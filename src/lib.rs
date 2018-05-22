@@ -26,6 +26,7 @@ use std::convert::From;
 use std::result::Result as StdResult;
 use std::ffi::{OsStr, OsString};
 use std::fmt::{self, Display};
+use std::fs::File;
 use std::io::{self, Read, Write};
 use std::iter;
 use std::os::unix::io::AsRawFd;
@@ -128,28 +129,44 @@ impl<'a, I: UtilRead<'a, IL>, O: UtilWrite<'a, OL>, E: UtilWrite<'a, EL>, IL: Re
 pub trait UtilRead<'a>: Read + AsRawFd + Send + Sync {
     type Lock: Read + 'a;
 
-    fn lock<'b: 'a>(&'b self) -> Result<Self::Lock>;
+    fn lock_reader<'b: 'a>(&'b mut self) -> Result<Self::Lock>;
 }
 pub trait UtilWrite<'a>: Write + AsRawFd + Send + Sync {
     type Lock: Write + 'a;
 
-    fn lock<'b: 'a>(&'b self) -> Result<Self::Lock>;
+    fn lock_writer<'b: 'a>(&'b mut self) -> Result<Self::Lock>;
 }
 
-// TODO: implement for other common things like File
+// TODO: implement for other common things like File, BufReader, etc.
+
+impl<'a> UtilRead<'a> for File {
+    type Lock = &'a mut Self;
+
+    fn lock_reader<'b: 'a>(&'b mut self) -> Result<Self::Lock> {
+        Ok(self)
+    }
+}
 
 impl<'a> UtilRead<'a> for io::Stdin {
     type Lock = io::StdinLock<'a>;
 
-    fn lock<'b: 'a>(&'b self) -> Result<Self::Lock> {
+    fn lock_reader<'b: 'a>(&'b mut self) -> Result<Self::Lock> {
         Ok(self.lock())
+    }
+}
+
+impl<'a> UtilWrite<'a> for File {
+    type Lock = &'a mut Self;
+
+    fn lock_writer<'b: 'a>(&'b mut self) -> Result<Self::Lock> {
+        Ok(self)
     }
 }
 
 impl<'a> UtilWrite<'a> for io::Stdout {
     type Lock = io::StdoutLock<'a>;
 
-    fn lock<'b: 'a>(&'b self) -> Result<Self::Lock> {
+    fn lock_writer<'b: 'a>(&'b mut self) -> Result<Self::Lock> {
         Ok(self.lock())
     }
 }
@@ -157,7 +174,7 @@ impl<'a> UtilWrite<'a> for io::Stdout {
 impl<'a> UtilWrite<'a> for io::Stderr {
     type Lock = io::StderrLock<'a>;
 
-    fn lock<'b: 'a>(&'b self) -> Result<Self::Lock> {
+    fn lock_writer<'b: 'a>(&'b mut self) -> Result<Self::Lock> {
         Ok(self.lock())
     }
 }

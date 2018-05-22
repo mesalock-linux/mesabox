@@ -299,7 +299,7 @@ where
     let should_stop = AtomicBool::new(false);
     crossbeam::scope(|scope| {
         let should_stop_ref = &should_stop;
-        let stdout_ref = &setup.stdout;
+        let stdout_ref = &mut setup.stdout;
         let stats_ref = &mut stats;
 
         let child = scope.spawn(move || {
@@ -324,7 +324,7 @@ where
     print_stats(setup, &hostname, &stats)
 }
 
-fn ping_socket<O>(sock: IcmpSocket, stats: &mut Stats, stdout: &O, should_stop: &AtomicBool, mut options: Options) -> Result<()>
+fn ping_socket<O>(sock: IcmpSocket, stats: &mut Stats, stdout: &mut O, should_stop: &AtomicBool, mut options: Options) -> Result<()>
 where
     O: for<'a> UtilWrite<'a>,
 {
@@ -344,7 +344,7 @@ where
 
     let addr = socket::SockAddr::new_inet(socket::InetAddr::from_std(&options.sock_addr));
 
-    let mut stdout = stdout.lock()?;
+    let mut stdout = stdout.lock_writer()?;
     while options.count.unwrap_or(1) > 0 && !should_stop.load(Ordering::Acquire) {
         let request = IcmpPacket::new(icmp_kind, ident, seq_num);
         // FIXME: should print error rather than return
@@ -451,7 +451,7 @@ where
     set.add(Signal::SIGINT);
     set.thread_set_mask()?;
 
-    let mut stdout = setup.stdout.lock()?;
+    let mut stdout = setup.stdout.lock_writer()?;
 
     writeln!(stdout, "\n--- {} ping statistics ---", hostname)?;
     writeln!(stdout, "{} packets transmitted, {} packets received, {}% packet loss", stats.sent, stats.received, stats.packet_loss())?;

@@ -97,14 +97,14 @@ where
         format: format,
     };
 
-    let output = setup.stdout.lock()?;
+    let output = setup.stdout.lock_writer()?;
     match matches.value_of_os("FILE") {
         Some(filename) if filename != OsStr::new("-") => {
             let file = File::open(filename)?;
             handle_data(output, BufReader::new(file), options)
         }
         _ => {
-            let input = setup.stdin.lock()?;
+            let input = setup.stdin.lock_reader()?;
             handle_data(output, input, options)
         }
     }

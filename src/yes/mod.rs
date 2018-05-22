@@ -99,13 +99,13 @@ fn prepare_buffer<'a>(input: &'a str, _buffer: &'a mut [u8; BUF_SIZE]) -> &'a [u
     input
 }
 
-pub fn run<I, O, E>(setup: &UtilSetup<I, O, E>, bytes: &[u8]) -> Result<()>
+pub fn run<I, O, E>(setup: &mut UtilSetup<I, O, E>, bytes: &[u8]) -> Result<()>
 where
     I: for<'a> UtilRead<'a>,
     O: for<'a> UtilWrite<'a>,
     E: for<'a> UtilWrite<'a>,
 {
-    let mut stdout = setup.stdout.lock()?;
+    let mut stdout = setup.stdout.lock_writer()?;
     loop {
         stdout.write_all(bytes)?;
     }
