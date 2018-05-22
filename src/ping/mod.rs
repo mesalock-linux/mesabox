@@ -16,7 +16,7 @@ use libc::{self, AF_INET};
 use nix;
 use nix::errno::Errno;
 use nix::unistd;
-use nix::sys::signal::{self, Signal, SigAction, SigSet};
+use nix::sys::signal::{self, Signal, SigSet};
 use nix::sys::socket;
 use nix::sys::uio::IoVec;
 use std::net::{SocketAddr, ToSocketAddrs};
@@ -296,7 +296,7 @@ where
 
     writeln!(setup.stdout, "PING {} ({}): {} data bytes", hostname, resolved_ip.ip(), options.expected_size)?;
 
-    let mut should_stop = AtomicBool::new(false);
+    let should_stop = AtomicBool::new(false);
     crossbeam::scope(|scope| {
         let should_stop_ref = &should_stop;
         let stdout_ref = &setup.stdout;
@@ -446,7 +446,7 @@ where
     E: for<'a> UtilWrite<'a>,
 {
     // ignore SIGINT completely while printing stats
-    let mut old_set = SigSet::thread_get_mask()?;
+    let old_set = SigSet::thread_get_mask()?;
     let mut set = old_set.clone();
     set.add(Signal::SIGINT);
     set.thread_set_mask()?;

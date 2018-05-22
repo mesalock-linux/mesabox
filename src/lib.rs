@@ -20,15 +20,14 @@ extern crate uucore;
 extern crate quick_error;
 
 use clap::{App, SubCommand};
-use failure::Error;
+use failure::{Error, Fail};
 use libc::EXIT_FAILURE;
 use std::convert::From;
-use std::error::Error as StdError;
 use std::result::Result as StdResult;
 use std::ffi::{OsStr, OsString};
 use std::fmt::{self, Display};
 use std::io::{self, Read, Write};
-use std::iter::{self, Chain, Once};
+use std::iter;
 use std::os::unix::io::AsRawFd;
 use std::path::Path;
 
@@ -63,7 +62,7 @@ impl MesaError {
     }
 }
 
-impl<E: StdError + Send + Sync + 'static> From<E> for MesaError {
+impl<E: Fail + Send + Sync + 'static> From<E> for MesaError {
     fn from(error: E) -> Self {
         Self {
             progname: None,

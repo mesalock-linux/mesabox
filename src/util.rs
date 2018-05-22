@@ -15,6 +15,7 @@ use std::result::Result as StdResult;
 use std::path::Path;
 use std::os::unix::io::AsRawFd;
 
+#[allow(dead_code)]
 pub(crate) fn set_exitcode<T, E: StdError + Send + Sync + 'static>(
     error: StdResult<T, E>,
     code: libc::c_int,
@@ -36,6 +37,7 @@ pub(crate) fn is_tty<T: AsRawFd>(stream: &T) -> bool {
     unsafe { libc::isatty(stream.as_raw_fd()) == 1 }
 }
 
+#[allow(dead_code)]
 pub(crate) fn one_filesystem<T, U>(_start_dir: T, _func: U) -> Result<()>
 where
     T: AsRef<Path>,

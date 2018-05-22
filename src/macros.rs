@@ -10,11 +10,14 @@
 //       stdin/stdout/stderr for clap
 
 macro_rules! util_app {
-    ($name:tt) => {
+    ($name:expr) => {
+        util_app!($name, self::DESCRIPTION)
+    };
+    ($name:expr, $desc:expr) => {
         ::clap::App::new($name)
                         .version(crate_version!())
                         .author(crate_authors!())
-                        .about(self::DESCRIPTION)
+                        .about($desc)
                         .arg(::clap::Arg::with_name("version")
                                 .short("V")
                                 .long("version")
@@ -22,7 +25,7 @@ macro_rules! util_app {
                         .arg(::clap::Arg::with_name("help")
                                 .long("help")
                                 .help("Print help information and exit"))
-    };
+    }
 }
 
 macro_rules! get_matches {
@@ -39,6 +42,7 @@ macro_rules! get_matches {
     }}
 }
 
+// FIXME: should use name given on the command-line rather than a hard-coded one
 macro_rules! display_msg {
     ($stream:expr, $($args:tt)+) => {
         writeln!($stream, "{}: {}", self::NAME, format_args!($($args)+))
