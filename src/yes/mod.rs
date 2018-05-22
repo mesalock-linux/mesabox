@@ -31,24 +31,26 @@
 //     SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 //
 
-use super::{UtilSetup, Result, ArgsIter, UtilRead, UtilWrite};
+use super::{UtilSetup, Result, /*ArgsIter, */UtilRead, UtilWrite};
 
 use clap::Arg;
 use std::borrow::Cow;
 use std::ffi::OsString;
-use std::io;
+use std::io::Write;
+use std::os::unix::ffi::OsStrExt;
 
+pub(crate) const NAME: &str = "yes";
 pub(crate) const DESCRIPTION: &str = "Repeatedly print 'y' or a series of user-provided strings to stdout";
 
 // it's possible that using a smaller or larger buffer might provide better performance on some
 // systems, but this is probably good enough
 const BUF_SIZE: usize = 16 * 1024;
 
-pub fn execute<I, O, E, T, U>(setup: &mut UtilSetup<I, O, E>, args: ArgsIter<T, U>) -> Result<()>
+pub fn execute<I, O, E, T, U>(setup: &mut UtilSetup<I, O, E>, args: T) -> Result<()>
 where
-    I: UtilRead,
-    O: UtilWrite,
-    E: UtilWrite,
+    I: for<'a> UtilRead<'a>,
+    O: for<'a> UtilWrite<'a>,
+    E: for<'a> UtilWrite<'a>,
     T: Iterator<Item = U>,
     U: Into<OsString> + Clone,
 {
@@ -56,13 +58,17 @@ where
 
     let matches = get_matches!(setup, app, args);
 
-    let string = if let Some(values) = matches.values_of("STRING") {
-        let mut result = values.fold(String::new(), |res, s| res + s + " ");
+    let string = if let Some(values) = matches.values_of_os("STRING") {
+        let mut result = values.fold(vec![], |mut res, s| {
+            res.extend_from_slice(s.as_bytes());
+            res.push(b' ');
+            res
+        });
         result.pop();
-        result.push('\n');
+        result.push(b'\n');
         Cow::from(result)
     } else {
-        Cow::from("y\n")
+        Cow::from(&b"y\n"[..])
     };
 
     let mut buffer = [0; BUF_SIZE];
@@ -74,32 +80,33 @@ where
 }
 
 #[cfg(not(feature = "latency"))]
-fn prepare_buffer<'a>(input: &'a str, buffer: &'a mut [u8; BUF_SIZE]) -> &'a [u8] {
+fn prepare_buffer<'a>(input: &'a [u8], buffer: &'a mut [u8; BUF_SIZE]) -> &'a [u8] {
     if input.len() < BUF_SIZE / 2 {
         let mut size = 0;
         while size < BUF_SIZE - input.len() {
             let (_, right) = buffer.split_at_mut(size);
-            right[..input.len()].copy_from_slice(input.as_bytes());
+            right[..input.len()].copy_from_slice(input);
             size += input.len();
         }
         &buffer[..size]
     } else {
-        input.as_bytes()
+        input
     }
 }
 
 #[cfg(feature = "latency")]
 fn prepare_buffer<'a>(input: &'a str, _buffer: &'a mut [u8; BUF_SIZE]) -> &'a [u8] {
-    input.as_bytes()
+    input
 }
 
-pub fn run<I, O, E>(setup: &mut UtilSetup<I, O, E>, bytes: &[u8]) -> io::Result<()>
+pub fn run<I, O, E>(setup: &UtilSetup<I, O, E>, bytes: &[u8]) -> Result<()>
 where
-    I: UtilRead,
-    O: UtilWrite,
-    E: UtilWrite,
+    I: for<'a> UtilRead<'a>,
+    O: for<'a> UtilWrite<'a>,
+    E: for<'a> UtilWrite<'a>,
 {
+    let mut stdout = setup.stdout.lock()?;
     loop {
-        setup.stdout.write_all(bytes)?;
+        stdout.write_all(bytes)?;
     }
 }

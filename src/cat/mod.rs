@@ -41,7 +41,7 @@ use std::ffi::{OsString, OsStr};
 use std::fs::{metadata, File};
 use std::iter;
 use std::io::{self, BufWriter, Read, Write};
-use super::{UtilSetup, ArgsIter, UtilRead, UtilWrite, is_tty};
+use super::{UtilSetup, /*ArgsIter, */UtilRead, UtilWrite, is_tty};
 
 /// Unix domain socket support
 #[cfg(unix)]
@@ -84,7 +84,6 @@ quick_error! {
             display("{0}: unknown filetype", path)
         }
 
-// FIXME: figure out how to get this to print with "cat: "
         /// At least one error was encountered in reading or writing
         EncounteredErrors(count: usize) {
             display("encountered {0} error(s)", count)
@@ -180,18 +179,18 @@ struct OutputState {
 // XXX: is ArgsIter even needed?  i think the traits it needs might satisfy the reqs anyway
 struct Cat<'a, I, O, E>
 where
-    I: UtilRead + 'a,
-    O: UtilWrite + 'a,
-    E: UtilWrite + 'a,
+    I: for<'b> UtilRead<'b> + 'a,
+    O: for<'b> UtilWrite<'b> + 'a,
+    E: for<'b> UtilWrite<'b> + 'a,
 {
     setup: &'a mut UtilSetup<I, O, E>,
 }
 
 impl<'a, I, O, E> Cat<'a, I, O, E>
 where
-    I: UtilRead,
-    O: UtilWrite,
-    E: UtilWrite,
+    I: for<'b> UtilRead<'b>,
+    O: for<'b> UtilWrite<'b>,
+    E: for<'b> UtilWrite<'b>,
 {
     pub fn new(setup: &'a mut UtilSetup<I, O, E>) -> Self {
         Self {
@@ -380,11 +379,11 @@ where
 
 type CatResult<T> = Result<T, CatError>;
 
-pub fn execute<I, O, E, T, U>(setup: &mut UtilSetup<I, O, E>, args: ArgsIter<T, U>) -> super::Result<()>
+pub fn execute<I, O, E, T, U>(setup: &mut UtilSetup<I, O, E>, args: T) -> super::Result<()>
 where
-    I: UtilRead,
-    O: UtilWrite,
-    E: UtilWrite,
+    I: for<'a> UtilRead<'a>,
+    O: for<'a> UtilWrite<'a>,
+    E: for<'a> UtilWrite<'a>,
     T: Iterator<Item = U>,
     U: Into<OsString> + Clone,
 {
@@ -453,9 +452,9 @@ where
 
 fn run<'a, 'b, I, O, E, T>(setup: &mut UtilSetup<I, O, E>, files: T, mut options: OutputOptions<'b>) -> super::Result<()>
 where
-    I: UtilRead,
-    O: UtilWrite,
-    E: UtilWrite,
+    I: for<'c> UtilRead<'c>,
+    O: for<'c> UtilWrite<'c>,
+    E: for<'c> UtilWrite<'c>,
     T: Iterator<Item = &'a OsStr>,
 {
     let can_write_fast = options.can_write_fast();

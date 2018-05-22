@@ -12,6 +12,9 @@ extern crate failure;
 extern crate globset;
 extern crate libc;
 extern crate nix;
+extern crate chrono;
+extern crate crossbeam;
+extern crate uucore;
 // TODO: convert to use failure instead
 #[macro_use]
 extern crate quick_error;
@@ -29,20 +32,26 @@ use std::iter::{self, Chain, Once};
 use std::os::unix::io::AsRawFd;
 use std::path::Path;
 
+pub(crate) use util::*;
+
 #[macro_use]
 mod macros;
+mod util;
 
 // contains all the "mod"s which allow us to use the utils
 include!(concat!(env!("OUT_DIR"), "/utils.rs"));
 
+#[derive(Debug)]
 pub struct MesaError {
+    pub(crate) progname: Option<OsString>,
     pub exitcode: libc::c_int,
     pub err: Option<Error>,
 }
 
 impl MesaError {
-    pub fn new(exitcode: libc::c_int, err: Option<Error>) -> Self {
+    pub fn new(progname: Option<OsString>, exitcode: libc::c_int, err: Option<Error>) -> Self {
         Self {
+            progname: progname,
             exitcode: exitcode,
             err: err,
         }
@@ -57,6 +66,7 @@ impl MesaError {
 impl<E: StdError + Send + Sync + 'static> From<E> for MesaError {
     fn from(error: E) -> Self {
         Self {
+            progname: None,
             exitcode: 1,
             err: Some(error.into()),
         }
@@ -65,21 +75,31 @@ impl<E: StdError + Send + Sync + 'static> From<E> for MesaError {
 
 impl Display for MesaError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        if let Some(ref err) = self.err {
-            err.fmt(f)
-        } else {
-            Ok(())
+        match (&self.progname, &self.err) {
+            (Some(ref progname), Some(ref err)) => write!(f, "{}: {}", progname.to_string_lossy(), err),
+            (None, Some(ref err)) => err.fmt(f),
+            _ => Ok(()),
         }
     }
 }
 
-pub struct UtilSetup<I: UtilRead, O: UtilWrite, E: UtilWrite> {
+pub struct UtilSetup<I, O, E>
+where
+    I: for<'a> UtilRead<'a>,
+    O: for<'a> UtilWrite<'a>,
+    E: for<'a> UtilWrite<'a>,
+{
     pub stdin: I,
     pub stdout: O,
     pub stderr: E,
 }
 
-impl<I: UtilRead, O: UtilWrite, E: UtilWrite> UtilSetup<I, O, E> {
+impl<I, O, E> UtilSetup<I, O, E>
+where
+    I: for<'a> UtilRead<'a>,
+    O: for<'a> UtilWrite<'a>,
+    E: for<'a> UtilWrite<'a>,
+{
     pub fn new(stdin: I, stdout: O, stderr: E) -> Self {
         Self {
             stdin: stdin,
@@ -88,8 +108,8 @@ impl<I: UtilRead, O: UtilWrite, E: UtilWrite> UtilSetup<I, O, E> {
         }
     }
 }
-
-impl<I: UtilRead, O: UtilWrite, E: UtilWrite> Write for UtilSetup<I, O, E> {
+/*
+impl<'a, I: UtilRead<'a, IL>, O: UtilWrite<'a, OL>, E: UtilWrite<'a, EL>, IL: Read, OL: Write, EL: Write> Write for UtilSetup<'a, I, O, E, IL, OL, EL> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         self.stdout.write(buf)
     }
@@ -99,46 +119,61 @@ impl<I: UtilRead, O: UtilWrite, E: UtilWrite> Write for UtilSetup<I, O, E> {
     }
 }
 
-impl<I: UtilRead, O: UtilWrite, E: UtilWrite> Read for UtilSetup<I, O, E> {
+impl<'a, I: UtilRead<'a, IL>, O: UtilWrite<'a, OL>, E: UtilWrite<'a, EL>, IL: Read, OL: Write, EL: Write> Read for UtilSetup<'a, I, O, E, IL, OL, EL> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         self.stdin.read(buf)
     }
 }
+*/
 
-pub trait UtilRead: Read + AsRawFd { }
-pub trait UtilWrite: Write + AsRawFd { }
+pub trait UtilRead<'a>: Read + AsRawFd + Send + Sync {
+    type Lock: Read + 'a;
 
-impl<T: Read + AsRawFd> UtilRead for T { }
-impl<T: Write + AsRawFd> UtilWrite for T { }
+    fn lock<'b: 'a>(&'b self) -> Result<Self::Lock>;
+}
+pub trait UtilWrite<'a>: Write + AsRawFd + Send + Sync {
+    type Lock: Write + 'a;
 
-pub type Result<T> = std::result::Result<T, MesaError>;
-
-pub type ArgsIter<T, U> = Chain<Once<U>, T>;
-
-pub(crate) fn set_exitcode<T, E: StdError + Send + Sync + 'static>(
-    error: StdResult<T, E>,
-    code: libc::c_int,
-) -> Result<T> {
-    error.map_err(|e| {
-        let mut err: MesaError = e.into();
-        err.exitcode = code;
-        err
-    })
+    fn lock<'b: 'a>(&'b self) -> Result<Self::Lock>;
 }
 
-pub(crate) fn is_tty<T: AsRawFd>(stream: &T) -> bool {
-    unsafe { libc::isatty(stream.as_raw_fd()) == 1 }
+// TODO: implement for other common things like File
+
+impl<'a> UtilRead<'a> for io::Stdin {
+    type Lock = io::StdinLock<'a>;
+
+    fn lock<'b: 'a>(&'b self) -> Result<Self::Lock> {
+        Ok(self.lock())
+    }
 }
+
+impl<'a> UtilWrite<'a> for io::Stdout {
+    type Lock = io::StdoutLock<'a>;
+
+    fn lock<'b: 'a>(&'b self) -> Result<Self::Lock> {
+        Ok(self.lock())
+    }
+}
+
+impl<'a> UtilWrite<'a> for io::Stderr {
+    type Lock = io::StderrLock<'a>;
+
+    fn lock<'b: 'a>(&'b self) -> Result<Self::Lock> {
+        Ok(self.lock())
+    }
+}
+
+pub type Result<T> = StdResult<T, MesaError>;
 
 fn execute_util<I, O, E, T, U>(
     setup: &mut UtilSetup<I, O, E>,
     name: &OsStr,
-    args: ArgsIter<T, U>,
+    args: T,
 ) -> Option<Result<()>>
 where
-    I: UtilRead,
-    O: UtilWrite,
-    E: UtilWrite,
+    I: for<'a> UtilRead<'a>,
+    O: for<'a> UtilWrite<'a>,
+    E: for<'a> UtilWrite<'a>,
     T: Iterator<Item = U>,
     U: Into<OsString> + Clone,
 {
@@ -153,9 +188,9 @@ fn generate_app() -> App<'static, 'static> {
 
 pub fn execute<I, O, E, T, U>(setup: &mut UtilSetup<I, O, E>, args: T) -> Result<()>
 where
-    I: UtilRead,
-    O: UtilWrite,
-    E: UtilWrite,
+    I: for<'a> UtilRead<'a>,
+    O: for<'a> UtilWrite<'a>,
+    E: for<'a> UtilWrite<'a>,
     T: IntoIterator<Item = U>,
     U: Into<OsString> + Clone,
 {
@@ -168,7 +203,7 @@ where
         let _ = generate_app().write_help(&mut setup.stderr);
         let _ = writeln!(setup.stderr);
 
-        Some(Err(MesaError::new(EXIT_FAILURE, None)))
+        Some(Err(MesaError::new(None, EXIT_FAILURE, None)))
     }).unwrap();
 
     let _ = setup.stdout.flush();
@@ -179,9 +214,9 @@ where
 
 fn start<I, O, E, T, U>(setup: &mut UtilSetup<I, O, E>, mut args: T) -> Option<Result<()>>
 where
-    I: UtilRead,
-    O: UtilWrite,
-    E: UtilWrite,
+    I: for<'a> UtilRead<'a>,
+    O: for<'a> UtilWrite<'a>,
+    E: for<'a> UtilWrite<'a>,
     T: Iterator<Item = U>,
     U: Into<OsString> + Clone,
 {
@@ -195,8 +230,8 @@ where
                 iter::once(progname).chain(args),
             ).map(|res| {
                 // XXX: note that this currently is useless as we are temporarily overriding -V and --help
-                res.or_else(|err| {
-                    if let Some(ref e) = err.err {
+                res.or_else(|mut mesa_err| {
+                    if let Some(ref e) = mesa_err.err {
                         if let Some(clap_err) = e.downcast_ref::<clap::Error>() {
                             if clap_err.kind == clap::ErrorKind::HelpDisplayed || clap_err.kind == clap::ErrorKind::VersionDisplayed {
                                 return Ok(());
@@ -204,7 +239,10 @@ where
                         }
                     }
                     // TODO: check for --help and -V/--version probably
-                    Err(err)
+                    if mesa_err.progname.is_none() {
+                        mesa_err.progname = Some(filename.to_os_string());
+                    }
+                    Err(mesa_err)
                 })
             });
         }

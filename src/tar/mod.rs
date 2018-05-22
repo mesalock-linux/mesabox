@@ -8,7 +8,7 @@
 
 extern crate tar;
 
-use super::{ArgsIter, UtilSetup, Result, UtilRead, UtilWrite};
+use super::{/*ArgsIter, */UtilSetup, Result, UtilRead, UtilWrite};
 
 use clap::{Arg, ArgGroup, OsValues};
 use globset::{GlobSetBuilder, Glob};
@@ -18,6 +18,7 @@ use std::fs::File;
 use std::io::{BufReader, BufWriter, Read};
 use std::path::Path;
 
+pub(crate) const NAME: &str = "tar";
 pub(crate) const DESCRIPTION: &str = "Manage archives using the tar format";
 
 #[derive(PartialEq)]
@@ -81,9 +82,9 @@ struct Options<'a> {
 
 struct Tar<'a, 'b, I, O, E>
 where
-    I: UtilRead + 'a,
-    O: UtilWrite + 'a,
-    E: UtilWrite + 'a,
+    I: for<'c> UtilRead<'c> + 'a,
+    O: for<'c> UtilWrite<'c> + 'a,
+    E: for<'c> UtilWrite<'c> + 'a,
 {
     setup: &'a mut UtilSetup<I, O, E>,
     pub options: Options<'b>,
@@ -91,9 +92,9 @@ where
 
 impl<'a, 'b, I, O, E> Tar<'a, 'b, I, O, E>
 where
-    I: UtilRead,
-    O: UtilWrite,
-    E: UtilWrite,
+    I: for<'c> UtilRead<'c>,
+    O: for<'c> UtilWrite<'c>,
+    E: for<'c> UtilWrite<'c>,
 {
     pub fn new(setup: &'a mut UtilSetup<I, O, E>, options: Options<'b>) -> Self {
         Self {
@@ -180,11 +181,11 @@ where
     }
 }
 
-pub fn execute<I, O, E, T, U>(setup: &mut UtilSetup<I, O, E>, args: ArgsIter<T, U>) -> super::Result<()>
+pub fn execute<I, O, E, T, U>(setup: &mut UtilSetup<I, O, E>, args: T) -> super::Result<()>
 where
-    I: UtilRead,
-    O: UtilWrite,
-    E: UtilWrite,
+    I: for<'a> UtilRead<'a>,
+    O: for<'a> UtilWrite<'a>,
+    E: for<'a> UtilWrite<'a>,
     T: Iterator<Item = U>,
     U: Into<OsString> + Clone,
 {

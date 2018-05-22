@@ -17,10 +17,13 @@ clap = "2.31.2"
 failure = "0.1.1"
 libc = "0.2.40"
 platform-info = { git = "https://github.com/uutils/platform-info" }
+uucore = { git = "https://github.com/uutils/coreutils", features = ["parse_time"] }
 tar = "0.4.15"
 globset = "0.4.0"
 quick-error = "1.2.1"
 nix = "0.10.0"
+chrono = "0.4.2"
+crossbeam = "0.3.2"
 
 [build-dependencies]
 rustc_version = "0.2.2"

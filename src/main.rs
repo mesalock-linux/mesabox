@@ -15,17 +15,11 @@ use std::process;
 
 // this is just a thin wrapper around the library
 fn main() {
-    // FIXME: all of these should lock, but this causes issues with clap at the moment
     let stdout = io::stdout();
-    let locked_stdout = stdout;//stdout.lock();
-
     let stdin = io::stdin();
-    let locked_stdin = stdin;//stdin.lock();
-
     let stderr = io::stderr();
-    let locked_stderr = stderr;//stderr.lock();
 
-    let mut setup = UtilSetup::new(locked_stdin, locked_stdout, locked_stderr);
+    let mut setup = UtilSetup::new(stdin, stdout, stderr);
 
     if let Err(f) = mesatools::execute(&mut setup, env::args_os()) {
         if let Some(ref err) = f.err {
@@ -38,7 +32,7 @@ fn main() {
             }
 
             if !skip {
-                let _ = writeln!(setup.stderr, "{}", err);
+                let _ = writeln!(setup.stderr, "{}", f);
                 let _ = setup.stderr.flush();
             }
         }
