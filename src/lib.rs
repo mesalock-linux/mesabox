@@ -27,7 +27,7 @@ use std::result::Result as StdResult;
 use std::ffi::{OsStr, OsString};
 use std::fmt::{self, Display};
 use std::fs::File;
-use std::io::{self, Read, Write};
+use std::io::{self, BufReader, BufWriter, BufRead, Read, Write};
 use std::iter;
 use std::os::unix::io::AsRawFd;
 use std::path::Path;
@@ -127,7 +127,7 @@ impl<'a, I: UtilRead<'a, IL>, O: UtilWrite<'a, OL>, E: UtilWrite<'a, EL>, IL: Re
 */
 
 pub trait UtilRead<'a>: Read + AsRawFd + Send + Sync {
-    type Lock: Read + 'a;
+    type Lock: BufRead + 'a;
 
     fn lock_reader<'b: 'a>(&'b mut self) -> Result<Self::Lock>;
 }
@@ -140,10 +140,10 @@ pub trait UtilWrite<'a>: Write + AsRawFd + Send + Sync {
 // TODO: implement for other common things like File, BufReader, etc.
 
 impl<'a> UtilRead<'a> for File {
-    type Lock = &'a mut Self;
+    type Lock = BufReader<&'a mut Self>;
 
     fn lock_reader<'b: 'a>(&'b mut self) -> Result<Self::Lock> {
-        Ok(self)
+        Ok(BufReader::new(self))
     }
 }
 
@@ -156,10 +156,10 @@ impl<'a> UtilRead<'a> for io::Stdin {
 }
 
 impl<'a> UtilWrite<'a> for File {
-    type Lock = &'a mut Self;
+    type Lock = BufWriter<&'a mut Self>;
 
     fn lock_writer<'b: 'a>(&'b mut self) -> Result<Self::Lock> {
-        Ok(self)
+        Ok(BufWriter::new(self))
     }
 }
 
