@@ -36,12 +36,12 @@
 //
 
 use clap::Arg;
-use quick_error::ResultExt;
+use failure::{Fail, ResultExt};
 use std::ffi::{OsString, OsStr};
 use std::fs::{metadata, File};
 use std::iter;
-use std::io::{self, BufWriter, Read, Write};
-use super::{UtilSetup, /*ArgsIter, */UtilRead, UtilWrite, is_tty};
+use std::io::{self, BufWriter, BufRead, Read, Write};
+use super::{Result, UtilSetup, /*ArgsIter, */UtilRead, UtilWrite, is_tty};
 
 /// Unix domain socket support
 #[cfg(unix)]
@@ -62,37 +62,45 @@ enum NumberingMode {
     NumberAll,
 }
 
-// TODO: convert to use failure
-quick_error! {
-    #[derive(Debug)]
-    enum CatError {
-        /// Wrapper for io::Error with path context
-        Input(err: io::Error, path: String) {
-            display("{0}: {1}", path, err)
-            context(path: &'a str, err: io::Error) -> (err, path.to_owned())
-            cause(err)
-        }
+#[derive(Fail, Debug)]
+enum CatError {
+    /// Wrapper for io::Error with path context
+    #[fail(display = "{}: {}", path, err)]
+    Input {
+        #[cause] err: io::Error,
+        path: String,
+    },
 
-        /// Wrapper for io::Error with no context
-        Output(err: io::Error) {
-            display("{0}", err) from()
-            cause(err)
-        }
+    /// Wrapper for io::Error with no context
+    #[fail(display = "{}", _0)]
+    Output(#[cause] io::Error),
 
-        /// Uknown Filetype  classification
-        UnknownFiletype(path: String) {
-            display("{0}: unknown filetype", path)
-        }
+    /// Uknown Filetype  classification
+    #[fail(display = "{}: unknown filetype", _0)]
+    UnknownFiletype(String),
 
-        /// At least one error was encountered in reading or writing
-        EncounteredErrors(count: usize) {
-            display("encountered {0} error(s)", count)
-        }
+    /// At least one error was encountered in reading or writing
+    #[fail(display = "encountered {} error(s)", _0)]
+    EncounteredErrors(usize),
 
-        /// Denotes an error caused by trying to `cat` a directory
-        IsDirectory(path: String) {
-            display("{0}: Is a directory", path)
-        }
+    /// Denotes an error caused by trying to `cat` a directory
+    #[fail(display = "{}: Is a directory", _0)]
+    IsDirectory(String),
+
+    /// Denotes an error caused by one of stdin, stdout, or stderr failing to lock
+    #[fail(display = "{}", _0)]
+    Lock(#[cause] super::LockError),
+}
+
+impl From<io::Error> for CatError {
+    fn from(err: io::Error) -> Self {
+        CatError::Output(err)
+    }
+}
+
+impl From<super::LockError> for CatError {
+    fn from(err: super::LockError) -> Self {
+        CatError::Lock(err)
     }
 }
 
@@ -177,24 +185,30 @@ struct OutputState {
 }
 
 // XXX: is ArgsIter even needed?  i think the traits it needs might satisfy the reqs anyway
-struct Cat<'a, I, O, E>
+struct Cat<I, O, E>
 where
-    I: for<'b> UtilRead<'b> + 'a,
-    O: for<'b> UtilWrite<'b> + 'a,
-    E: for<'b> UtilWrite<'b> + 'a,
+    I: BufRead,
+    O: Write,
+    E: Write,
 {
-    setup: &'a mut UtilSetup<I, O, E>,
+    stdin: I,
+    stdout: O,
+    stderr: E,
+    interactive: bool,
 }
 
-impl<'a, I, O, E> Cat<'a, I, O, E>
+impl<I, O, E> Cat<I, O, E>
 where
-    I: for<'b> UtilRead<'b>,
-    O: for<'b> UtilWrite<'b>,
-    E: for<'b> UtilWrite<'b>,
+    I: BufRead,
+    O: Write,
+    E: Write,
 {
-    pub fn new(setup: &'a mut UtilSetup<I, O, E>) -> Self {
+    pub fn new(stdin: I, stdout: O, stderr: E, interactive: bool) -> Self {
         Self {
-            setup: setup,
+            stdin: stdin,
+            stdout: stdout,
+            stderr: stderr,
+            interactive: interactive,
         }
     }
 
@@ -210,22 +224,20 @@ where
     where
         T: Iterator<Item = &'b OsStr>,
     {
-        let writer = &mut self.setup.stdout;
         let mut in_buf = [0; 1024 * 64];
         let mut error_count = 0;
 
+        let writer = &mut self.stdout;
+
         for file in files {
-            let res = Self::open_and_exec(&file, &mut self.setup.stdin, |handle| {
-                while let Ok(n) = handle.reader.read(&mut in_buf) {
-                    if n == 0 {
-                        break;
-                    }
-                    writer.write_all(&in_buf[..n]).context(&file.to_string_lossy()[..])?;
-                }
+            let res = Self::open_and_exec(&file, &mut self.stdin, self.interactive, |handle| {
+                io::copy(handle.reader, writer).map_err(|err| {
+                    CatError::Input { err: err, path: file.to_string_lossy().into_owned() }
+                })?;
                 Ok(())
             });
             if let Err(error) = res {
-                display_msg!(&mut self.setup.stderr, "{}", error)?;
+                display_msg!(self.stderr, "{}", error)?;
                 error_count += 1;
             }
         }
@@ -245,9 +257,9 @@ where
     ///
     /// * `files` - There is no short circuit when encountiner an error
     /// reading a file in this vector
-    pub fn write_lines<'b, 'c, T>(&mut self, files: T, options: &OutputOptions<'c>) -> CatResult<()>
+    pub fn write_lines<'a, 'b, T>(&mut self, files: T, options: &OutputOptions<'b>) -> CatResult<()>
     where
-        T: Iterator<Item = &'b OsStr>,
+        T: Iterator<Item = &'a OsStr>,
     {
         let mut error_count = 0;
         let mut state = OutputState {
@@ -257,28 +269,28 @@ where
 
         for file in files {
             if let Err(error) = self.write_file_lines(&file, options, &mut state) {
-                display_msg!(&mut self.setup.stderr, "{}", error).context(&file.to_string_lossy()[..])?;
+                display_msg!(self.stderr, "{}", error)?;
                 error_count += 1;
             }
         }
 
-        match error_count {
-            0 => Ok(()),
-            _ => Err(CatError::EncounteredErrors(error_count)),
+        if error_count == 0 {
+            Ok(())
+        } else {
+            Err(CatError::EncounteredErrors(error_count))
         }
     }
 
     /// Outputs file contents to stdout in a linewise fashion,
     /// propagating any errors that might occur.
     fn write_file_lines<'b>(&mut self, file: &OsStr, options: &OutputOptions<'b>, state: &mut OutputState) -> CatResult<()> {
-        //let mut handle = self.open(file)?;
         let mut in_buf = [0; 1024 * 31];
-        // TODO: this is a waste of an allocation if the file is invalid, so move to write_lines and pass as an argument
         // TODO: maybe pass the callback as well so it can become an FnMut and be reused?
-        let mut writer = BufWriter::with_capacity(1024 * 64, &mut self.setup.stdout);
-        Self::open_and_exec(file, &mut self.setup.stdin, |handle| {
+        let writer = &mut self.stdout;
+        Self::open_and_exec(file, &mut self.stdin, self.interactive, |handle| {
             let mut one_blank_kept = false;
 
+            // FIXME: ignores read errors
             while let Ok(n) = handle.reader.read(&mut in_buf) {
                 if n == 0 {
                     break;
@@ -291,12 +303,12 @@ where
                         if !state.at_line_start || !options.squeeze_blank || !one_blank_kept {
                             one_blank_kept = true;
                             if state.at_line_start && options.number == NumberingMode::NumberAll {
-                                write!(&mut writer, "{0:6}\t", state.line_number)?;
+                                write!(writer, "{0:6}\t", state.line_number)?;
                                 state.line_number += 1;
                             }
                             writer.write_all(options.end_of_line.as_bytes())?;
                             if handle.is_interactive {
-                                writer.flush().context(&file.to_string_lossy()[..])?;
+                                writer.flush()?;
                             }
                         }
                         state.at_line_start = true;
@@ -305,17 +317,17 @@ where
                     }
                     one_blank_kept = false;
                     if state.at_line_start && options.number != NumberingMode::NumberNone {
-                        write!(&mut writer, "{0:6}\t", state.line_number)?;
+                        write!(writer, "{0:6}\t", state.line_number)?;
                         state.line_number += 1;
                     }
 
                     // print to end of line or end of buffer
                     let offset = if options.show_nonprint {
-                        write_nonprint_to_end(&in_buf[pos..], &mut writer, options.tab.as_bytes())
+                        write_nonprint_to_end(&in_buf[pos..], writer, options.tab.as_bytes())
                     } else if options.show_tabs {
-                        write_tab_to_end(&in_buf[pos..], &mut writer)
+                        write_tab_to_end(&in_buf[pos..], writer)
                     } else {
-                        write_to_end(&in_buf[pos..], &mut writer)
+                        write_to_end(&in_buf[pos..], writer)
                     }?;
                     // end of buffer?
                     if offset == 0 {
@@ -342,32 +354,38 @@ where
     /// # Arguments
     ///
     /// * `path` - `InputHandler` will wrap a reader from this file path
-    fn open_and_exec<T>(path: &OsStr, stdin: &mut I, func: T) -> CatResult<()>
+    fn open_and_exec<T>(path: &OsStr, stdin: &mut I, interactive: bool, func: T) -> CatResult<()>
     where
         T: FnOnce(InputHandle<&mut Read>) -> CatResult<()>,
     {
         if path == "-" {
-            let interactive = is_tty(stdin);
             return func(InputHandle {
                 reader: stdin,
                 is_interactive: interactive,
             });
         }
 
+        // XXX: determine if buffering the file/socket would be of any benefit (we are already
+        //      buffering manually, so I imagine the difference would be minor if there is any)
         let lossy_path = path.to_string_lossy();
         match get_input_type(path)? {
             InputType::Directory => Err(CatError::IsDirectory(lossy_path.into_owned())),
             #[cfg(unix)]
             InputType::Socket => {
-                let mut socket = UnixStream::connect(path).context(&lossy_path[..])?;
-                socket.shutdown(Shutdown::Write).context(&lossy_path[..])?;
+                let mut socket = UnixStream::connect(path).and_then(|sock| {
+                    sock.shutdown(Shutdown::Write).map(|_| sock)
+                }).map_err(|err| {
+                    CatError::Input { err: err, path: lossy_path.into_owned() }
+                })?;
                 func(InputHandle {
                     reader: &mut socket as &mut Read,
                     is_interactive: false,
                 })
             }
             _ => {
-                let mut file = File::open(path).context(&lossy_path[..])?;
+                let mut file = File::open(path).map_err(|err| {
+                    CatError::Input { err: err, path: lossy_path.into_owned() }
+                })?;
                 func(InputHandle {
                     reader: &mut file as &mut Read,
                     is_interactive: false,
@@ -377,7 +395,7 @@ where
     }
 }
 
-type CatResult<T> = Result<T, CatError>;
+type CatResult<T> = ::std::result::Result<T, CatError>;
 
 pub fn execute<I, O, E, T, U>(setup: &mut UtilSetup<I, O, E>, args: T) -> super::Result<()>
 where
@@ -459,7 +477,12 @@ where
 {
     let can_write_fast = options.can_write_fast();
     
-    let mut util = Cat::new(setup);
+    let interactive = is_tty(&setup.stdin);
+    let stdin = setup.stdin.lock_reader()?;
+    let stdout = setup.stdout.lock_writer()?;
+    let stderr = setup.stderr.lock_writer()?;
+
+    let mut util = Cat::new(stdin, stdout, stderr, interactive);
 
     if can_write_fast {
         util.write_fast(files)?;
@@ -484,7 +507,11 @@ fn get_input_type(path: &OsStr) -> CatResult<InputType> {
     }
 
     let lossy_path = path.to_string_lossy();
-    match metadata(path).context(&lossy_path[..])?.file_type() {
+    let info = metadata(path).map_err(|err| {
+        // XXX: it should be fine to do .into_owned() but the compiler can't tell
+        CatError::Input { err: err, path: lossy_path.to_string() }
+    })?;
+    match info.file_type() {
         #[cfg(unix)]
         ft if ft.is_block_device() =>
         {

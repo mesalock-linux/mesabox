@@ -9,15 +9,16 @@
 #[macro_use]
 extern crate clap;
 extern crate failure;
+#[macro_use]
+extern crate failure_derive;
 extern crate globset;
 extern crate libc;
 extern crate nix;
 extern crate chrono;
 extern crate crossbeam;
+extern crate pnet;
+extern crate byteorder;
 extern crate uucore;
-// TODO: convert to use failure instead
-#[macro_use]
-extern crate quick_error;
 
 use clap::{App, SubCommand};
 use failure::{Error, Fail};
@@ -83,6 +84,12 @@ impl Display for MesaError {
     }
 }
 
+#[derive(Fail, Debug)]
+#[fail(display = "{}: failed to lock", file)]
+pub struct LockError {
+    file: String,
+}
+
 pub struct UtilSetup<I, O, E>
 where
     I: for<'a> UtilRead<'a>,
@@ -108,33 +115,16 @@ where
         }
     }
 }
-/*
-impl<'a, I: UtilRead<'a, IL>, O: UtilWrite<'a, OL>, E: UtilWrite<'a, EL>, IL: Read, OL: Write, EL: Write> Write for UtilSetup<'a, I, O, E, IL, OL, EL> {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.stdout.write(buf)
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        self.stdout.flush()
-    }
-}
-
-impl<'a, I: UtilRead<'a, IL>, O: UtilWrite<'a, OL>, E: UtilWrite<'a, EL>, IL: Read, OL: Write, EL: Write> Read for UtilSetup<'a, I, O, E, IL, OL, EL> {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        self.stdin.read(buf)
-    }
-}
-*/
 
 pub trait UtilRead<'a>: Read + AsRawFd + Send + Sync {
     type Lock: BufRead + 'a;
 
-    fn lock_reader<'b: 'a>(&'b mut self) -> Result<Self::Lock>;
+    fn lock_reader<'b: 'a>(&'b mut self) -> StdResult<Self::Lock, LockError>;
 }
 pub trait UtilWrite<'a>: Write + AsRawFd + Send + Sync {
     type Lock: Write + 'a;
 
-    fn lock_writer<'b: 'a>(&'b mut self) -> Result<Self::Lock>;
+    fn lock_writer<'b: 'a>(&'b mut self) -> StdResult<Self::Lock, LockError>;
 }
 
 // TODO: implement for other common things like File, BufReader, etc.
@@ -142,7 +132,7 @@ pub trait UtilWrite<'a>: Write + AsRawFd + Send + Sync {
 impl<'a> UtilRead<'a> for File {
     type Lock = BufReader<&'a mut Self>;
 
-    fn lock_reader<'b: 'a>(&'b mut self) -> Result<Self::Lock> {
+    fn lock_reader<'b: 'a>(&'b mut self) -> StdResult<Self::Lock, LockError> {
         Ok(BufReader::new(self))
     }
 }
@@ -150,7 +140,7 @@ impl<'a> UtilRead<'a> for File {
 impl<'a> UtilRead<'a> for io::Stdin {
     type Lock = io::StdinLock<'a>;
 
-    fn lock_reader<'b: 'a>(&'b mut self) -> Result<Self::Lock> {
+    fn lock_reader<'b: 'a>(&'b mut self) -> StdResult<Self::Lock, LockError> {
         Ok(self.lock())
     }
 }
@@ -158,7 +148,7 @@ impl<'a> UtilRead<'a> for io::Stdin {
 impl<'a> UtilWrite<'a> for File {
     type Lock = BufWriter<&'a mut Self>;
 
-    fn lock_writer<'b: 'a>(&'b mut self) -> Result<Self::Lock> {
+    fn lock_writer<'b: 'a>(&'b mut self) -> StdResult<Self::Lock, LockError> {
         Ok(BufWriter::new(self))
     }
 }
@@ -166,7 +156,7 @@ impl<'a> UtilWrite<'a> for File {
 impl<'a> UtilWrite<'a> for io::Stdout {
     type Lock = io::StdoutLock<'a>;
 
-    fn lock_writer<'b: 'a>(&'b mut self) -> Result<Self::Lock> {
+    fn lock_writer<'b: 'a>(&'b mut self) -> StdResult<Self::Lock, LockError> {
         Ok(self.lock())
     }
 }
@@ -174,7 +164,7 @@ impl<'a> UtilWrite<'a> for io::Stdout {
 impl<'a> UtilWrite<'a> for io::Stderr {
     type Lock = io::StderrLock<'a>;
 
-    fn lock_writer<'b: 'a>(&'b mut self) -> Result<Self::Lock> {
+    fn lock_writer<'b: 'a>(&'b mut self) -> StdResult<Self::Lock, LockError> {
         Ok(self.lock())
     }
 }
