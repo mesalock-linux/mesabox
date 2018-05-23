@@ -6,9 +6,9 @@
 // For a copy, see the LICENSE file.
 //
 
-extern crate mesatools;
+extern crate mesabox;
 
-use mesatools::UtilSetup;
+use mesabox::UtilSetup;
 use std::env;
 use std::io::{self, Write};
 use std::process;
@@ -21,7 +21,7 @@ fn main() {
 
     let mut setup = UtilSetup::new(stdin, stdout, stderr);
 
-    if let Err(f) = mesatools::execute(&mut setup, env::args_os()) {
+    if let Err(f) = mesabox::execute(&mut setup, env::args_os()) {
         if let Some(ref err) = f.err {
             let mut skip = false;
             // XXX: should this be checked in lib.rs?  i feel like it might be useful if people can detect this, so it is being done this way atm

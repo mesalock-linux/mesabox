@@ -213,7 +213,7 @@ where
     let mut args = args.into_iter();
 
     // assume that we are using symlinks first (i.e. "command args" format).  if not, check for
-    // "mesatools command args" format
+    // "mesabox command args" format
     let res = start(setup, &mut args).or_else(|| start(setup, args)).or_else(|| {
         // no valid util was found, so just display a help menu
         let _ = generate_app().write_help(&mut setup.stderr);
