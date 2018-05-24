@@ -7,7 +7,7 @@
 //
 
 use super::{Result, UtilRead, UtilWrite, UtilSetup};
-use clap::{Arg, AppSettings};
+use clap::{Arg, ArgGroup, AppSettings};
 use std::collections::VecDeque;
 use std::ffi::{OsString, OsStr};
 use std::fs::File;
@@ -18,7 +18,16 @@ use std::str::FromStr;
 use std::path::Path;
 
 pub const NAME: &str = "head";
-pub const DESCRIPTION: &str = "Read the first N bytes or lines from a file";
+pub const DESCRIPTION: &str = "Print the first N bytes or lines from a file";
+
+const AFTER_HELP: &str = "
+This utility acts as if the user provided the argument '-n 10' by default.
+
+NUMBER may be given a multiplier suffix following the International System of Units (SI), meaning
+that kB is 1000, MB is 1000^2, etc. up to YB (which is 1000^8).  If you remove the 'B' from the
+suffix, the number is interpreted as its IEC equivalent (e.g. K means 1024 and M means 1024^2).
+Providing the suffix 'b' is equivalent to multiplying NUMBER by 512.
+";
 
 enum Mode {
     Bytes((usize, bool)),
@@ -27,8 +36,6 @@ enum Mode {
 
 struct Options {
     method: Mode,
-    verbose: bool,
-    quiet: bool,
     previous_printed: bool,
 }
 
@@ -43,27 +50,34 @@ where
     // TODO: check for obsolete arg style (e.g. head -5 file)
     let mut app = util_app!("head")
                     .setting(AppSettings::AllowNegativeNumbers)
+                    .after_help(AFTER_HELP)
+                    .group(ArgGroup::with_name("mode")
+                            .arg("bytes")
+                            .arg("lines"))
                     .arg(Arg::with_name("bytes")
                             .short("c")
                             .long("bytes")
                             .takes_value(true)
                             .value_name("NUMBER")
-                            .validator_os(is_valid_num))
+                            .validator_os(is_valid_num)
+                            .help("Print the first NUMBER bytes if NUMBER is positive; otherwise print all but the last NUMBER bytes"))
                     .arg(Arg::with_name("lines")
                             .short("n")
                             .long("lines")
                             .takes_value(true)
                             .value_name("NUMBER")
                             .validator_os(is_valid_num)
-                            .conflicts_with("bytes"))
+                            .help("Print the first NUMBER lines if NUMBER is positive; otherwise print all but the last NUMBER lines"))
                     .arg(Arg::with_name("quiet")
                             .short("q")
                             .long("quiet")
-                            /* TODO: add silent */)
+                            .visible_alias("silent")
+                            .help("Never print file headers"))
                     .arg(Arg::with_name("verbose")
                             .short("v")
                             .long("verbose")
-                            .overrides_with("quiet"))
+                            .overrides_with("quiet")
+                            .help("Always print file headers"))
                     .arg(Arg::with_name("FILES")
                             .index(1)
                             .multiple(true));
@@ -82,11 +96,8 @@ where
         Mode::Lines((10, true))
     };
 
-    // TODO: probably just move verbose/quiet into an enum
     let mut options = Options {
         method: method,
-        verbose: verbose,
-        quiet: quiet,
         previous_printed: false,
     };
 
@@ -98,12 +109,13 @@ where
         let file_count = matches.occurrences_of("FILES");
 
         for file in matches.values_of_os("FILES").unwrap() {
-            let filename = if file_count > 1 {
+            let filename = if (file_count > 1 && !quiet) || verbose {
                 Some(file)
             } else {
                 None
             };
             let res = if file == OsStr::new("-") {
+                let filename = filename.map(|_| OsStr::new("standard input"));
                 handle_stdin(&mut output, &mut setup.stdin, filename, &mut options)
             } else {
                 handle_file(&mut output, file, filename, &mut options)
@@ -118,7 +130,12 @@ where
 
         result
     } else {
-        handle_stdin(output, &mut setup.stdin, None, &mut options)
+        let filename = if verbose {
+            Some(OsStr::new("standard input"))
+        } else {
+            None
+        };
+        handle_stdin(output, &mut setup.stdin, filename, &mut options)
     }
 }
 
