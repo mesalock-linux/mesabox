@@ -27,6 +27,10 @@ NUMBER may be given a multiplier suffix following the International System of Un
 that kB is 1000, MB is 1000^2, etc. up to YB (which is 1000^8).  If you remove the 'B' from the
 suffix, the number is interpreted as its IEC equivalent (e.g. K means 1024 and M means 1024^2).
 Providing the suffix 'b' is equivalent to multiplying NUMBER by 512.
+
+Please note that the maximum value for NUMBER is the maximum value of your platform's native
+integer type (so a 64-bit number on 64-bit platforms).  Therefore, some suffixes may not work at
+all on your system.
 ";
 
 enum Mode {
@@ -87,10 +91,13 @@ where
     let verbose = matches.is_present("verbose");
     let quiet = matches.is_present("quiet");
 
+    // these .unwrap()s are fine because of the validators above
     let method = if matches.is_present("bytes") {
-        Mode::Bytes(parse_num(matches.value_of("bytes").unwrap()))
+        let num = parse_num(matches.value_of("bytes").unwrap()).unwrap();
+        Mode::Bytes(num)
     } else if matches.is_present("lines") {
-        Mode::Lines(parse_num(matches.value_of("lines").unwrap()))
+        let num = parse_num(matches.value_of("lines").unwrap()).unwrap();
+        Mode::Lines(num)
     } else {
         // just dump the first ten lines
         Mode::Lines((10, true))
@@ -284,23 +291,84 @@ where
     Ok(())
 }
 
-// FIXME: need to add suffixes
 // returns the number and whether it is positive
-fn parse_num(s: &str) -> (usize, bool) {
-    let positive = (s.chars().next().unwrap() != '-');
-    let num = usize::from_str(if positive { s } else { s.trim_left_matches('-') }).unwrap();
-    (num, positive)
+fn parse_num(s: &str) -> Option<(usize, bool)> {
+    let positive = (s.chars().next()? != '-');
+    let numstr = if positive {
+        s
+    } else {
+        s.trim_left_matches('-')
+    };
+    let num = parse_num_with_suffix(numstr)?;
+    Some((num, positive))
 }
 
-// FIXME: need to add suffixes
 fn is_valid_num(val: &OsStr) -> StdResult<(), OsString> {
-    let res = val.to_str().and_then(|s| {
-        let positive = (s.chars().next().unwrap() != '-');
-        usize::from_str(if positive { s } else { s.trim_left_matches('-') }).map(|_| ()).ok()
-    });
+    let res = val.to_str().and_then(parse_num);
     if res.is_some() {
         Ok(())
     } else {
-        Err(OsString::from(format!("'{}' is not a number", val.to_string_lossy())))
+        Err(OsString::from(format!("'{}' is not a number or is too large", val.to_string_lossy())))
     }
+}
+
+fn parse_num_with_suffix(s: &str) -> Option<usize> {
+    const SUFFIXES: [char; 8] = ['K', 'M', 'G', 'T', 'P', 'E', 'Z', 'Y'];
+
+    let mut chars = s.chars();
+    let mut found_si = false;
+    let mut base = 1;
+    let mut power = 1;
+    {
+        let mut rchars = (&mut chars).rev().peekable();
+        loop {
+            let ch = rchars.peek()?.clone();
+            match ch {
+                'b' if !found_si => {
+                    // special case this one because it's slightly different
+                    base = 512;
+                    let _ = rchars.next();
+                    break;
+                }
+                'B' if !found_si => {
+                    found_si = true;
+                }
+                _ => {
+                    for (i, &suffix) in SUFFIXES.iter().enumerate() {
+                        if suffix == ch {
+                            base = if found_si {
+                                1000
+                            } else {
+                                1024
+                            };
+                            power = i as u32 + 1;
+                            let _ = rchars.next();
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
+    usize::from_str(chars.as_str()).ok()?.checked_mul(pow(base, power)?)
+}
+
+// usize::pow() can panic, and the versions that don't panic are not yet stable
+fn pow(mut base: usize, mut exp: u32) -> Option<usize> {
+    let mut acc: usize = 1;
+
+    while exp > 1 {
+        if (exp & 1) == 1 {
+            acc = acc.checked_mul(base)?;
+        }
+        exp /= 2;
+        base = base.checked_mul(base)?;
+    }
+
+    if exp == 1 {
+        acc = acc.checked_mul(base)?;
+    }
+
+    Some(acc)
 }
