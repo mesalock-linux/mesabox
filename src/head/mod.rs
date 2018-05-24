@@ -7,6 +7,8 @@
 //
 
 use super::{Result, UtilRead, UtilWrite, UtilSetup};
+use util;
+
 use clap::{Arg, ArgGroup, AppSettings};
 use std::collections::VecDeque;
 use std::ffi::{OsString, OsStr};
@@ -53,7 +55,7 @@ where
 {
     // TODO: check for obsolete arg style (e.g. head -5 file)
     let mut app = util_app!("head")
-                    .setting(AppSettings::AllowNegativeNumbers)
+                    .setting(AppSettings::AllowLeadingHyphen)
                     .after_help(AFTER_HELP)
                     .group(ArgGroup::with_name("mode")
                             .arg("bytes")
@@ -258,6 +260,7 @@ where
     W: Write,
     R: BufRead,
 {
+    // TODO: figure out a way to do this that won't use exhaust memory on e.g. -1E
     let size = bytes.max(32 * 1024);
     let mut first_buffer = Vec::with_capacity(size);
     let mut second_buffer = Vec::with_capacity(size);
@@ -293,13 +296,14 @@ where
 
 // returns the number and whether it is positive
 fn parse_num(s: &str) -> Option<(usize, bool)> {
+    let s = s.trim();
     let positive = (s.chars().next()? != '-');
     let numstr = if positive {
         s
     } else {
         s.trim_left_matches('-')
     };
-    let num = parse_num_with_suffix(numstr)?;
+    let num = util::parse_num_with_suffix(numstr)?;
     Some((num, positive))
 }
 
@@ -310,65 +314,4 @@ fn is_valid_num(val: &OsStr) -> StdResult<(), OsString> {
     } else {
         Err(OsString::from(format!("'{}' is not a number or is too large", val.to_string_lossy())))
     }
-}
-
-fn parse_num_with_suffix(s: &str) -> Option<usize> {
-    const SUFFIXES: [char; 8] = ['K', 'M', 'G', 'T', 'P', 'E', 'Z', 'Y'];
-
-    let mut chars = s.chars();
-    let mut found_si = false;
-    let mut base = 1;
-    let mut power = 1;
-    {
-        let mut rchars = (&mut chars).rev().peekable();
-        loop {
-            let ch = rchars.peek()?.clone();
-            match ch {
-                'b' if !found_si => {
-                    // special case this one because it's slightly different
-                    base = 512;
-                    let _ = rchars.next();
-                    break;
-                }
-                'B' if !found_si => {
-                    found_si = true;
-                }
-                _ => {
-                    for (i, &suffix) in SUFFIXES.iter().enumerate() {
-                        if suffix == ch {
-                            base = if found_si {
-                                1000
-                            } else {
-                                1024
-                            };
-                            power = i as u32 + 1;
-                            let _ = rchars.next();
-                        }
-                    }
-                    break;
-                }
-            }
-        }
-    }
-
-    usize::from_str(chars.as_str()).ok()?.checked_mul(pow(base, power)?)
-}
-
-// usize::pow() can panic, and the versions that don't panic are not yet stable
-fn pow(mut base: usize, mut exp: u32) -> Option<usize> {
-    let mut acc: usize = 1;
-
-    while exp > 1 {
-        if (exp & 1) == 1 {
-            acc = acc.checked_mul(base)?;
-        }
-        exp /= 2;
-        base = base.checked_mul(base)?;
-    }
-
-    if exp == 1 {
-        acc = acc.checked_mul(base)?;
-    }
-
-    Some(acc)
 }
