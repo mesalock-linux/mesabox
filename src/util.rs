@@ -16,6 +16,9 @@ use std::path::Path;
 use std::os::unix::io::AsRawFd;
 use std::str::FromStr;
 
+// defined out here rather than in parse_num_with_suffix() because we need the array for testing
+const SUFFIXES: [char; 8] = ['K', 'M', 'G', 'T', 'P', 'E', 'Z', 'Y'];
+
 #[allow(dead_code)]
 pub(crate) fn set_exitcode<T, E: StdError + Send + Sync + 'static>(
     error: StdResult<T, E>,
@@ -49,8 +52,6 @@ where
 }
 
 pub fn parse_num_with_suffix(s: &str) -> Option<usize> {
-    const SUFFIXES: [char; 8] = ['K', 'M', 'G', 'T', 'P', 'E', 'Z', 'Y'];
-
     let mut chars = s.chars();
     let mut found_si = false;
     let mut base = 1;
@@ -67,6 +68,7 @@ pub fn parse_num_with_suffix(s: &str) -> Option<usize> {
                     break;
                 }
                 'B' if !found_si => {
+                    let _ = rchars.next();
                     found_si = true;
                 }
                 _ => {
@@ -108,4 +110,69 @@ fn pow(mut base: usize, mut exp: u32) -> Option<usize> {
     }
 
     Some(acc)
+}
+
+#[test]
+fn parse_num_invalid() {
+    let strings = [
+        "  1",
+        "1  ",
+        "  1  ",
+        "1X",
+        "b",
+        "1 b",
+        "-1",
+    ];
+    for s in strings.iter() {
+        assert_eq!(parse_num_with_suffix(s), None);
+    }
+
+    for suffix in &SUFFIXES {
+        assert_eq!(parse_num_with_suffix(&suffix.to_string()), None);
+        assert_eq!(parse_num_with_suffix(&format!("{}B", suffix)), None);
+        assert_eq!(parse_num_with_suffix(&format!("1 {}", suffix)), None);
+        assert_eq!(parse_num_with_suffix(&format!("1 {}B", suffix)), None);
+
+        // TODO: add tests ensuring too large values fail as well
+    }
+
+    assert_eq!(parse_num_with_suffix(&format!("{}1", usize::max_value())), None);
+}
+
+#[test]
+fn parse_num_valid() {
+    let strings = [
+        ("0", 0),
+        ("1", 1),
+        ("1b", 512),
+    ];
+    for s in strings.iter() {
+        assert_eq!(parse_num_with_suffix(s.0), Some(s.1));
+    }
+
+    for (i, suffix) in SUFFIXES.iter().enumerate() {
+        let exp = i as u32 + 1;
+
+        assert_eq!(parse_num_with_suffix(&format!("1{}", suffix)), pow(1024, exp));
+        assert_eq!(parse_num_with_suffix(&format!("1{}B", suffix)), pow(1000, exp));
+
+        // TODO: add tests ensuring values that are almost too large pass
+    }
+
+    assert_eq!(parse_num_with_suffix(&format!("{}", usize::max_value())), Some(usize::max_value()));
+}
+
+#[test]
+fn pow_overflow() {
+    let root = (usize::max_value() as f64).sqrt().ceil() as usize;
+
+    assert_eq!(pow(root, 2), None);
+    assert!(pow(root - 1, 2).is_some());
+}
+
+#[test]
+fn pow_correct() {
+    assert_eq!(pow(1, 0), Some(1));
+    assert_eq!(pow(2, 16), Some(65536));
+    assert_eq!(pow(256, 2), Some(65536));
 }
