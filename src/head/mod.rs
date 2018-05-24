@@ -8,9 +8,11 @@
 
 use super::{Result, UtilRead, UtilWrite, UtilSetup};
 use clap::{Arg, AppSettings};
+use std::collections::VecDeque;
 use std::ffi::{OsString, OsStr};
 use std::fs::File;
 use std::io::{self, BufReader, BufRead, Read, Write};
+use std::mem;
 use std::result::Result as StdResult;
 use std::str::FromStr;
 use std::path::Path;
@@ -19,8 +21,8 @@ pub const NAME: &str = "head";
 pub const DESCRIPTION: &str = "Read the first N bytes or lines from a file";
 
 enum Mode {
-    Bytes(isize),
-    Lines(isize),
+    Bytes((usize, bool)),
+    Lines((usize, bool)),
 }
 
 struct Options {
@@ -38,7 +40,7 @@ where
     T: Iterator<Item = U>,
     U: Into<OsString> + Clone,
 {
-    // TODO: check for obsolete arg style
+    // TODO: check for obsolete arg style (e.g. head -5 file)
     let mut app = util_app!("head")
                     .setting(AppSettings::AllowNegativeNumbers)
                     .arg(Arg::with_name("bytes")
@@ -58,10 +60,10 @@ where
                             .short("q")
                             .long("quiet")
                             /* TODO: add silent */)
-                            // TODO: i assume quiet and verbose override but ensure they don't conflict
                     .arg(Arg::with_name("verbose")
                             .short("v")
-                            .long("verbose"))
+                            .long("verbose")
+                            .overrides_with("quiet"))
                     .arg(Arg::with_name("FILES")
                             .index(1)
                             .multiple(true));
@@ -77,7 +79,7 @@ where
         Mode::Lines(parse_num(matches.value_of("lines").unwrap()))
     } else {
         // just dump the first ten lines
-        Mode::Lines(10)
+        Mode::Lines((10, true))
     };
 
     // TODO: probably just move verbose/quiet into an enum
@@ -135,7 +137,6 @@ fn handle_file<O: Write>(output: O, filename: &OsStr, disp_filename: Option<&OsS
     handle_data(output, reader, disp_filename, options)
 }
 
-// FIXME: can only seek if R: implements it
 fn handle_data<W, R>(mut output: W, mut input: R, filename: Option<&OsStr>, options: &mut Options) -> Result<()>
 where
     W: Write,
@@ -151,33 +152,76 @@ where
         }
     }
     match options.method {
-        Mode::Lines(mut lines) => {
-            // NOTE: need to keep reading until we hit "lines" lines, so slow
-            if lines >= 0 {
-                let mut buffer = vec![];
-                while lines > 0 {
-                    // NOTE: it would be faster to just continuously read into the buffer and then
-                    //       write once, but that could potentially take a lot of memory
-                    let count = input.read_until(b'\n', &mut buffer)?;
-                    if count == 0 {
-                        break;
-                    }
-                    output.write_all(&buffer)?;
-
-                    buffer.clear();
-                    lines -= 1;
-                }
+        Mode::Lines((lines, positive)) => {
+            if positive {
+                write_lines_forward(output, input, lines)
             } else {
-                // TODO: negative number
-                // NOTE: we might need to seek
+                write_lines_backward(output, input, lines)
             }
         }
-        Mode::Bytes(bytes) => {
-            if bytes >= 0 {
+        Mode::Bytes((bytes, positive)) => {
+            if positive {
                 io::copy(&mut input.take(bytes as u64), &mut output)?;
+                Ok(())
             } else {
-                // TODO: negative number
-                // NOTE: we need to seek from the end, so R needs to implement Seek or we need to emulate it
+                write_bytes_backward(output, input, bytes)
+            }
+        }
+    }
+}
+
+fn write_lines_forward<W, R>(mut output: W, mut input: R, mut line_count: usize) -> Result<()>
+where
+    W: Write,
+    R: BufRead,
+{
+    let mut buffer = vec![];
+    while line_count > 0 {
+        // NOTE: it would be faster to just continuously read into the buffer and then
+        //       write once, but that could potentially take a lot of memory
+        let count = input.read_until(b'\n', &mut buffer)?;
+        if count == 0 {
+            break;
+        }
+        output.write_all(&buffer)?;
+
+        buffer.clear();
+        line_count -= 1;
+    }
+
+    Ok(())
+}
+
+fn write_lines_backward<W, R>(mut output: W, mut input: R, mut line_count: usize) -> Result<()>
+where
+    W: Write,
+    R: BufRead,
+{
+    let mut store = VecDeque::new();
+
+    // returns true if we can just return rather than printing
+    let mut read_line = |store: &mut VecDeque<_>, mut line| -> StdResult<_, io::Error> {
+        if input.read_until(b'\n', &mut line)? == 0 {
+            return Ok(true);
+        }
+        store.push_back(line);
+        Ok(false)
+    };
+
+    while line_count > 0 {
+        if read_line(&mut store, vec![])? {
+            return Ok(());
+        }
+        line_count -= 1;
+    }
+    if !read_line(&mut store, vec![])? {
+        loop {
+            // this .unwrap() is fine because we always push another line into the store
+            let mut line = store.pop_front().unwrap();
+            output.write_all(&line)?;
+            line.clear();
+            if read_line(&mut store, line)? {
+                break;
             }
         }
     }
@@ -185,14 +229,59 @@ where
     Ok(())
 }
 
+fn write_bytes_backward<W, R>(mut output: W, mut input: R, bytes: usize) -> Result<()>
+where
+    W: Write,
+    R: BufRead,
+{
+    let size = bytes.max(32 * 1024);
+    let mut first_buffer = Vec::with_capacity(size);
+    let mut second_buffer = Vec::with_capacity(size);
+    let mut prev_buffer = &mut first_buffer;
+    let mut cur_buffer = &mut second_buffer;
+
+    loop {
+        let n = (&mut input).take(size as u64).read_to_end(cur_buffer)?;
+        if n == size {
+            output.write_all(prev_buffer)?;
+            mem::swap(&mut prev_buffer, &mut cur_buffer);
+            cur_buffer.clear();
+        } else {
+            break;
+        }
+    }
+    if cur_buffer.len() == 0 {
+        if bytes < prev_buffer.len() {
+            output.write_all(&prev_buffer[..prev_buffer.len() - bytes])?
+        }
+    } else {
+        if bytes < cur_buffer.len() {
+            output.write_all(prev_buffer)?;
+            output.write_all(&cur_buffer[..cur_buffer.len() - bytes])?;
+        } else {
+            let bytes = bytes - cur_buffer.len();
+            output.write_all(&prev_buffer[..prev_buffer.len() - bytes])?;
+        }
+    }
+
+    Ok(())
+}
+
 // FIXME: need to add suffixes
-fn parse_num(s: &str) -> isize {
-    isize::from_str(s).unwrap()
+// returns the number and whether it is positive
+fn parse_num(s: &str) -> (usize, bool) {
+    let positive = (s.chars().next().unwrap() != '-');
+    let num = usize::from_str(if positive { s } else { s.trim_left_matches('-') }).unwrap();
+    (num, positive)
 }
 
 // FIXME: need to add suffixes
 fn is_valid_num(val: &OsStr) -> StdResult<(), OsString> {
-    if val.to_str().and_then(|s| isize::from_str(s).ok()).is_some() {
+    let res = val.to_str().and_then(|s| {
+        let positive = (s.chars().next().unwrap() != '-');
+        usize::from_str(if positive { s } else { s.trim_left_matches('-') }).map(|_| ()).ok()
+    });
+    if res.is_some() {
         Ok(())
     } else {
         Err(OsString::from(format!("'{}' is not a number", val.to_string_lossy())))
