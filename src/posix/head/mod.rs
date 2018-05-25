@@ -261,10 +261,22 @@ where
     W: Write,
     R: BufRead,
 {
-    // TODO: figure out a way to do this that won't use exhaust memory on e.g. -1E
+    const BUF_SIZE: usize = 32 * 1024;
+    
+    // FIXME: if the user provides a byte count greater than the amount of memory available and
+    //        the file size is also greater than the amount of memory available, this will
+    //        currently exhaust memory and abort.  not sure what the best way to fix this is other
+    //        than writing to a temporary file if the size is too large (but this solution comes
+    //        with its own issues as well)
     let size = bytes.max(32 * 1024);
-    let mut first_buffer = Vec::with_capacity(size);
-    let mut second_buffer = Vec::with_capacity(size);
+    let (mut first_buffer, mut second_buffer) = if size > BUF_SIZE {
+        // in case the byte count is larger than the amount of memory, only allocate to the size of
+        // the data read (in case the file size is much smaller than the byte count, which would
+        // mean nothing should be printed rather than the program aborting)
+        (vec![], vec![])
+    } else {
+        (Vec::with_capacity(size), Vec::with_capacity(size))
+    };
     let mut prev_buffer = &mut first_buffer;
     let mut cur_buffer = &mut second_buffer;
 
@@ -288,7 +300,8 @@ where
             output.write_all(&cur_buffer[..cur_buffer.len() - bytes])?;
         } else {
             let bytes = bytes - cur_buffer.len();
-            output.write_all(&prev_buffer[..prev_buffer.len() - bytes])?;
+            let buf_len = prev_buffer.len();
+            output.write_all(&prev_buffer[..buf_len - bytes.min(buf_len)])?;
         }
     }
 
