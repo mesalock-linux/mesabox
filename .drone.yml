@@ -1,0 +1,12 @@
+pipeline:
+  build:
+    image: rust:${RUST_VERSION}
+    commands:
+      - rustup show
+      - cargo build
+      - cargo test
+
+matrix:
+  RUST_VERSION:
+    - 1.26
+    - nightly
