@@ -18,6 +18,9 @@ extern crate chrono;
 extern crate crossbeam;
 extern crate pnet;
 extern crate byteorder;
+extern crate mio;
+extern crate trust_dns_resolver;
+extern crate socket2;
 extern crate uucore;
 
 use clap::{App, SubCommand};
@@ -188,7 +191,7 @@ where
 
 // generate a clap::App such that the available utils are set up as subcommands without any
 // arguments (adding all the arguments would slow down startup time)
-fn generate_app() -> App<'static, 'static> {
+fn generate_app() -> App<'static, 'static, impl BufRead, impl Write, impl Write> {
     include!(concat!(env!("OUT_DIR"), "/generate_app.rs"))
 }
 
@@ -240,6 +243,7 @@ where
                     if let Some(ref e) = mesa_err.err {
                         if let Some(clap_err) = e.downcast_ref::<clap::Error>() {
                             if clap_err.kind == clap::ErrorKind::HelpDisplayed || clap_err.kind == clap::ErrorKind::VersionDisplayed {
+                                write!(setup.stdout, "{}", clap_err)?;
                                 return Ok(());
                             }
                         }

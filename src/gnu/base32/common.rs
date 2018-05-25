@@ -60,7 +60,8 @@ where
     T: Iterator<Item = U>,
     U: Into<OsString> + Clone,
 {
-    let mut app = util_app!(name, desc)
+    let matches = {
+        let app = util_app!(name, setup, desc)
                     .arg(Arg::with_name("decode")
                             .short("d")
                             .long("decode")
@@ -79,7 +80,8 @@ where
                     .arg(Arg::with_name("FILE")
                             .index(1));
 
-    let matches = get_matches!(setup, app, args);
+        app.get_matches_from_safe(args)?
+    };
 
     let line_wrap = match matches.value_of("wrap") {
         Some(s) => usize::from_str(s).unwrap(),

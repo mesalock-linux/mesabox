@@ -6,27 +6,60 @@ description = "A collection of utilities important to basic system functionality
 build = "build.rs"
 
 [features]
+arch = []
+base32 = []
+base64 = []
 yes = []
+gnu = [
+    "arch",
+    "base32",
+    "base64",
+    "yes"
+]
 
-posix = ["yes"]
+# XXX: temporary until renaming dependencies is supported
+tar_util = []
+lsb = [
+    "tar_util"
+]
 
-default-features = ["posix"]
+ping = []
+networking = [
+    "ping"
+]
+
+cat = []
+head = []
+sleep = []
+posix = [
+    "cat",
+    "head",
+    "sleep"
+]
+
+default = ["gnu", "lsb", "networking", "posix"]
 
 [dependencies]
-clap = "2.31.2"
+clap = { git = "https://github.com/mesalock-linux/clap-rs" }
 failure = "0.1.1"
+failure_derive = "0.1.1"
 libc = "0.2.40"
 platform-info = { git = "https://github.com/uutils/platform-info" }
-uucore = { git = "https://github.com/Arcterus/coreutils", branch = "bytes", features = ["encoding", "parse_time"] }
+uucore = { git = "https://github.com/Arcterus/coreutils", branch = "bytes", features = ["encoding", "mode", "parse_time"] }
 tar = "0.4.15"
 globset = "0.4.0"
-quick-error = "1.2.1"
 nix = "0.10.0"
 chrono = "0.4.2"
 crossbeam = "0.3.2"
+pnet = "0.21.0"
+byteorder = "1.2.3"
+trust-dns-resolver = "0.9.0"
+mio = "0.6.14"
+socket2 = "0.3.5"
 
 [build-dependencies]
 rustc_version = "0.2.2"
 
 [profile.release]
+lto = true
 panic = "abort"

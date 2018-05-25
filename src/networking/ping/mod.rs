@@ -231,7 +231,8 @@ where
     T: Iterator<Item = U>,
     U: Into<OsString> + Clone,
 {
-    let mut app = util_app!("ping")
+    let matches = {
+        let app = util_app!("ping", setup)
                     .arg(Arg::with_name("count")
                                 .short("c")
                                 .takes_value(true)
@@ -258,7 +259,8 @@ where
                                 .index(1)
                                 .required(true));
     
-    let matches = get_matches!(setup, app, args);
+        app.get_matches_from_safe(args)?
+    };
     
     let count = if matches.is_present("count") {
         // this is fine because of the validator

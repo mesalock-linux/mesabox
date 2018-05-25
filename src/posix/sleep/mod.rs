@@ -50,9 +50,9 @@ where
     T: Iterator<Item = U>,
     U: Into<OsString> + Clone,
 {
-    let mut app = util_app!("sleep").arg(Arg::with_name("NUMBER[SUFFIX]").index(1).multiple(true).required(true).help("hi"));
+    let app = util_app!("sleep", setup).arg(Arg::with_name("NUMBER[SUFFIX]").index(1).multiple(true).required(true).help("hi"));
 
-    let matches = get_matches!(setup, app, args);
+    let matches = app.get_matches_from_safe(args)?;
 
     // XXX: should this fail on invalid bytes?
     let args = matches.values_of_lossy("NUMBER[SUFFIX]").unwrap();

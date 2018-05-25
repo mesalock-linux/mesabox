@@ -36,12 +36,11 @@
 //
 
 use clap::Arg;
-use failure::{Fail, ResultExt};
 use std::ffi::{OsString, OsStr};
 use std::fs::{metadata, File};
 use std::iter;
-use std::io::{self, BufWriter, BufRead, Read, Write};
-use super::{Result, UtilSetup, /*ArgsIter, */UtilRead, UtilWrite, is_tty};
+use std::io::{self, BufRead, Read, Write};
+use super::{UtilSetup, /*ArgsIter, */UtilRead, UtilWrite, is_tty};
 
 /// Unix domain socket support
 #[cfg(unix)]
@@ -224,7 +223,6 @@ where
     where
         T: Iterator<Item = &'b OsStr>,
     {
-        let mut in_buf = [0; 1024 * 64];
         let mut error_count = 0;
 
         let writer = &mut self.stdout;
@@ -405,7 +403,8 @@ where
     T: Iterator<Item = U>,
     U: Into<OsString> + Clone,
 {
-    let mut app = util_app!("cat")
+    let matches = {
+        let app = util_app!("cat", setup)
                     .arg(Arg::with_name("show-all")
                             .short("A")
                             .long("show-all")
@@ -444,7 +443,8 @@ where
                     .arg(Arg::with_name("FILES")
                             .index(1)
                             .multiple(true));
-    let matches = get_matches!(setup, app, args);
+        app.get_matches_from_safe(args)?
+    };
 
     let mut options = OutputOptions::default();
 

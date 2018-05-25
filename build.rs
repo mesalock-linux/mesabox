@@ -8,13 +8,35 @@
 
 extern crate rustc_version;
 
+use std::collections::HashMap;
 use std::env;
 use std::fs::{self, File};
 use std::io::{BufWriter, Write};
 use std::path::Path;
 
+fn create_util_map() -> HashMap<&'static str, &'static str> {
+    let mut hashmap = HashMap::new();
+
+    hashmap.insert("arch", "gnu");
+    hashmap.insert("base32", "gnu");
+    hashmap.insert("base64", "gnu");
+    hashmap.insert("yes", "gnu");
+
+    hashmap.insert("tar", "lsb");
+
+    hashmap.insert("ping", "networking");
+
+    hashmap.insert("cat", "posix");
+    hashmap.insert("head", "posix");
+    hashmap.insert("sleep", "posix");
+
+    hashmap
+}
+
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
+
+    let util_map = create_util_map();
 
     let manifest_dir =
         env::var("CARGO_MANIFEST_DIR").expect("Cargo did not set CARGO_MANIFEST_DIR");
@@ -27,18 +49,21 @@ fn main() {
 
     let mut utils = vec![];
 
-    // TODO: ideally, stuff like "yes" should be able to be able to go in a "posix" folder or
-    //       something similar and the code generation here would still work
-    for entry in fs::read_dir("src").expect("could not read src/") {
-        let entry = entry.expect("could not process directory entry");
-        let path = entry.path();
-        if path.is_dir() {
-            let filename = path.file_name()
-                .expect("directory entry does not have a filename");
-            let name = filename.to_string_lossy().into_owned();
-            writeln!(output, "#[path = \"{}/src/{}/mod.rs\"]", manifest_dir, name).unwrap();
-            writeln!(output, "mod {};", name).unwrap();
-            utils.push(name);
+    for &util in util_map.keys() {
+        let util = if util == "tar" {
+            "tar_util"
+        } else {
+            util
+        };
+        if env::var_os(format!("CARGO_FEATURE_{}", util.to_uppercase())).is_some() {
+            let util = if util == "tar_util" {
+                "tar"
+            } else {
+                util
+            };
+            writeln!(output, "#[path = \"{}/src/{}/{}/mod.rs\"]", manifest_dir, util_map.get(util).unwrap(), util).unwrap();
+            writeln!(output, "mod {};", util).unwrap();
+            utils.push(util);
         }
     }
 

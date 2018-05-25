@@ -10,35 +10,17 @@
 //       stdin/stdout/stderr for clap
 
 macro_rules! util_app {
-    ($name:expr) => {
-        util_app!($name, self::DESCRIPTION)
+    ($name:expr, $setup:expr) => {
+        util_app!($name, $setup, self::DESCRIPTION)
     };
-    ($name:expr, $desc:expr) => {
-        ::clap::App::new($name)
+    ($name:expr, $setup:expr, $desc:expr) => {{
+        let stdin = $setup.stdin.lock_reader()?;
+        let stdout = $setup.stdout.lock_writer()?;
+        let stderr = $setup.stderr.lock_writer()?;
+        ::clap::App::with_io($name, stdin, stdout, stderr)
                         .version(crate_version!())
                         .author(crate_authors!())
                         .about($desc)
-                        .arg(::clap::Arg::with_name("version")
-                                .short("V")
-                                .long("version")
-                                .help("Print version info and exit"))
-                        .arg(::clap::Arg::with_name("help")
-                                .long("help")
-                                .help("Print help information and exit"))
-    }
-}
-
-macro_rules! get_matches {
-    ($setup:tt, $app:tt, $args:tt) => {{
-        let matches = $app.get_matches_from_safe_borrow($args)?;
-        if matches.is_present("version") {
-            $app.write_version(&mut $setup.stdout)?;
-            return Ok(());
-        } else if matches.is_present("help") {
-            $app.write_help(&mut $setup.stdout)?;
-            return Ok(());
-        }
-        matches
     }}
 }
 

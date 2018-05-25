@@ -16,7 +16,6 @@ use std::fs::File;
 use std::io::{self, BufReader, BufRead, Read, Write};
 use std::mem;
 use std::result::Result as StdResult;
-use std::str::FromStr;
 use std::path::Path;
 
 pub const NAME: &str = "head";
@@ -54,7 +53,8 @@ where
     U: Into<OsString> + Clone,
 {
     // TODO: check for obsolete arg style (e.g. head -5 file)
-    let mut app = util_app!("head")
+    let matches = {
+        let app = util_app!("head", setup)
                     .setting(AppSettings::AllowLeadingHyphen)
                     .after_help(AFTER_HELP)
                     .group(ArgGroup::with_name("mode")
@@ -88,7 +88,8 @@ where
                             .index(1)
                             .multiple(true));
     
-    let matches = get_matches!(setup, app, args);
+        app.get_matches_from_safe(args)?
+    };
 
     let verbose = matches.is_present("verbose");
     let quiet = matches.is_present("quiet");
@@ -163,7 +164,7 @@ fn handle_file<O: Write>(output: O, filename: &OsStr, disp_filename: Option<&OsS
     handle_data(output, reader, disp_filename, options)
 }
 
-fn handle_data<W, R>(mut output: W, mut input: R, filename: Option<&OsStr>, options: &mut Options) -> Result<()>
+fn handle_data<W, R>(mut output: W, input: R, filename: Option<&OsStr>, options: &mut Options) -> Result<()>
 where
     W: Write,
     R: BufRead,
@@ -295,6 +296,7 @@ where
 }
 
 // returns the number and whether it is positive
+#[allow(unused_parens)]
 fn parse_num(s: &str) -> Option<(usize, bool)> {
     let s = s.trim();
     let positive = (s.chars().next()? != '-');

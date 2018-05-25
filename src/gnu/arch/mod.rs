@@ -24,8 +24,7 @@ where
     T: Iterator<Item = U>,
     U: Into<OsString> + Clone,
 {
-    let mut app = util_app!("arch");
-    let _ = get_matches!(setup, app, args);
+    let _ = util_app!("arch", setup).get_matches_from_safe_borrow(args)?;
 
     writeln!(setup.stdout, "{}", PlatformInfo::new()?.machine().trim())?;
 

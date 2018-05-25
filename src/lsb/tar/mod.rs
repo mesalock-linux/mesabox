@@ -190,7 +190,8 @@ where
     U: Into<OsString> + Clone,
 {
     // TODO: figure out how to support bundled syntax
-    let mut app = util_app!("tar")
+    let matches = {
+        let app = util_app!("tar", setup)
                     // operations
                     .group(ArgGroup::with_name("mode")
                             .args(&["create", "append", "list", "update", "extract"])
@@ -274,13 +275,14 @@ where
                             .help("use lzop for compression/decompression"))
                     .arg(Arg::with_name("format")
                             .long("format")
-                            // XXX: posix only works for read i believe (which unfortunately are the ones that don't this specified)
+                            // XXX: posix only works for read i believe (even though this for writing)
                             .conflicts_with_all(&["list", "extract"])
                             .possible_values(&["gnu", "v7", "ustar", "posix"])
                             .help("Use the specified format for the archive"))
                     .arg(Arg::with_name("FILES | PATTERNS").index(1).multiple(true));
 
-    let matches = get_matches!(setup, app, args);
+        app.get_matches_from_safe(args)?
+    };
 
     let mut options = Options::default();
 
