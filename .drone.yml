@@ -9,4 +9,4 @@ pipeline:
 matrix:
   RUST_VERSION:
     - 1.26
-    - nightly
+    - latest
