@@ -14,6 +14,7 @@ use std::collections::VecDeque;
 use std::ffi::{OsString, OsStr};
 use std::fs::File;
 use std::io::{self, BufReader, BufRead, Read, Write};
+use std::iter;
 use std::mem;
 use std::result::Result as StdResult;
 use std::path::Path;
@@ -44,7 +45,7 @@ struct Options {
     previous_printed: bool,
 }
 
-pub fn execute<I, O, E, T, U>(setup: &mut UtilSetup<I, O, E>, args: T) -> Result<()>
+pub fn execute<I, O, E, T, U>(setup: &mut UtilSetup<I, O, E>, mut args: T) -> Result<()>
 where
     I: for<'a> UtilRead<'a>,
     O: for<'a> UtilWrite<'a>,
@@ -52,7 +53,8 @@ where
     T: Iterator<Item = U>,
     U: Into<OsString> + Clone,
 {
-    // TODO: check for obsolete arg style (e.g. head -5 file)
+    let mut default_lines = 10;
+
     let matches = {
         let app = util_app!("head", setup)
                     .setting(AppSettings::AllowLeadingHyphen)
@@ -88,7 +90,16 @@ where
                             .index(1)
                             .multiple(true));
     
-        app.get_matches_from_safe(args)?
+        let res = check_obsolete(&mut args);
+        match res {
+            Ok((progname, num)) => {
+                default_lines = num;
+                app.get_matches_from_safe(iter::once(progname).chain(args))?
+            }
+            Err(already_found) => {
+                app.get_matches_from_safe(already_found.into_iter().chain(args))?
+            }
+        }
     };
 
     let verbose = matches.is_present("verbose");
@@ -102,8 +113,9 @@ where
         let num = parse_num(matches.value_of("lines").unwrap()).unwrap();
         Mode::Lines(num)
     } else {
-        // just dump the first ten lines
-        Mode::Lines((10, true))
+        // just dump the first ten lines (or, if using the obsolete syntax, the number specified
+        // using that)
+        Mode::Lines((default_lines, true))
     };
 
     let mut options = Options {
@@ -328,5 +340,37 @@ fn is_valid_num(val: &OsStr) -> StdResult<(), OsString> {
         Ok(())
     } else {
         Err(OsString::from(format!("'{}' is not a number or is too large", val.to_string_lossy())))
+    }
+}
+
+// checks for the form -num[suffix] where suffix is one of [b, k, kb, m, mb]
+// this form is equivalent to -n num[suffix] (with the suffix translated to the modern style)
+fn check_obsolete<T, U>(args: &mut T) -> StdResult<(U, usize), Vec<U>>
+where
+    T: Iterator<Item = U>,
+    U: Into<OsString> + Clone,
+{
+    let progname = if let Some(progname) = args.next() {
+        progname
+    } else {
+        return Err(vec![]);
+    };
+
+    if let Some(val) = args.next() {
+        let backup = val.clone();
+        let val = val.into();
+        if let Some(val) = val.to_str() {
+            if val.starts_with("-") && val.len() > 1 {
+                let mut numstr = val.chars();
+                let _ = numstr.next();
+                let numstr = numstr.as_str();
+                if let Some(num) = util::parse_obsolete_num(numstr) {
+                    return Ok((progname, num))
+                }
+            }
+        }
+        Err(vec![progname, backup])
+    } else {
+        Err(vec![progname])
     }
 }

@@ -18,6 +18,7 @@ use std::str::FromStr;
 
 // defined out here rather than in parse_num_with_suffix() because we need the array for testing
 const SUFFIXES: [char; 8] = ['K', 'M', 'G', 'T', 'P', 'E', 'Z', 'Y'];
+const OBSOLETE_SUFFIXES: [char; 2] = ['k', 'm'];
 
 #[allow(dead_code)]
 pub(crate) fn set_exitcode<T, E: StdError + Send + Sync + 'static>(
@@ -52,40 +53,50 @@ where
 }
 
 pub fn parse_num_with_suffix(s: &str) -> Option<usize> {
+    parse_num_common(s, &SUFFIXES, false)
+}
+
+pub fn parse_obsolete_num(s: &str) -> Option<usize> {
+    parse_num_common(s, &OBSOLETE_SUFFIXES, true)
+}
+
+fn parse_num_common(s: &str, suffixes: &[char], obsolete: bool) -> Option<usize> {
     let mut chars = s.chars();
     let mut found_si = false;
     let mut base = 1;
     let mut power = 1;
-    {
-        loop {
-            let ch = chars.clone().rev().next()?;
-            let mut rchars = (&mut chars).rev();
-            match ch {
-                'b' if !found_si => {
-                    // special case this one because it's slightly different
-                    base = 512;
-                    let _ = rchars.next();
-                    break;
-                }
-                'B' if !found_si => {
-                    let _ = rchars.next();
+    loop {
+        let ch = chars.clone().rev().next()?;
+        let mut rchars = (&mut chars).rev();
+        match ch {
+            'b' if !found_si => {
+                // special case this one because it's slightly different
+                base = 512;
+                let _ = rchars.next();
+                if obsolete {
                     found_si = true;
-                }
-                _ => {
-                    for (i, &suffix) in SUFFIXES.iter().enumerate() {
-                        if suffix == ch {
-                            base = if found_si {
-                                1000
-                            } else {
-                                1024
-                            };
-                            power = i as u32 + 1;
-                            let _ = rchars.next();
-                            break;
-                        }
-                    }
+                } else {
                     break;
                 }
+            }
+            'B' if !found_si && !obsolete => {
+                let _ = rchars.next();
+                found_si = true;
+            }
+            _ => {
+                for (i, &suffix) in suffixes.iter().enumerate() {
+                    if suffix == ch {
+                        base = if found_si {
+                            1000
+                        } else {
+                            1024
+                        };
+                        power = i as u32 + 1;
+                        let _ = rchars.next();
+                        break;
+                    }
+                }
+                break;
             }
         }
     }
