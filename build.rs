@@ -10,7 +10,7 @@ extern crate rustc_version;
 
 use std::collections::HashMap;
 use std::env;
-use std::fs::{self, File};
+use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::Path;
 
@@ -27,7 +27,9 @@ fn create_util_map() -> HashMap<&'static str, &'static str> {
     hashmap.insert("ping", "networking");
 
     hashmap.insert("cat", "posix");
+    hashmap.insert("chmod", "posix");
     hashmap.insert("head", "posix");
+    //hashmap.insert("init", "posix");
     hashmap.insert("sleep", "posix");
 
     hashmap

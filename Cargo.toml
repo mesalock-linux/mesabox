@@ -29,11 +29,15 @@ networking = [
 ]
 
 cat = []
+chmod = []
 head = []
+#init = []
 sleep = []
 posix = [
     "cat",
+    "chmod",
     "head",
+#    "init",
     "sleep"
 ]
 
@@ -45,7 +49,7 @@ failure = "0.1.1"
 failure_derive = "0.1.1"
 libc = "0.2.40"
 platform-info = { git = "https://github.com/uutils/platform-info" }
-uucore = { git = "https://github.com/Arcterus/coreutils", branch = "bytes", features = ["encoding", "mode", "parse_time"] }
+uucore = { git = "https://github.com/uutils/coreutils", features = ["encoding", "fs", "mode", "parse_time"] }
 tar = "0.4.15"
 globset = "0.4.0"
 nix = "0.10.0"
@@ -56,6 +60,7 @@ byteorder = "1.2.3"
 trust-dns-resolver = "0.9.0"
 mio = "0.6.14"
 socket2 = "0.3.5"
+walkdir = "2.1.4"
 
 [build-dependencies]
 rustc_version = "0.2.2"

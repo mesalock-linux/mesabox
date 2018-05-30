@@ -22,6 +22,7 @@ extern crate mio;
 extern crate trust_dns_resolver;
 extern crate socket2;
 extern crate uucore;
+extern crate walkdir;
 
 use clap::{App, SubCommand};
 use failure::{Error, Fail};
@@ -39,7 +40,9 @@ use std::path::Path;
 pub(crate) use util::*;
 
 #[macro_use]
+#[allow(unused_macros)]
 mod macros;
+#[allow(dead_code)]
 mod util;
 
 // contains all the "mod"s which allow us to use the utils

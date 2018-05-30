@@ -20,7 +20,6 @@ use std::str::FromStr;
 const SUFFIXES: [char; 8] = ['K', 'M', 'G', 'T', 'P', 'E', 'Z', 'Y'];
 const OBSOLETE_SUFFIXES: [char; 2] = ['k', 'm'];
 
-#[allow(dead_code)]
 pub(crate) fn set_exitcode<T, E: StdError + Send + Sync + 'static>(
     error: StdResult<T, E>,
     code: libc::c_int,

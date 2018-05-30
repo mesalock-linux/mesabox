@@ -30,3 +30,15 @@ macro_rules! display_msg {
         writeln!($stream, "{}: {}", self::NAME, format_args!($($args)+))
     }
 }
+
+macro_rules! display_err {
+    ($stream:expr, $($args:tt)+) => {
+        display_msg!($stream, "error: {}", format_args!($($args)+))
+    }
+}
+
+macro_rules! display_warn {
+    ($stream:expr, $($args:tt)+) => {
+        display_msg!($stream, "warning: {}", format_args!($($args)+))
+    }
+}
