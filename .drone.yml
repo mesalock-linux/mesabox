@@ -1,6 +1,6 @@
 pipeline:
   build:
-    image: rust:${RUST_VERSION}
+    image: ${RUST_VERSION}
     commands:
       - rustup show
       - cargo build
@@ -8,6 +8,6 @@ pipeline:
 
 matrix:
   RUST_VERSION:
-    - 1.26
-    - latest
+    - rust:1.26
+    - rust:latest
     - rustlang/rust:nightly
