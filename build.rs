@@ -69,6 +69,18 @@ fn main() {
         }
     }
 
+    writeln!(output, "pub fn dump_commands<I, O, E>(setup: &mut UtilSetup<I, O, E>) -> Result<()>
+where
+    I: for<'a> UtilRead<'a>,
+    O: for<'a> UtilWrite<'a>,
+    E: for<'a> UtilWrite<'a>,
+{{
+    let mut stdout = setup.stdout.lock_writer()?;").unwrap();
+    for util in &utils {
+        writeln!(output, "writeln!(stdout, {:?})?;", util).unwrap();
+    }
+    writeln!(output, "Ok(())\n}}").unwrap();
+
     let app_path = Path::new(&outdir).join("generate_app.rs");
     let app_file = File::create(app_path).expect("could not open generate_app.rs for writing");
     let mut app_output = BufWriter::new(app_file);
@@ -76,6 +88,7 @@ fn main() {
     for util in &utils {
         write!(app_output, ".subcommand(SubCommand::with_name({:?}).about({0}::DESCRIPTION))", util).unwrap();
     }
+    write!(app_output, ".subcommand(SubCommand::with_name(\"dump-cmds\").about(\"Print a list of commands in the binary\"))").unwrap();
 
     let exec_path = Path::new(&outdir).join("execute_utils.rs");
     let exec_file = File::create(exec_path).expect("could not open execute_utils.rs for writing");
@@ -89,5 +102,5 @@ fn main() {
             util
         ).unwrap();
     }
-    write!(exec_output, "{{ None }}").unwrap();
+    write!(exec_output, "if name == \"dump-cmds\" {{ Some(dump_commands(setup)) }} else {{ None }}").unwrap();
 }
