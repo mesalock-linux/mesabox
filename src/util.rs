@@ -1,7 +1,7 @@
 //
 // Copyright (c) 2018, The MesaLock Linux Project Contributors
 // All rights reserved.
-// 
+//
 // This work is licensed under the terms of the BSD 3-Clause License.
 // For a copy, see the LICENSE file.
 //
@@ -11,9 +11,9 @@ use super::{MesaError, Result};
 use failure;
 use libc;
 use std::error::Error as StdError;
-use std::result::Result as StdResult;
-use std::path::Path;
 use std::os::unix::io::AsRawFd;
+use std::path::Path;
+use std::result::Result as StdResult;
 use std::str::FromStr;
 
 // defined out here rather than in parse_num_with_suffix() because we need the array for testing
@@ -32,9 +32,7 @@ pub(crate) fn set_exitcode<T, E: StdError + Send + Sync + 'static>(
 }
 
 pub(crate) fn string_to_err<T>(error: StdResult<T, String>) -> Result<T> {
-    error.map_err(|e| {
-        failure::err_msg(e).compat().into()
-    })
+    error.map_err(|e| failure::err_msg(e).compat().into())
 }
 
 pub(crate) fn is_tty<T: AsRawFd>(stream: &T) -> bool {
@@ -85,11 +83,7 @@ fn parse_num_common(s: &str, suffixes: &[char], obsolete: bool) -> Option<usize>
             _ => {
                 for (i, &suffix) in suffixes.iter().enumerate() {
                     if suffix == ch {
-                        base = if found_si {
-                            1000
-                        } else {
-                            1024
-                        };
+                        base = if found_si { 1000 } else { 1024 };
                         power = i as u32 + 1;
                         let _ = rchars.next();
                         break;
@@ -100,7 +94,9 @@ fn parse_num_common(s: &str, suffixes: &[char], obsolete: bool) -> Option<usize>
         }
     }
 
-    usize::from_str(chars.as_str()).ok()?.checked_mul(pow(base, power)?)
+    usize::from_str(chars.as_str())
+        .ok()?
+        .checked_mul(pow(base, power)?)
 }
 
 // usize::pow() can panic, and the versions that don't panic are not yet stable
@@ -124,15 +120,7 @@ fn pow(mut base: usize, mut exp: u32) -> Option<usize> {
 
 #[test]
 fn parse_num_invalid() {
-    let strings = [
-        "  1",
-        "1  ",
-        "  1  ",
-        "1X",
-        "b",
-        "1 b",
-        "-1",
-    ];
+    let strings = ["  1", "1  ", "  1  ", "1X", "b", "1 b", "-1"];
     for s in strings.iter() {
         assert_eq!(parse_num_with_suffix(s), None);
     }
@@ -146,16 +134,15 @@ fn parse_num_invalid() {
         // TODO: add tests ensuring too large values fail as well
     }
 
-    assert_eq!(parse_num_with_suffix(&format!("{}1", usize::max_value())), None);
+    assert_eq!(
+        parse_num_with_suffix(&format!("{}1", usize::max_value())),
+        None
+    );
 }
 
 #[test]
 fn parse_num_valid() {
-    let strings = [
-        ("0", 0),
-        ("1", 1),
-        ("1b", 512),
-    ];
+    let strings = [("0", 0), ("1", 1), ("1b", 512)];
     for s in strings.iter() {
         assert_eq!(parse_num_with_suffix(s.0), Some(s.1));
     }
@@ -163,13 +150,22 @@ fn parse_num_valid() {
     for (i, suffix) in SUFFIXES.iter().enumerate() {
         let exp = i as u32 + 1;
 
-        assert_eq!(parse_num_with_suffix(&format!("1{}", suffix)), pow(1024, exp));
-        assert_eq!(parse_num_with_suffix(&format!("1{}B", suffix)), pow(1000, exp));
+        assert_eq!(
+            parse_num_with_suffix(&format!("1{}", suffix)),
+            pow(1024, exp)
+        );
+        assert_eq!(
+            parse_num_with_suffix(&format!("1{}B", suffix)),
+            pow(1000, exp)
+        );
 
         // TODO: add tests ensuring values that are almost too large pass
     }
 
-    assert_eq!(parse_num_with_suffix(&format!("{}", usize::max_value())), Some(usize::max_value()));
+    assert_eq!(
+        parse_num_with_suffix(&format!("{}", usize::max_value())),
+        Some(usize::max_value())
+    );
 }
 
 #[test]

@@ -1,0 +1,5 @@
+id:2:initdefault:
+
+si::sysinit:/etc/init.sh
+
+2:2:respawn:/bin/mgetty

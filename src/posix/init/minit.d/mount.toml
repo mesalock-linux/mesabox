@@ -1,0 +1,18 @@
+
+
+
+
+
+
+
+
+# systemd style below
+[Unit]
+Description=Mount core filesystems
+
+[Service]
+Type=oneshot
+ExecStart=/etc/minit.d/scripts/mount.sh
+
+[Install]
+WantedBy=____all___ (dunno what the actual name would be)

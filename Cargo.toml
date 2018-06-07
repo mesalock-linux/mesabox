@@ -31,13 +31,13 @@ networking = [
 cat = []
 chmod = []
 head = []
-#init = []
+init = []
 sleep = []
 posix = [
     "cat",
     "chmod",
     "head",
-#    "init",
+    "init",
     "sleep"
 ]
 
@@ -61,6 +61,7 @@ trust-dns-resolver = "0.9.0"
 mio = "0.6.14"
 socket2 = "0.3.5"
 walkdir = "2.1.4"
+fnv = "1.0.6"
 
 [build-dependencies]
 rustc_version = "0.2.2"

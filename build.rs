@@ -1,7 +1,7 @@
 //
 // Copyright (c) 2018, The MesaLock Linux Project Contributors
 // All rights reserved.
-// 
+//
 // This work is licensed under the terms of the BSD 3-Clause License.
 // For a copy, see the LICENSE file.
 //
@@ -29,7 +29,7 @@ fn create_util_map() -> HashMap<&'static str, &'static str> {
     hashmap.insert("cat", "posix");
     hashmap.insert("chmod", "posix");
     hashmap.insert("head", "posix");
-    //hashmap.insert("init", "posix");
+    hashmap.insert("init", "posix");
     hashmap.insert("sleep", "posix");
 
     hashmap
@@ -52,30 +52,31 @@ fn main() {
     let mut utils = vec![];
 
     for &util in util_map.keys() {
-        let util = if util == "tar" {
-            "tar_util"
-        } else {
-            util
-        };
+        let util = if util == "tar" { "tar_util" } else { util };
         if env::var_os(format!("CARGO_FEATURE_{}", util.to_uppercase())).is_some() {
-            let util = if util == "tar_util" {
-                "tar"
-            } else {
+            let util = if util == "tar_util" { "tar" } else { util };
+            writeln!(
+                output,
+                "#[path = \"{}/src/{}/{}/mod.rs\"]",
+                manifest_dir,
+                util_map.get(util).unwrap(),
                 util
-            };
-            writeln!(output, "#[path = \"{}/src/{}/{}/mod.rs\"]", manifest_dir, util_map.get(util).unwrap(), util).unwrap();
+            ).unwrap();
             writeln!(output, "mod {};", util).unwrap();
             utils.push(util);
         }
     }
 
-    writeln!(output, "pub fn dump_commands<I, O, E>(setup: &mut UtilSetup<I, O, E>) -> Result<()>
+    writeln!(
+        output,
+        "pub fn dump_commands<I, O, E>(setup: &mut UtilSetup<I, O, E>) -> Result<()>
 where
     I: for<'a> UtilRead<'a>,
     O: for<'a> UtilWrite<'a>,
     E: for<'a> UtilWrite<'a>,
 {{
-    let mut stdout = setup.stdout.lock_writer()?;").unwrap();
+    let mut stdout = setup.stdout.lock_writer()?;"
+    ).unwrap();
     for util in &utils {
         writeln!(output, "writeln!(stdout, {:?})?;", util).unwrap();
     }
@@ -86,7 +87,11 @@ where
     let mut app_output = BufWriter::new(app_file);
     write!(app_output, "app_from_crate!()").unwrap();
     for util in &utils {
-        write!(app_output, ".subcommand(SubCommand::with_name({:?}).about({0}::DESCRIPTION))", util).unwrap();
+        write!(
+            app_output,
+            ".subcommand(SubCommand::with_name({:?}).about({0}::DESCRIPTION))",
+            util
+        ).unwrap();
     }
     write!(app_output, ".subcommand(SubCommand::with_name(\"dump-cmds\").about(\"Print a list of commands in the binary\"))").unwrap();
 
@@ -102,5 +107,8 @@ where
             util
         ).unwrap();
     }
-    write!(exec_output, "if name == \"dump-cmds\" {{ Some(dump_commands(setup)) }} else {{ None }}").unwrap();
+    write!(
+        exec_output,
+        "if name == \"dump-cmds\" {{ Some(dump_commands(setup)) }} else {{ None }}"
+    ).unwrap();
 }

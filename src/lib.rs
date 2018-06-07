@@ -1,7 +1,7 @@
 //
 // Copyright (c) 2018, The MesaLock Linux Project Contributors
 // All rights reserved.
-// 
+//
 // This work is licensed under the terms of the BSD 3-Clause License.
 // For a copy, see the LICENSE file.
 //
@@ -11,16 +11,17 @@ extern crate clap;
 extern crate failure;
 #[macro_use]
 extern crate failure_derive;
-extern crate globset;
-extern crate libc;
-extern crate nix;
+extern crate byteorder;
 extern crate chrono;
 extern crate crossbeam;
-extern crate pnet;
-extern crate byteorder;
+extern crate fnv;
+extern crate globset;
+extern crate libc;
 extern crate mio;
-extern crate trust_dns_resolver;
+extern crate nix;
+extern crate pnet;
 extern crate socket2;
+extern crate trust_dns_resolver;
 extern crate uucore;
 extern crate walkdir;
 
@@ -28,14 +29,14 @@ use clap::{App, SubCommand};
 use failure::{Error, Fail};
 use libc::EXIT_FAILURE;
 use std::convert::From;
-use std::result::Result as StdResult;
 use std::ffi::{OsStr, OsString};
 use std::fmt::{self, Display};
 use std::fs::File;
-use std::io::{self, BufReader, BufWriter, BufRead, Read, Write};
+use std::io::{self, BufRead, BufReader, BufWriter, Read, Write};
 use std::iter;
 use std::os::unix::io::AsRawFd;
 use std::path::Path;
+use std::result::Result as StdResult;
 
 pub(crate) use util::*;
 
@@ -83,7 +84,9 @@ impl<E: Fail + Send + Sync + 'static> From<E> for MesaError {
 impl Display for MesaError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match (&self.progname, &self.err) {
-            (Some(ref progname), Some(ref err)) => write!(f, "{}: {}", progname.to_string_lossy(), err),
+            (Some(ref progname), Some(ref err)) => {
+                write!(f, "{}: {}", progname.to_string_lossy(), err)
+            }
             (None, Some(ref err)) => err.fmt(f),
             _ => Ok(()),
         }
@@ -210,13 +213,16 @@ where
 
     // assume that we are using symlinks first (i.e. "command args" format).  if not, check for
     // "mesabox command args" format
-    let res = start(setup, &mut args).or_else(|| start(setup, args)).or_else(|| {
-        // no valid util was found, so just display a help menu
-        let _ = generate_app().write_help(&mut setup.stderr);
-        let _ = writeln!(setup.stderr);
+    let res = start(setup, &mut args)
+        .or_else(|| start(setup, args))
+        .or_else(|| {
+            // no valid util was found, so just display a help menu
+            let _ = generate_app().write_help(&mut setup.stderr);
+            let _ = writeln!(setup.stderr);
 
-        Some(Err(MesaError::new(None, EXIT_FAILURE, None)))
-    }).unwrap();
+            Some(Err(MesaError::new(None, EXIT_FAILURE, None)))
+        })
+        .unwrap();
 
     let _ = setup.stdout.flush();
     let _ = setup.stderr.flush();
@@ -236,16 +242,14 @@ where
         if let Some(filename) = Path::new(&progname.clone().into()).file_name() {
             // we pass along the args in case the util requires non-standard argument
             // parsing (e.g. dd)
-            return execute_util(
-                setup,
-                filename,
-                iter::once(progname).chain(args),
-            ).map(|res| {
+            return execute_util(setup, filename, iter::once(progname).chain(args)).map(|res| {
                 // XXX: note that this currently is useless as we are temporarily overriding -V and --help
                 res.or_else(|mut mesa_err| {
                     if let Some(ref e) = mesa_err.err {
                         if let Some(clap_err) = e.downcast_ref::<clap::Error>() {
-                            if clap_err.kind == clap::ErrorKind::HelpDisplayed || clap_err.kind == clap::ErrorKind::VersionDisplayed {
+                            if clap_err.kind == clap::ErrorKind::HelpDisplayed
+                                || clap_err.kind == clap::ErrorKind::VersionDisplayed
+                            {
                                 write!(setup.stdout, "{}", clap_err)?;
                                 return Ok(());
                             }
