@@ -1,0 +1,29 @@
+MesaBox
+=======
+
+[![Build Status](https://ci.mesalock-linux.org/api/badges/mesalock-linux/mesabox/status.svg?branch=master)](https://ci.mesalock-linux.org/mesalock-linux/mesabox)
+[![License](https://img.shields.io/badge/license-BSD-blue.svg)](LICENSE)
+
+MesaBox is a collection of core system utilities written in Rust for Unix-like
+systems.  
+
+Like the well-known [BusyBox][] and [Toybox][] sets of utilities popular on
+embedded devices, MesaBox seeks to provide a fully functioning command-line
+environment (unlike [uutils][], which just seeks to reimplement the GNU
+coreutils).
+
+Maintainer
+----------
+
+  - Alex Lyon `<alexlyon@baidu.com>` [@Arcterus](https://github.com/Arcterus)
+  - Mingshen Sun `<mssun@mesalock-linux.org>` [@mssun](https://github.com/mssun)
+
+[BusyBox]: https://busybox.net/about
+[Toybox]: https://landley.net/toybox/about.html
+[uutils]: https://github.com/uutils/coreutils
+
+License
+-------
+
+MesaBox is provided under the 3-Clause BSD license (please see LICENSE for more
+details).
