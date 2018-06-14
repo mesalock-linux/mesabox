@@ -20,6 +20,7 @@ extern crate libc;
 extern crate mio;
 extern crate nix;
 extern crate pnet;
+extern crate regex;
 extern crate socket2;
 extern crate trust_dns_resolver;
 extern crate uucore;
@@ -34,8 +35,8 @@ use std::fmt::{self, Display};
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, BufWriter, Read, Write};
 use std::iter;
-use std::os::unix::io::AsRawFd;
-use std::path::Path;
+use std::os::unix::io::{AsRawFd, RawFd};
+use std::path::{Path, PathBuf};
 use std::result::Result as StdResult;
 
 pub(crate) use util::*;
@@ -108,6 +109,8 @@ where
     pub stdin: I,
     pub stdout: O,
     pub stderr: E,
+    pub env: Box<Iterator<Item = (OsString, OsString)>>,
+    pub current_dir: Option<PathBuf>,
 }
 
 impl<I, O, E> UtilSetup<I, O, E>
@@ -116,33 +119,93 @@ where
     O: for<'a> UtilWrite<'a>,
     E: for<'a> UtilWrite<'a>,
 {
-    pub fn new(stdin: I, stdout: O, stderr: E) -> Self {
+    pub fn new(
+        stdin: I,
+        stdout: O,
+        stderr: E,
+        env: Box<Iterator<Item = (OsString, OsString)>>,
+        current_dir: Option<PathBuf>,
+    ) -> Self {
         Self {
             stdin: stdin,
             stdout: stdout,
             stderr: stderr,
+            env: env,
+            current_dir: current_dir,
         }
     }
 }
 
-pub trait UtilRead<'a>: Read + AsRawFd + Send + Sync {
+pub trait UtilRead<'a>: Read + Send + Sync {
     type Lock: BufRead + 'a;
 
     fn lock_reader<'b: 'a>(&'b mut self) -> StdResult<Self::Lock, LockError>;
+
+    fn raw_fd(&self) -> Option<RawFd> {
+        None
+    }
 }
-pub trait UtilWrite<'a>: Write + AsRawFd + Send + Sync {
+pub trait UtilWrite<'a>: Write + Send + Sync {
     type Lock: Write + 'a;
 
     fn lock_writer<'b: 'a>(&'b mut self) -> StdResult<Self::Lock, LockError>;
+
+    fn raw_fd(&self) -> Option<RawFd> {
+        None
+    }
+}
+
+impl<'a, 'b, T: UtilRead<'a>> UtilRead<'a> for &'b mut T {
+    type Lock = T::Lock;
+
+    fn lock_reader<'c: 'a>(&'c mut self) -> StdResult<Self::Lock, LockError> {
+        (**self).lock_reader()
+    }
+
+    fn raw_fd(&self) -> Option<RawFd> {
+        (**self).raw_fd()
+    }
+}
+
+impl<'a, 'b, T: UtilWrite<'a>> UtilWrite<'a> for &'b mut T {
+    type Lock = T::Lock;
+
+    fn lock_writer<'c: 'a>(&'c mut self) -> StdResult<Self::Lock, LockError> {
+        (**self).lock_writer()
+    }
+
+    fn raw_fd(&self) -> Option<RawFd> {
+        (**self).raw_fd()
+    }
 }
 
 // TODO: implement for other common things like File, BufReader, etc.
+
+impl<'a, 'b> UtilRead<'a> for &'b [u8] {
+    type Lock = &'a [u8];
+
+    fn lock_reader<'c: 'a>(&'c mut self) -> StdResult<Self::Lock, LockError> {
+        Ok(self)
+    }
+}
+
+impl<'a> UtilWrite<'a> for Vec<u8> {
+    type Lock = &'a mut Self;
+
+    fn lock_writer<'b: 'a>(&'b mut self) -> StdResult<Self::Lock, LockError> {
+        Ok(self)
+    }
+}
 
 impl<'a> UtilRead<'a> for File {
     type Lock = BufReader<&'a mut Self>;
 
     fn lock_reader<'b: 'a>(&'b mut self) -> StdResult<Self::Lock, LockError> {
         Ok(BufReader::new(self))
+    }
+
+    fn raw_fd(&self) -> Option<RawFd> {
+        Some(self.as_raw_fd())
     }
 }
 
@@ -152,6 +215,10 @@ impl<'a> UtilRead<'a> for io::Stdin {
     fn lock_reader<'b: 'a>(&'b mut self) -> StdResult<Self::Lock, LockError> {
         Ok(self.lock())
     }
+
+    fn raw_fd(&self) -> Option<RawFd> {
+        Some(self.as_raw_fd())
+    }
 }
 
 impl<'a> UtilWrite<'a> for File {
@@ -159,6 +226,10 @@ impl<'a> UtilWrite<'a> for File {
 
     fn lock_writer<'b: 'a>(&'b mut self) -> StdResult<Self::Lock, LockError> {
         Ok(BufWriter::new(self))
+    }
+
+    fn raw_fd(&self) -> Option<RawFd> {
+        Some(self.as_raw_fd())
     }
 }
 
@@ -168,6 +239,10 @@ impl<'a> UtilWrite<'a> for io::Stdout {
     fn lock_writer<'b: 'a>(&'b mut self) -> StdResult<Self::Lock, LockError> {
         Ok(self.lock())
     }
+
+    fn raw_fd(&self) -> Option<RawFd> {
+        Some(self.as_raw_fd())
+    }
 }
 
 impl<'a> UtilWrite<'a> for io::Stderr {
@@ -175,6 +250,10 @@ impl<'a> UtilWrite<'a> for io::Stderr {
 
     fn lock_writer<'b: 'a>(&'b mut self) -> StdResult<Self::Lock, LockError> {
         Ok(self.lock())
+    }
+
+    fn raw_fd(&self) -> Option<RawFd> {
+        Some(self.as_raw_fd())
     }
 }
 

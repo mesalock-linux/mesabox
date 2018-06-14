@@ -140,7 +140,8 @@ where
                 let filename = filename.map(|_| OsStr::new("standard input"));
                 handle_stdin(&mut output, &mut setup.stdin, filename, &mut options)
             } else {
-                handle_file(&mut output, file, filename, &mut options)
+                let path = util::actual_path(&setup.current_dir, file);
+                handle_file(&mut output, &path, filename, &mut options)
             };
 
             if let Err(mut e) = res {
@@ -170,7 +171,7 @@ where
     handle_data(output, stdin, filename, options)
 }
 
-fn handle_file<O: Write>(output: O, filename: &OsStr, disp_filename: Option<&OsStr>, options: &mut Options) -> Result<()> {
+fn handle_file<O: Write>(output: O, filename: &Path, disp_filename: Option<&OsStr>, options: &mut Options) -> Result<()> {
     let file = File::open(filename)?;
     let reader = BufReader::new(file);
     handle_data(output, reader, disp_filename, options)

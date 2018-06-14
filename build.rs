@@ -6,8 +6,6 @@
 // For a copy, see the LICENSE file.
 //
 
-extern crate rustc_version;
-
 use std::collections::HashMap;
 use std::env;
 use std::fs::File;
@@ -49,6 +47,11 @@ fn main() {
     let file = File::create(output_path).expect("could not open utils.rs for writing");
     let mut output = BufWriter::new(file);
 
+    let output_path = Path::new(&outdir).join("test_utils.rs");
+
+    let file = File::create(output_path).expect("could not open test_utils.rs for writing");
+    let mut test_output = BufWriter::new(file);
+
     let mut utils = vec![];
 
     for &util in util_map.keys() {
@@ -63,6 +66,16 @@ fn main() {
                 util
             ).unwrap();
             writeln!(output, "mod {};", util).unwrap();
+
+            writeln!(
+                test_output,
+                "#[path = \"{}/tests/{}/test_{}.rs\"]",
+                manifest_dir,
+                util_map.get(util).unwrap(),
+                util
+            ).unwrap();
+            writeln!(test_output, "mod test_{};", util).unwrap();
+
             utils.push(util);
         }
     }

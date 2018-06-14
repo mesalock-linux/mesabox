@@ -9,14 +9,15 @@
 extern crate tar;
 
 use super::{/*ArgsIter, */UtilSetup, Result, UtilRead, UtilWrite};
+use util;
 
 use clap::{Arg, ArgGroup, OsValues};
 use globset::{GlobSetBuilder, Glob};
 //use regex::bytes::RegexSet;
-use std::ffi::{OsString, OsStr};
+use std::ffi::OsString;
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Read};
-use std::path::Path;
+use std::path::PathBuf;
 
 pub(crate) const NAME: &str = "tar";
 pub(crate) const DESCRIPTION: &str = "Manage archives using the tar format";
@@ -74,7 +75,7 @@ struct Options<'a> {
     pub mode: Mode,
     pub compression: Compression,
     pub format: ArchiveFormat,
-    pub file: Option<&'a OsStr>,
+    pub file: Option<PathBuf>,
 
     // extra parameters passed to the command
     pub values: Option<OsValues<'a>>,
@@ -105,7 +106,7 @@ where
 
     pub fn create_archive(&mut self) -> Result<()> {
         // this is fine because -c requires -f
-        let path = Path::new(self.options.file.unwrap());
+        let path = self.options.file.as_ref().unwrap();
         let file = File::create(path)?;
 
         let mut builder = tar::Builder::new(BufWriter::new(file));
@@ -136,7 +137,7 @@ where
 
     pub fn list_contents(&mut self) -> Result<()> {
         match self.options.file {
-            Some(filepath) => {
+            Some(ref filepath) => {
                 let file = File::open(filepath)?;
                 let archive = tar::Archive::new(BufReader::new(file));
                 Self::list_contents_helper(&mut self.setup.stdout, &mut self.options.values, archive)
@@ -286,7 +287,7 @@ where
 
     let mut options = Options::default();
 
-    options.file = matches.value_of_os("file");
+    options.file = matches.value_of_os("file").map(|name| util::actual_path(&setup.current_dir, name));
 
     options.mode = if matches.is_present("create") {
         Mode::Create

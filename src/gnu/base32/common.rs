@@ -35,6 +35,7 @@
 //
 
 use ::{Result, UtilRead, UtilWrite, UtilSetup};
+use util;
 
 use clap::Arg;
 use uucore::encoding::{self, Data, Format};
@@ -102,7 +103,8 @@ where
     let output = setup.stdout.lock_writer()?;
     match matches.value_of_os("FILE") {
         Some(filename) if filename != OsStr::new("-") => {
-            let file = File::open(filename)?;
+            let path = util::actual_path(&setup.current_dir, filename);
+            let file = File::open(path)?;
             handle_data(output, BufReader::new(file), options)
         }
         _ => {

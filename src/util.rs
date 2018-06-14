@@ -11,8 +11,8 @@ use super::{MesaError, Result};
 use failure;
 use libc;
 use std::error::Error as StdError;
-use std::os::unix::io::AsRawFd;
-use std::path::Path;
+use std::os::unix::io::RawFd;
+use std::path::{Path, PathBuf};
 use std::result::Result as StdResult;
 use std::str::FromStr;
 
@@ -35,8 +35,10 @@ pub(crate) fn string_to_err<T>(error: StdResult<T, String>) -> Result<T> {
     error.map_err(|e| failure::err_msg(e).compat().into())
 }
 
-pub(crate) fn is_tty<T: AsRawFd>(stream: &T) -> bool {
-    unsafe { libc::isatty(stream.as_raw_fd()) == 1 }
+pub(crate) fn is_tty(stream: Option<RawFd>) -> bool {
+    stream
+        .map(|fd| unsafe { libc::isatty(fd) == 1 })
+        .unwrap_or(false)
 }
 
 #[allow(dead_code)]
@@ -47,6 +49,17 @@ where
 {
     // TODO: should probably loop over specified directory or something and call the function
     Ok(())
+}
+
+pub fn actual_path<D, P>(current_dir: &Option<D>, path: &P) -> PathBuf
+where
+    D: AsRef<Path>,
+    P: AsRef<Path> + ?Sized,
+{
+    match current_dir {
+        Some(dir) if !Path::new(path.as_ref()).is_absolute() => dir.as_ref().join(path),
+        _ => PathBuf::from(path.as_ref()),
+    }
 }
 
 pub fn parse_num_with_suffix(s: &str) -> Option<usize> {

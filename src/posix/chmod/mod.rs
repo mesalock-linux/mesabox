@@ -32,8 +32,10 @@
 //
 
 use super::{MesaError, UtilSetup, Result, /*ArgsIter, */UtilRead, UtilWrite};
+use util;
 
-use clap::{Arg, ArgGroup, OsValues};
+use clap::{Arg, ArgGroup, AppSettings, OsValues};
+use regex::Regex;
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io::{self, Write};
@@ -75,6 +77,7 @@ where
     let matches = {
         let app = util_app!(NAME, setup)
                     .after_help(MODE_SYNTAX)
+                    .setting(AppSettings::AllowLeadingHyphen)
                     .arg(Arg::with_name("recursive")
                             .long("recursive")
                             .short("R")
@@ -110,7 +113,6 @@ where
                     //        given by the user.  clap is also unhappy that FILES (which has an
                     //        index that occurs later than MODE) is required while MODE is not
                     .arg(Arg::with_name("MODE")
-                            .allow_hyphen_values(true)
                             .index(1)
                             .validator_os(validate_mode)
                             .required(true))
@@ -149,6 +151,7 @@ where
         cmode: matches.value_of("MODE"),
         stdout: setup.stdout.lock_writer()?,
         stderr: setup.stderr.lock_writer()?,
+        current_dir: setup.current_dir.as_ref().map(|p| p.as_path()),
     };
 
     let exitcode = chmoder.chmod(matches.values_of_os("FILES").unwrap())?;
@@ -165,31 +168,16 @@ where
 }
 
 fn validate_mode(arg: &OsStr) -> StdResult<(), OsString> {
+    let re = Regex::new("[ugoa]*([-+=]([rwxXst]*|[ugo]))+|[-+=][0-7]+|[0-7]+").expect("invalid regex");
+
     arg.to_str()
         .ok_or_else(|| "mode was not a string (must be encoded using UTF-8)".into())
         .and_then(|s| {
             let mut valid = true;
-            'outer: for mode in s.split(',') {
-                if mode.len() <= 1 {
+            for mode in s.split(',') {
+                if mode.len() <= 1 || !re.is_match(mode) {
                     valid = false;
                     break;
-                }
-                
-                let mut chars = mode.chars();
-                let first = chars.next().unwrap();
-                if !['+', '=', '-'].contains(&first) {
-                    valid = false;
-                    break;
-                }
-
-                for ch in chars {
-                    match ch {
-                        'r' | 'w' | 'x' | 'X' | 's' | 't' | 'u' | 'g' | 'o' | '0'...'7' => {}
-                        _ => {
-                            valid = false;
-                            break 'outer;
-                        }
-                    }
                 }
             }
             if valid && s.len() > 1 {
@@ -212,6 +200,7 @@ where
     cmode: Option<&'a str>,
     stdout: O,
     stderr: E,
+    current_dir: Option<&'a Path>,
 }
 
 impl<'a, O, E> Chmoder<'a, O, E>
@@ -223,7 +212,8 @@ where
         let mut r = 0;
 
         for filename in files {
-            let file = Path::new(filename);
+            let file = util::actual_path(&self.current_dir, filename);
+
             r &= if file.is_dir() && self.recursive {
                 self.chmod_dir(&file)
             } else {

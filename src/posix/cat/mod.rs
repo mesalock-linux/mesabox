@@ -40,7 +40,9 @@ use std::ffi::{OsString, OsStr};
 use std::fs::{metadata, File};
 use std::iter;
 use std::io::{self, BufRead, Read, Write};
+use std::path::Path;
 use super::{UtilSetup, /*ArgsIter, */UtilRead, UtilWrite, is_tty};
+use util;
 
 /// Unix domain socket support
 #[cfg(unix)]
@@ -184,7 +186,7 @@ struct OutputState {
 }
 
 // XXX: is ArgsIter even needed?  i think the traits it needs might satisfy the reqs anyway
-struct Cat<I, O, E>
+struct Cat<'a, I, O, E>
 where
     I: BufRead,
     O: Write,
@@ -193,20 +195,22 @@ where
     stdin: I,
     stdout: O,
     stderr: E,
+    current_dir: Option<&'a Path>,
     interactive: bool,
 }
 
-impl<I, O, E> Cat<I, O, E>
+impl<'c, I, O, E> Cat<'c, I, O, E>
 where
     I: BufRead,
     O: Write,
     E: Write,
 {
-    pub fn new(stdin: I, stdout: O, stderr: E, interactive: bool) -> Self {
+    pub fn new(stdin: I, stdout: O, stderr: E, current_dir: Option<&'c Path>, interactive: bool) -> Self {
         Self {
             stdin: stdin,
             stdout: stdout,
             stderr: stderr,
+            current_dir: current_dir,
             interactive: interactive,
         }
     }
@@ -228,7 +232,7 @@ where
         let writer = &mut self.stdout;
 
         for file in files {
-            let res = Self::open_and_exec(&file, &mut self.stdin, self.interactive, |handle| {
+            let res = Self::open_and_exec(&file, &mut self.stdin, self.current_dir, self.interactive, |handle| {
                 io::copy(handle.reader, writer).map_err(|err| {
                     CatError::Input { err: err, path: file.to_string_lossy().into_owned() }
                 })?;
@@ -285,7 +289,7 @@ where
         let mut in_buf = [0; 1024 * 31];
         // TODO: maybe pass the callback as well so it can become an FnMut and be reused?
         let writer = &mut self.stdout;
-        Self::open_and_exec(file, &mut self.stdin, self.interactive, |handle| {
+        Self::open_and_exec(file, &mut self.stdin, self.current_dir, self.interactive, |handle| {
             let mut one_blank_kept = false;
 
             // FIXME: ignores read errors
@@ -297,7 +301,7 @@ where
                 let mut pos = 0;
                 while pos < n {
                     // skip empty line_number enumerating them if needed
-                    if in_buf[pos] == '\n' as u8 {
+                    if in_buf[pos] == b'\n' {
                         if !state.at_line_start || !options.squeeze_blank || !one_blank_kept {
                             one_blank_kept = true;
                             if state.at_line_start && options.number == NumberingMode::NumberAll {
@@ -352,7 +356,7 @@ where
     /// # Arguments
     ///
     /// * `path` - `InputHandler` will wrap a reader from this file path
-    fn open_and_exec<T>(path: &OsStr, stdin: &mut I, interactive: bool, func: T) -> CatResult<()>
+    fn open_and_exec<T>(path: &OsStr, stdin: &mut I, current_dir: Option<&Path>, interactive: bool, func: T) -> CatResult<()>
     where
         T: FnOnce(InputHandle<&mut Read>) -> CatResult<()>,
     {
@@ -366,7 +370,8 @@ where
         // XXX: determine if buffering the file/socket would be of any benefit (we are already
         //      buffering manually, so I imagine the difference would be minor if there is any)
         let lossy_path = path.to_string_lossy();
-        match get_input_type(path)? {
+        let path = util::actual_path(&current_dir, path);
+        match get_input_type(&path)? {
             InputType::Directory => Err(CatError::IsDirectory(lossy_path.into_owned())),
             #[cfg(unix)]
             InputType::Socket => {
@@ -477,12 +482,12 @@ where
 {
     let can_write_fast = options.can_write_fast();
     
-    let interactive = is_tty(&setup.stdin);
+    let interactive = is_tty(setup.stdin.raw_fd());
     let stdin = setup.stdin.lock_reader()?;
     let stdout = setup.stdout.lock_writer()?;
     let stderr = setup.stderr.lock_writer()?;
 
-    let mut util = Cat::new(stdin, stdout, stderr, interactive);
+    let mut util = Cat::new(stdin, stdout, stderr, setup.current_dir.as_ref().map(|p| p.as_path()), interactive);
 
     if can_write_fast {
         util.write_fast(files)?;
@@ -501,8 +506,8 @@ where
 /// # Arguments
 ///
 /// * `path` - Path on a file system to classify metadata
-fn get_input_type(path: &OsStr) -> CatResult<InputType> {
-    if path == "-" {
+fn get_input_type(path: &Path) -> CatResult<InputType> {
+    if path == Path::new("-") {
         return Ok(InputType::StdIn);
     }
 
@@ -543,7 +548,7 @@ fn get_input_type(path: &OsStr) -> CatResult<InputType> {
 // Write all symbols till end of line or end of buffer is reached
 // Return the (number of written symbols + 1) or 0 if the end of buffer is reached
 fn write_to_end<W: Write>(in_buf: &[u8], writer: &mut W) -> CatResult<usize> {
-    Ok(match in_buf.iter().position(|c| *c == '\n' as u8) {
+    Ok(match in_buf.iter().position(|c| *c == b'\n') {
         Some(p) => {
             writer.write_all(&in_buf[..p])?;
             p + 1
@@ -556,21 +561,24 @@ fn write_to_end<W: Write>(in_buf: &[u8], writer: &mut W) -> CatResult<usize> {
 }
 
 fn write_tab_to_end<W: Write>(mut in_buf: &[u8], writer: &mut W) -> CatResult<usize> {
+    let mut count = 0;
     loop {
         match in_buf
             .iter()
-            .position(|c| *c == '\n' as u8 || *c == '\t' as u8)
+            .enumerate()
+            .find(|(_, &c)| c == b'\n' || c == b'\t')
         {
-            Some(p) => {
+            Some((p, b'\n')) => {
                 writer.write_all(&in_buf[..p])?;
-                if in_buf[p] == '\n' as u8 {
-                    return Ok(p + 1);
-                } else {
-                    writer.write_all("^I".as_bytes())?;
-                    in_buf = &in_buf[p + 1..];
-                }
+                return Ok(p + 1 + count);
             }
-            None => {
+            Some((p, b'\t')) => {
+                count += p + 1;
+                writer.write_all(&in_buf[..p])?;
+                writer.write_all("^I".as_bytes())?;
+                in_buf = &in_buf[p + 1..];
+            }
+            _ => {
                 writer.write_all(in_buf)?;
                 return Ok(0);
             }
@@ -579,11 +587,9 @@ fn write_tab_to_end<W: Write>(mut in_buf: &[u8], writer: &mut W) -> CatResult<us
 }
 
 fn write_nonprint_to_end<W: Write>(in_buf: &[u8], writer: &mut W, tab: &[u8]) -> CatResult<usize> {
-    let mut count = 0;
-
-    for byte in in_buf.iter().map(|c| *c) {
+    for (i, &byte) in in_buf.iter().enumerate() {
         if byte == b'\n' {
-            break;
+            return Ok(i + 1);
         }
         match byte {
             9 => writer.write_all(tab),
@@ -594,11 +600,7 @@ fn write_nonprint_to_end<W: Write>(in_buf: &[u8], writer: &mut W, tab: &[u8]) ->
             160...254 => writer.write_all(&['M' as u8, '-' as u8, byte - 128]),
             _ => writer.write_all(&['M' as u8, '-' as u8, '^' as u8, 63]),
         }?;
-        count += 1;
     }
-    if count != in_buf.len() {
-        Ok(count + 1)
-    } else {
-        Ok(0)
-    }
+
+    Ok(0)
 }
