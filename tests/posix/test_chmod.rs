@@ -169,6 +169,7 @@ fn test_chmod_many_options() {
 }
 
 #[test]
+#[ignore]
 fn test_chmod_reference_file() {
     let tests = vec!{
         TestCase{args: vec!{"--reference", REFERENCE_FILE, TEST_FILE}, before: 0o100070, after: 0o100247},

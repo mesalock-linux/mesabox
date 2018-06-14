@@ -62,7 +62,8 @@ fn test_garbage() {
         .arg("-d")
         .pipe_in(input)
         .fails()
-        .stderr_only("base32: error: invalid input\n");
+        .no_stdout()
+        .stderr_contains("invalid length at 16");
 }
 
 #[test]
@@ -97,18 +98,18 @@ fn test_wrap_no_arg() {
         new_ucmd!()
             .arg(wrap_param)
             .fails()
-            .stderr_only(format!("base32: error: Argument to option '{}' missing\n",
-                                 if wrap_param == "-w" { "w" } else { "wrap" }));
+            .no_stdout()
+            .stderr_contains("requires a value but none was supplied\n");
     }
 }
 
-// FIXME: the problem here is clap prints out ANSI color codes, causing the output to differ
 #[test]
 fn test_wrap_bad_arg() {
     for wrap_param in vec!["-w", "--wrap"] {
         new_ucmd!()
             .arg(wrap_param).arg("b")
             .fails()
-            .stderr_only("base32: error: Invalid value for '--wrap <COLS>': 'b' is not a number\n");
+            .no_stdout()
+            .stderr_contains("'b' is not a number\n");
     }
 }

@@ -120,7 +120,7 @@ impl CmdResult {
     }
 
     /// asserts that the command resulted in stdout stream output that equals the
-    /// passed in value, when both are trimmed of trailing whitespace
+    /// passed in value
     /// stdout_only is a better choice unless stderr may or will be non-empty
     pub fn stdout_is<T: AsRef<[u8]>>(&self, msg: T) -> &CmdResult {
         assert_eq!(msg.as_ref(), &self.stdout[..]);
@@ -133,8 +133,14 @@ impl CmdResult {
         self.stdout_is(contents)
     }
 
+    /// like stdout_is(...), but only checks if the stdout stream contains the given value
+    pub fn stdout_contains<T: AsRef<str>>(&self, msg: T) -> &CmdResult {
+        assert!(self.stdout_str().contains(msg.as_ref()));
+        self
+    }
+
     /// asserts that the command resulted in stderr stream output that equals the
-    /// passed in value, when both are trimmed of trailing whitespace
+    /// passed in value
     /// stderr_only is a better choice unless stdout may or will be non-empty
     pub fn stderr_is<T: AsRef<[u8]>>(&self, msg: T) -> &CmdResult {
         assert_eq!(msg.as_ref(), &self.stderr[..]);
@@ -147,9 +153,15 @@ impl CmdResult {
         self.stderr_is(contents)
     }
 
+    /// like stderr_is(...), but only checks if the stderr stream contains the given value
+    pub fn stderr_contains<T: AsRef<str>>(&self, msg: T) -> &CmdResult {
+        assert!(self.stderr_str().contains(&msg.as_ref()));
+        self
+    }
+
     /// asserts that
     /// 1. the command resulted in stdout stream output that equals the
-    /// passed in value, when both are trimmed of trailing whitespace
+    /// passed in value
     /// and 2. the command resulted in empty (zero-length) stderr stream output
     pub fn stdout_only<T: AsRef<[u8]>>(&self, msg: T) -> &CmdResult {
         self.no_stderr().stdout_is(msg)
@@ -163,7 +175,7 @@ impl CmdResult {
 
     /// asserts that
     /// 1. the command resulted in stderr stream output that equals the
-    /// passed in value, when both are trimmed of trailing whitespace
+    /// passed in value
     /// and 2. the command resulted in empty (zero-length) stdout stream output
     pub fn stderr_only<T: AsRef<[u8]>>(&self, msg: T) -> &CmdResult {
         self.no_stdout().stderr_is(msg)

@@ -62,7 +62,8 @@ fn test_garbage() {
         .arg("-d")
         .pipe_in(input)
         .fails()
-        .stderr_only("base64: error: invalid input\n");
+        .no_stdout()
+        .stderr_contains("invalid length at 20");
 }
 
 #[test]
@@ -97,8 +98,8 @@ fn test_wrap_no_arg() {
         new_ucmd!()
             .arg(wrap_param)
             .fails()
-            .stderr_only(format!("base64: error: Argument to option '{}' missing\n",
-                                 if wrap_param == "-w" { "w" } else { "wrap" }));
+            .no_stdout()
+            .stderr_contains("requires a value but none was supplied\n");
     }
 }
 
@@ -106,9 +107,9 @@ fn test_wrap_no_arg() {
 fn test_wrap_bad_arg() {
     for wrap_param in vec!["-w", "--wrap"] {
         new_ucmd!()
-            .arg(wrap_param)
-            .arg("b")
+            .arg(wrap_param).arg("b")
             .fails()
-            .stderr_only("base64: error: invalid wrap size: ‘b’: invalid digit found in string\n");
+            .no_stdout()
+            .stderr_contains("'b' is not a number\n");
     }
 }
