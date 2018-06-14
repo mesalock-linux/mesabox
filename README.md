@@ -12,6 +12,29 @@ embedded devices, MesaBox seeks to provide a fully functioning command-line
 environment (unlike [uutils][], which just seeks to reimplement the GNU
 coreutils).
 
+Completion Status
+-----------------
+
+As the project has just begun many utilities have yet to be implemented.  If
+something in the table below seems interesting, feel free to take a stab at it.
+If it seems like something that should be in the table is missing, make sure to
+open an issue.  Take a look at CONTRIBUTING.md for more details.
+
+Utility | Type | Status
+:------:|:----:|:------:
+arch    | GNU  | **Complete**
+base32  | GNU  | **Complete**
+base64  | GNU  | **Complete**
+yes     | GNU  | **Complete**
+tar     | LSB  | Beginning Stages
+ping    | Networking | Simple Version
+cat     | POSIX/GNU | **Complete**
+chmod   | POSIX/GNU | **Mostly Complete** <br/> (missing `--reference`)
+head    | POSIX/GNU | **Complete**
+init    | POSIX | Simple Version
+sh      | POSIX | TODO
+sleep   | POSIX | **Complete**
+
 Maintainer
 ----------
 
