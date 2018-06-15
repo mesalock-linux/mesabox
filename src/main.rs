@@ -21,7 +21,7 @@ fn main() {
 
     let mut setup = UtilSetup::new(stdin, stdout, stderr, Box::new(env::vars_os()), None);
 
-    if let Err(f) = mesabox::execute(&mut setup, env::args_os()) {
+    if let Err(f) = mesabox::execute(&mut setup, &mut env::args_os()) {
         if let Some(ref err) = f.err {
             let mut skip = false;
             // XXX: should this be checked in lib.rs?  i feel like it might be useful if people can detect this, so it is being done this way atm

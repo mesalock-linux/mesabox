@@ -6,7 +6,7 @@
 // For a copy, see the LICENSE file.
 //
 
-use super::{Result, UtilRead, UtilWrite, UtilSetup};
+use super::{ArgsIter, Result, UtilRead, UtilWrite, UtilSetup};
 use util;
 
 use clap::{Arg, ArgGroup, AppSettings};
@@ -45,13 +45,12 @@ struct Options {
     previous_printed: bool,
 }
 
-pub fn execute<I, O, E, T, U>(setup: &mut UtilSetup<I, O, E>, mut args: T) -> Result<()>
+pub fn execute<I, O, E, T>(setup: &mut UtilSetup<I, O, E>, mut args: T) -> Result<()>
 where
     I: for<'a> UtilRead<'a>,
     O: for<'a> UtilWrite<'a>,
     E: for<'a> UtilWrite<'a>,
-    T: Iterator<Item = U>,
-    U: Into<OsString> + Clone,
+    T: ArgsIter,
 {
     let mut default_lines = 10;
 

@@ -8,13 +8,12 @@
 
 extern crate tar;
 
-use super::{/*ArgsIter, */UtilSetup, Result, UtilRead, UtilWrite};
+use super::{ArgsIter, UtilSetup, Result, UtilRead, UtilWrite};
 use util;
 
 use clap::{Arg, ArgGroup, OsValues};
 use globset::{GlobSetBuilder, Glob};
 //use regex::bytes::RegexSet;
-use std::ffi::OsString;
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Read};
 use std::path::PathBuf;
@@ -182,13 +181,12 @@ where
     }
 }
 
-pub fn execute<I, O, E, T, U>(setup: &mut UtilSetup<I, O, E>, args: T) -> super::Result<()>
+pub fn execute<I, O, E, T>(setup: &mut UtilSetup<I, O, E>, args: T) -> super::Result<()>
 where
     I: for<'a> UtilRead<'a>,
     O: for<'a> UtilWrite<'a>,
     E: for<'a> UtilWrite<'a>,
-    T: Iterator<Item = U>,
-    U: Into<OsString> + Clone,
+    T: ArgsIter,
 {
     // TODO: figure out how to support bundled syntax
     let matches = {

@@ -616,11 +616,12 @@ impl UCommand {
         UChild::new(
             thread::spawn(move || {
                 let stdin = stdin;
+                let mut args = args;
                 let mut stdout = stdout_clone.lock().unwrap();
                 let mut stderr = stderr_clone.lock().unwrap();
                 let mut setup =
                     UtilSetup::new(&stdin[..], &mut *stdout, &mut *stderr, env, current_dir);
-                mesabox::execute(&mut setup, args)
+                mesabox::execute(&mut setup, &mut args)
             }),
             stdout,
             stderr,

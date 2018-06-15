@@ -6,20 +6,18 @@
 // For a copy, see the LICENSE file.
 //
 
-use super::{Result, UtilRead, UtilWrite, UtilSetup};
+use super::{ArgsIter, Result, UtilRead, UtilWrite, UtilSetup};
 use base32::common;
 use uucore::encoding::Format;
-use std::ffi::OsString;
 
 pub const DESCRIPTION: &str = "Encode or decode input data to standard output using Base64";
 
-pub fn execute<I, O, E, T, U>(setup: &mut UtilSetup<I, O, E>, args: T) -> Result<()>
+pub fn execute<I, O, E, T>(setup: &mut UtilSetup<I, O, E>, args: T) -> Result<()>
 where
     I: for<'a> UtilRead<'a>,
     O: for<'a> UtilWrite<'a>,
     E: for<'a> UtilWrite<'a>,
-    T: Iterator<Item = U>,
-    U: Into<OsString> + Clone,
+    T: ArgsIter,
 {
     common::execute_base(setup, args, "base64", DESCRIPTION, Format::Base64)
 }

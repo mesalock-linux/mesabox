@@ -33,7 +33,7 @@
 //     SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 //
 
-use ::{Result, UtilRead, UtilWrite, UtilSetup};
+use ::{ArgsIter, Result, UtilRead, UtilWrite, UtilSetup};
 use util;
 
 use clap::Arg;
@@ -52,13 +52,12 @@ struct Options {
     format: Format,
 }
 
-pub(crate) fn execute_base<I, O, E, T, U>(setup: &mut UtilSetup<I, O, E>, args: T, name: &str, desc: &str, format: Format) -> Result<()>
+pub(crate) fn execute_base<I, O, E, T>(setup: &mut UtilSetup<I, O, E>, args: T, name: &str, desc: &str, format: Format) -> Result<()>
 where
     I: for<'a> UtilRead<'a>,
     O: for<'a> UtilWrite<'a>,
     E: for<'a> UtilWrite<'a>,
-    T: Iterator<Item = U>,
-    U: Into<OsString> + Clone,
+    T: ArgsIter,
 {
     let matches = {
         let app = util_app!(name, setup, desc)

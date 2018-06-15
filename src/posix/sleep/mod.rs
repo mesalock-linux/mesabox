@@ -31,9 +31,8 @@
 //     SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 //
 
-use super::{Result, UtilRead, UtilWrite, UtilSetup, string_to_err};
+use super::{ArgsIter, Result, UtilRead, UtilWrite, UtilSetup, string_to_err};
 
-use std::ffi::OsString;
 use std::thread;
 use std::time::Duration;
 
@@ -42,13 +41,12 @@ use uucore;
 
 pub(crate) const DESCRIPTION: &str = "Pause for a given number of seconds";
 
-pub fn execute<I, O, E, T, U>(setup: &mut UtilSetup<I, O, E>, args: T) -> Result<()>
+pub fn execute<I, O, E, T>(setup: &mut UtilSetup<I, O, E>, args: T) -> Result<()>
 where
     I: for<'a> UtilRead<'a>,
     O: for<'a> UtilWrite<'a>,
     E: for<'a> UtilWrite<'a>,
-    T: Iterator<Item = U>,
-    U: Into<OsString> + Clone,
+    T: ArgsIter,
 {
     let app = util_app!("sleep", setup).arg(Arg::with_name("NUMBER[SUFFIX]").index(1).multiple(true).required(true).help("hi"));
 

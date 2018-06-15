@@ -4,7 +4,7 @@
 // This work is licensed under the terms of the BSD 3-Clause License.
 // For a copy, see the LICENSE file.
 
-use super::{/*ArgsIter, */UtilSetup, UtilRead, UtilWrite, Result};
+use super::{ArgsIter, UtilSetup, UtilRead, UtilWrite, Result};
 
 use clap::Arg;
 use chrono::Local;
@@ -222,14 +222,12 @@ struct Options {
 }
 
 // TODO: this needs to catch SIGINT and dump out the stats when it does
-pub fn execute<I, O, E, T, U>(setup: &mut UtilSetup<I, O, E>, args: T) -> Result<()>
+pub fn execute<I, O, E, T>(setup: &mut UtilSetup<I, O, E>, args: T) -> Result<()>
 where
     I: for<'a> UtilRead<'a>,
     O: for<'a> UtilWrite<'a>,
     E: for<'a> UtilWrite<'a>,
-    //T: ArgsIter,
-    T: Iterator<Item = U>,
-    U: Into<OsString> + Clone,
+    T: ArgsIter,
 {
     let matches = {
         let app = util_app!(NAME, setup)

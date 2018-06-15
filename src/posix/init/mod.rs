@@ -6,7 +6,7 @@
 // For a copy, see the LICENSE file.
 //
 
-use super::{Result, MesaError, UtilSetup, UtilRead, UtilWrite};
+use super::{ArgsIter, Result, MesaError, UtilSetup, UtilRead, UtilWrite};
 
 use fnv::FnvHashMap as HashMap;
 use nix;
@@ -24,7 +24,7 @@ use std::io::{self, BufRead, BufReader, Write};
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::process::CommandExt;
 use std::process::{Child, Command};
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsStr;
 use std::result::Result as StdResult;
 
 const NAME: &str = "init";
@@ -313,13 +313,12 @@ fn reset_signals(set: &SigSet) -> nix::Result<()> {
     signal::sigprocmask(SigmaskHow::SIG_UNBLOCK, Some(set), None)
 }
 
-pub fn execute<I, O, E, T, U>(setup: &mut UtilSetup<I, O, E>, _args: T) -> Result<()>
+pub fn execute<I, O, E, T>(setup: &mut UtilSetup<I, O, E>, _args: T) -> Result<()>
 where
     I: for<'a> UtilRead<'a>,
     O: for<'a> UtilWrite<'a>,
     E: for<'a> UtilWrite<'a>,
-    T: Iterator<Item = U>,
-    U: Into<OsString> + Clone,
+    T: ArgsIter,
 {
     if unistd::getpid() != Pid::from_raw(1) {
         display_msg!(setup.stderr, "already running")?;

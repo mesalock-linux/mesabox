@@ -257,9 +257,17 @@ impl<'a> UtilWrite<'a> for io::Stderr {
     }
 }
 
+pub trait ArgsIter: Iterator<Item = <Self as ArgsIter>::ArgItem> {
+    type ArgItem: Into<OsString> + Clone;
+}
+
+impl<'a, T: Into<OsString> + Clone, U: Iterator<Item = T>> ArgsIter for &'a mut U {
+    type ArgItem = T;
+}
+
 pub type Result<T> = StdResult<T, MesaError>;
 
-fn execute_util<I, O, E, T, U>(
+fn execute_util<I, O, E, T>(
     setup: &mut UtilSetup<I, O, E>,
     name: &OsStr,
     args: T,
@@ -268,8 +276,7 @@ where
     I: for<'a> UtilRead<'a>,
     O: for<'a> UtilWrite<'a>,
     E: for<'a> UtilWrite<'a>,
-    T: Iterator<Item = U>,
-    U: Into<OsString> + Clone,
+    T: ArgsIter,
 {
     include!(concat!(env!("OUT_DIR"), "/execute_utils.rs"))
 }
@@ -280,20 +287,21 @@ fn generate_app() -> App<'static, 'static, impl BufRead, impl Write, impl Write>
     include!(concat!(env!("OUT_DIR"), "/generate_app.rs"))
 }
 
-pub fn execute<I, O, E, T, U>(setup: &mut UtilSetup<I, O, E>, args: T) -> Result<()>
+pub fn execute<I, O, E, T, U, V>(setup: &mut UtilSetup<I, O, E>, args: T) -> Result<()>
 where
     I: for<'a> UtilRead<'a>,
     O: for<'a> UtilWrite<'a>,
     E: for<'a> UtilWrite<'a>,
-    T: IntoIterator<Item = U>,
+    T: IntoIterator<IntoIter = V, Item = U>,
     U: Into<OsString> + Clone,
+    V: ArgsIter<ArgItem = U>,
 {
     let mut args = args.into_iter();
 
     // assume that we are using symlinks first (i.e. "command args" format).  if not, check for
     // "mesabox command args" format
     let res = start(setup, &mut args)
-        .or_else(|| start(setup, args))
+        .or_else(|| start(setup, &mut args))
         .or_else(|| {
             // no valid util was found, so just display a help menu
             let _ = generate_app().write_help(&mut setup.stderr);
@@ -309,19 +317,18 @@ where
     res
 }
 
-fn start<I, O, E, T, U>(setup: &mut UtilSetup<I, O, E>, mut args: T) -> Option<Result<()>>
+fn start<I, O, E, T>(setup: &mut UtilSetup<I, O, E>, args: &mut T) -> Option<Result<()>>
 where
     I: for<'a> UtilRead<'a>,
     O: for<'a> UtilWrite<'a>,
     E: for<'a> UtilWrite<'a>,
-    T: Iterator<Item = U>,
-    U: Into<OsString> + Clone,
+    T: ArgsIter,
 {
     if let Some(progname) = args.next() {
         if let Some(filename) = Path::new(&progname.clone().into()).file_name() {
             // we pass along the args in case the util requires non-standard argument
             // parsing (e.g. dd)
-            return execute_util(setup, filename, iter::once(progname).chain(args)).map(|res| {
+            return execute_util(setup, filename, &mut iter::once(progname).chain(args)).map(|res| {
                 // XXX: note that this currently is useless as we are temporarily overriding -V and --help
                 res.or_else(|mut mesa_err| {
                     if let Some(ref e) = mesa_err.err {

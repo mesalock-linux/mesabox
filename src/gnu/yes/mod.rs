@@ -31,11 +31,10 @@
 //     SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 //
 
-use super::{UtilSetup, Result, /*ArgsIter, */UtilRead, UtilWrite};
+use super::{UtilSetup, Result, ArgsIter, UtilRead, UtilWrite};
 
 use clap::Arg;
 use std::borrow::Cow;
-use std::ffi::OsString;
 use std::io::Write;
 use std::os::unix::ffi::OsStrExt;
 
@@ -46,13 +45,12 @@ pub(crate) const DESCRIPTION: &str = "Repeatedly print 'y' or a series of user-p
 // systems, but this is probably good enough
 const BUF_SIZE: usize = 16 * 1024;
 
-pub fn execute<I, O, E, T, U>(setup: &mut UtilSetup<I, O, E>, args: T) -> Result<()>
+pub fn execute<I, O, E, T>(setup: &mut UtilSetup<I, O, E>, args: T) -> Result<()>
 where
     I: for<'a> UtilRead<'a>,
     O: for<'a> UtilWrite<'a>,
     E: for<'a> UtilWrite<'a>,
-    T: Iterator<Item = U>,
-    U: Into<OsString> + Clone,
+    T: ArgsIter,
 {
     let matches = {
         let app = util_app!(NAME, setup)

@@ -36,12 +36,12 @@
 //
 
 use clap::Arg;
-use std::ffi::{OsString, OsStr};
+use std::ffi::OsStr;
 use std::fs::{metadata, File};
 use std::iter;
 use std::io::{self, BufRead, Read, Write};
 use std::path::Path;
-use super::{UtilSetup, /*ArgsIter, */UtilRead, UtilWrite, is_tty};
+use super::{UtilSetup, ArgsIter, UtilRead, UtilWrite, is_tty};
 use util;
 
 /// Unix domain socket support
@@ -400,13 +400,12 @@ where
 
 type CatResult<T> = ::std::result::Result<T, CatError>;
 
-pub fn execute<I, O, E, T, U>(setup: &mut UtilSetup<I, O, E>, args: T) -> super::Result<()>
+pub fn execute<I, O, E, T>(setup: &mut UtilSetup<I, O, E>, args: T) -> super::Result<()>
 where
     I: for<'a> UtilRead<'a>,
     O: for<'a> UtilWrite<'a>,
     E: for<'a> UtilWrite<'a>,
-    T: Iterator<Item = U>,
-    U: Into<OsString> + Clone,
+    T: ArgsIter,
 {
     let matches = {
         let app = util_app!("cat", setup)

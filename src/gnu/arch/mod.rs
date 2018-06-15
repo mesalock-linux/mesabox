@@ -8,21 +8,19 @@
 
 extern crate platform_info;
 
-use super::{UtilSetup, Result, /*ArgsIter, */UtilRead, UtilWrite};
+use super::{UtilSetup, Result, ArgsIter, UtilRead, UtilWrite};
 
 use self::platform_info::*;
-use std::ffi::OsString;
 
 pub(crate) const NAME: &str = "arch";
 pub(crate) const DESCRIPTION: &str = "Print the architecture type";
 
-pub fn execute<I, O, E, T, U>(setup: &mut UtilSetup<I, O, E>, args: T) -> Result<()>
+pub fn execute<I, O, E, T>(setup: &mut UtilSetup<I, O, E>, args: T) -> Result<()>
 where
     I: for<'a> UtilRead<'a>,
     O: for<'a> UtilWrite<'a>,
     E: for<'a> UtilWrite<'a>,
-    T: Iterator<Item = U>,
-    U: Into<OsString> + Clone,
+    T: ArgsIter,
 {
     let _ = util_app!(NAME, setup).get_matches_from_safe_borrow(args)?;
 

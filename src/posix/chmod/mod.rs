@@ -31,7 +31,7 @@
 //     SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 //
 
-use super::{MesaError, UtilSetup, Result, /*ArgsIter, */UtilRead, UtilWrite};
+use super::{MesaError, UtilSetup, Result, ArgsIter, UtilRead, UtilWrite};
 use util;
 
 use clap::{Arg, ArgGroup, AppSettings, OsValues};
@@ -66,13 +66,12 @@ enum Verbosity {
     Verbose,
 }
 
-pub fn execute<I, O, E, T, U>(setup: &mut UtilSetup<I, O, E>, args: T) -> Result<()>
+pub fn execute<I, O, E, T>(setup: &mut UtilSetup<I, O, E>, args: T) -> Result<()>
 where
     I: for<'a> UtilRead<'a>,
     O: for<'a> UtilWrite<'a>,
     E: for<'a> UtilWrite<'a>,
-    T: Iterator<Item = U>,
-    U: Into<OsString> + Clone,
+    T: ArgsIter,
 {
     let matches = {
         let app = util_app!(NAME, setup)
