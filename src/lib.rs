@@ -335,7 +335,7 @@ where
 
 // generate a clap::App such that the available utils are set up as subcommands without any
 // arguments (adding all the arguments would slow down startup time)
-fn generate_app() -> App<'static, 'static, impl BufRead, impl Write, impl Write> {
+fn generate_app() -> App<'static, 'static> {
     include!(concat!(env!("OUT_DIR"), "/generate_app.rs"))
 }
 

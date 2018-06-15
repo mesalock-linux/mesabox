@@ -49,7 +49,7 @@ posix = [
 default = ["gnu", "loginutils", "lsb", "networking", "posix"]
 
 [dependencies]
-clap = { git = "https://github.com/mesalock-linux/clap-rs" }
+clap = "2.31.2"
 failure = "0.1.1"
 failure_derive = "0.1.1"
 libc = "0.2.40"
