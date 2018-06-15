@@ -17,6 +17,11 @@ gnu = [
     "yes"
 ]
 
+getty = []
+loginutils = [
+    "getty"
+]
+
 # XXX: temporary until renaming dependencies is supported
 tar_util = []
 lsb = [
@@ -41,7 +46,7 @@ posix = [
     "sleep"
 ]
 
-default = ["gnu", "lsb", "networking", "posix"]
+default = ["gnu", "loginutils", "lsb", "networking", "posix"]
 
 [dependencies]
 clap = { git = "https://github.com/mesalock-linux/clap-rs" }

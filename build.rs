@@ -20,6 +20,8 @@ fn create_util_map() -> HashMap<&'static str, &'static str> {
     hashmap.insert("base64", "gnu");
     hashmap.insert("yes", "gnu");
 
+    hashmap.insert("getty", "loginutils");
+
     hashmap.insert("tar", "lsb");
 
     hashmap.insert("ping", "networking");
