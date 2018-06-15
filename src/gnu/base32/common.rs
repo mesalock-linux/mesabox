@@ -52,11 +52,9 @@ struct Options {
     format: Format,
 }
 
-pub(crate) fn execute_base<I, O, E, T>(setup: &mut UtilSetup<I, O, E>, args: T, name: &str, desc: &str, format: Format) -> Result<()>
+pub(crate) fn execute_base<S, T>(setup: &mut S, args: T, name: &str, desc: &str, format: Format) -> Result<()>
 where
-    I: for<'a> UtilRead<'a>,
-    O: for<'a> UtilWrite<'a>,
-    E: for<'a> UtilWrite<'a>,
+    S: UtilSetup,
     T: ArgsIter,
 {
     let matches = {
@@ -98,15 +96,17 @@ where
         format: format,
     };
 
-    let output = setup.stdout.lock_writer()?;
+    let mut output = setup.output();
+    let output = output.lock_writer()?;
     match matches.value_of_os("FILE") {
         Some(filename) if filename != OsStr::new("-") => {
-            let path = util::actual_path(&setup.current_dir, filename);
+            let path = util::actual_path(&setup.current_dir(), filename);
             let file = File::open(path)?;
             handle_data(output, BufReader::new(file), options)
         }
         _ => {
-            let input = setup.stdin.lock_reader()?;
+            let mut input = setup.input();
+            let input = input.lock_reader()?;
             handle_data(output, input, options)
         }
     }

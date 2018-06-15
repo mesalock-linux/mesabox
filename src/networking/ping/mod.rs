@@ -4,7 +4,7 @@
 // This work is licensed under the terms of the BSD 3-Clause License.
 // For a copy, see the LICENSE file.
 
-use super::{ArgsIter, UtilSetup, UtilRead, UtilWrite, Result};
+use super::{ArgsIter, UtilSetup, UtilWrite, Result};
 
 use clap::Arg;
 use chrono::Local;
@@ -222,11 +222,9 @@ struct Options {
 }
 
 // TODO: this needs to catch SIGINT and dump out the stats when it does
-pub fn execute<I, O, E, T>(setup: &mut UtilSetup<I, O, E>, args: T) -> Result<()>
+pub fn execute<S, T>(setup: &mut S, args: T) -> Result<()>
 where
-    I: for<'a> UtilRead<'a>,
-    O: for<'a> UtilWrite<'a>,
-    E: for<'a> UtilWrite<'a>,
+    S: UtilSetup,
     T: ArgsIter,
 {
     let matches = {
@@ -294,32 +292,35 @@ where
 
     let mut stats = Stats { sent: 0, received: 0, roundtrips: vec![] };
 
-    writeln!(setup.stdout, "PING {} ({}): {} data bytes", hostname, resolved_ip.ip(), options.expected_size)?;
+    writeln!(setup.output(), "PING {} ({}): {} data bytes", hostname, resolved_ip.ip(), options.expected_size)?;
 
     let should_stop = AtomicBool::new(false);
-    crossbeam::scope(|scope| {
-        let should_stop_ref = &should_stop;
-        let stdout_ref = &mut setup.stdout;
-        let stats_ref = &mut stats;
+    {
+        let mut stdout_ref = setup.output();
+        crossbeam::scope(|scope| {
+            let should_stop_ref = &should_stop;
+            let stdout_ref = &mut *stdout_ref;
+            let stats_ref = &mut stats;
 
-        let child = scope.spawn(move || {
-            let res = ping_socket(sock, stats_ref, stdout_ref, should_stop_ref, options);
-            if !should_stop_ref.load(Ordering::Acquire) {
-                // FIXME: pretty sure there's a race condition where user causes a SIGINT right after the above check, so two SIGINTs will occur and thus the program will die
-                // send a SIGINT to trigger the sigwait() below (XXX: there is probably a cleaner way to do this)
-                signal::kill(unistd::getpid(), Signal::SIGINT)?;
-            }
-            res
-        });
+            let child = scope.spawn(move || {
+                let res = ping_socket(sock, stats_ref, stdout_ref, should_stop_ref, options);
+                if !should_stop_ref.load(Ordering::Acquire) {
+                    // FIXME: pretty sure there's a race condition where user causes a SIGINT right after the above check, so two SIGINTs will occur and thus the program will die
+                    // send a SIGINT to trigger the sigwait() below (XXX: there is probably a cleaner way to do this)
+                    signal::kill(unistd::getpid(), Signal::SIGINT)?;
+                }
+                res
+            });
 
-        let mut set = signal::SigSet::empty();
-        set.add(Signal::SIGINT);
-        set.wait()?;
+            let mut set = signal::SigSet::empty();
+            set.add(Signal::SIGINT);
+            set.wait()?;
 
-        should_stop.store(true, Ordering::Release);
-    
-        child.join()
-    })?;
+            should_stop.store(true, Ordering::Release);
+        
+            child.join()
+        })?;
+    }
 
     print_stats(setup, &hostname, &stats)
 }
@@ -439,11 +440,9 @@ fn is_valid_wait_time(val: &OsStr) -> StdResult<(), OsString> {
     }
 }
 
-fn print_stats<I, O, E>(setup: &mut UtilSetup<I, O, E>, hostname: &str, stats: &Stats) -> Result<()>
+fn print_stats<S>(setup: &mut S, hostname: &str, stats: &Stats) -> Result<()>
 where
-    I: for<'a> UtilRead<'a>,
-    O: for<'a> UtilWrite<'a>,
-    E: for<'a> UtilWrite<'a>,
+    S: UtilSetup,
 {
     // ignore SIGINT completely while printing stats
     let old_set = SigSet::thread_get_mask()?;
@@ -451,7 +450,8 @@ where
     set.add(Signal::SIGINT);
     set.thread_set_mask()?;
 
-    let mut stdout = setup.stdout.lock_writer()?;
+    let mut stdout = setup.output();
+    let mut stdout = stdout.lock_writer()?;
 
     writeln!(stdout, "\n--- {} ping statistics ---", hostname)?;
     writeln!(stdout, "{} packets transmitted, {} packets received, {}% packet loss", stats.sent, stats.received, stats.packet_loss())?;

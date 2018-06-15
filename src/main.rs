@@ -8,7 +8,7 @@
 
 extern crate mesabox;
 
-use mesabox::UtilSetup;
+use mesabox::UtilData;
 use std::env;
 use std::io::{self, Write};
 use std::process;
@@ -19,7 +19,7 @@ fn main() {
     let stdin = io::stdin();
     let stderr = io::stderr();
 
-    let mut setup = UtilSetup::new(stdin, stdout, stderr, Box::new(env::vars_os()), None);
+    let mut setup = UtilData::new(stdin, stdout, stderr, Box::new(env::vars_os()), None);
 
     if let Err(f) = mesabox::execute(&mut setup, &mut env::args_os()) {
         if let Some(ref err) = f.err {
@@ -32,8 +32,8 @@ fn main() {
             }
 
             if !skip {
-                let _ = writeln!(setup.stderr, "{}", f);
-                let _ = setup.stderr.flush();
+                let _ = writeln!(setup.stderr.get_mut(), "{}", f);
+                let _ = setup.stderr.get_mut().flush();
             }
         }
         process::exit(f.exitcode);

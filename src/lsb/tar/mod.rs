@@ -8,14 +8,14 @@
 
 extern crate tar;
 
-use super::{ArgsIter, UtilSetup, Result, UtilRead, UtilWrite};
+use super::{ArgsIter, UtilSetup, Result};
 use util;
 
 use clap::{Arg, ArgGroup, OsValues};
 use globset::{GlobSetBuilder, Glob};
 //use regex::bytes::RegexSet;
 use std::fs::File;
-use std::io::{BufReader, BufWriter, Read};
+use std::io::{BufReader, BufWriter, Read, Write};
 use std::path::PathBuf;
 
 pub(crate) const NAME: &str = "tar";
@@ -80,23 +80,19 @@ struct Options<'a> {
     pub values: Option<OsValues<'a>>,
 }
 
-struct Tar<'a, 'b, I, O, E>
+struct Tar<'a, 'b, S>
 where
-    I: for<'c> UtilRead<'c> + 'a,
-    O: for<'c> UtilWrite<'c> + 'a,
-    E: for<'c> UtilWrite<'c> + 'a,
+    S: UtilSetup + 'a,
 {
-    setup: &'a mut UtilSetup<I, O, E>,
+    setup: &'a mut S,
     pub options: Options<'b>,
 }
 
-impl<'a, 'b, I, O, E> Tar<'a, 'b, I, O, E>
+impl<'a, 'b, S> Tar<'a, 'b, S>
 where
-    I: for<'c> UtilRead<'c>,
-    O: for<'c> UtilWrite<'c>,
-    E: for<'c> UtilWrite<'c>,
+    S: UtilSetup,
 {
-    pub fn new(setup: &'a mut UtilSetup<I, O, E>, options: Options<'b>) -> Self {
+    pub fn new(setup: &'a mut S, options: Options<'b>) -> Self {
         Self {
             setup: setup,
             options: options,
@@ -139,16 +135,17 @@ where
             Some(ref filepath) => {
                 let file = File::open(filepath)?;
                 let archive = tar::Archive::new(BufReader::new(file));
-                Self::list_contents_helper(&mut self.setup.stdout, &mut self.options.values, archive)
+                Self::list_contents_helper(&mut *self.setup.output(), &mut self.options.values, archive)
             }
             _ => {
-                let archive = tar::Archive::new(&mut self.setup.stdin);
-                Self::list_contents_helper(&mut self.setup.stdout, &mut self.options.values, archive)
+                let mut input = self.setup.input();
+                let archive = tar::Archive::new(&mut *input);
+                Self::list_contents_helper(&mut *self.setup.output(), &mut self.options.values, archive)
             }
         }
     }
 
-    fn list_contents_helper<R: Read>(output: &mut O, values: &mut Option<OsValues<'b>>, mut archive: tar::Archive<R>) -> Result<()> {
+    fn list_contents_helper<O: Write, R: Read>(output: &mut O, values: &mut Option<OsValues<'b>>, mut archive: tar::Archive<R>) -> Result<()> {
         use std::os::unix::ffi::OsStrExt;
         use std::str;
         // XXX: this is not complete, need to handle options and such
@@ -181,11 +178,9 @@ where
     }
 }
 
-pub fn execute<I, O, E, T>(setup: &mut UtilSetup<I, O, E>, args: T) -> super::Result<()>
+pub fn execute<S, T>(setup: &mut S, args: T) -> super::Result<()>
 where
-    I: for<'a> UtilRead<'a>,
-    O: for<'a> UtilWrite<'a>,
-    E: for<'a> UtilWrite<'a>,
+    S: UtilSetup,
     T: ArgsIter,
 {
     // TODO: figure out how to support bundled syntax
@@ -285,7 +280,7 @@ where
 
     let mut options = Options::default();
 
-    options.file = matches.value_of_os("file").map(|name| util::actual_path(&setup.current_dir, name));
+    options.file = matches.value_of_os("file").map(|name| util::actual_path(&setup.current_dir(), name));
 
     options.mode = if matches.is_present("create") {
         Mode::Create

@@ -6,7 +6,7 @@
 // For a copy, see the LICENSE file.
 //
 
-use super::{ArgsIter, UtilRead, UtilWrite, UtilSetup, Result};
+use super::{ArgsIter, UtilSetup, Result};
 
 use libc;
 use nix::fcntl::{self, FcntlArg, OFlag};
@@ -36,15 +36,13 @@ fn ndelay_off(fd: io::RawFd) {
     fcntl::fcntl(fd, FcntlArg::F_SETFL(!OFlag::O_NONBLOCK & original_flags)).expect("fcntl failed");
 }
 
-pub(crate) fn execute<I, O, E, T>(setup: &mut UtilSetup<I, O, E>, args: T) -> Result<()>
+pub(crate) fn execute<S, T>(_setup: &mut S, args: T) -> Result<()>
 where
-    I: for<'a> UtilRead<'a>,
-    O: for<'a> UtilWrite<'a>,
-    E: for<'a> UtilWrite<'a>,
+    S: UtilSetup,
     T: ArgsIter,
 {
     let _matches = {
-        let app = util_app!(NAME, setup);
+        let app = util_app!(NAME);
         app.get_matches_from_safe(args)?
     };
 

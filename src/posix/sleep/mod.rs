@@ -31,7 +31,7 @@
 //     SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 //
 
-use super::{ArgsIter, Result, UtilRead, UtilWrite, UtilSetup, string_to_err};
+use super::{ArgsIter, Result, UtilSetup, string_to_err};
 
 use std::thread;
 use std::time::Duration;
@@ -39,16 +39,15 @@ use std::time::Duration;
 use clap::Arg;
 use uucore;
 
+pub(crate) const NAME: &str = "sleep";
 pub(crate) const DESCRIPTION: &str = "Pause for a given number of seconds";
 
-pub fn execute<I, O, E, T>(setup: &mut UtilSetup<I, O, E>, args: T) -> Result<()>
+pub fn execute<S, T>(_setup: &mut S, args: T) -> Result<()>
 where
-    I: for<'a> UtilRead<'a>,
-    O: for<'a> UtilWrite<'a>,
-    E: for<'a> UtilWrite<'a>,
+    S: UtilSetup,
     T: ArgsIter,
 {
-    let app = util_app!("sleep", setup).arg(Arg::with_name("NUMBER[SUFFIX]").index(1).multiple(true).required(true).help("hi"));
+    let app = util_app!(NAME).arg(Arg::with_name("NUMBER[SUFFIX]").index(1).multiple(true).required(true).help("hi"));
 
     let matches = app.get_matches_from_safe(args)?;
 

@@ -1,7 +1,7 @@
 //
 // Copyright (c) 2018, The MesaLock Linux Project Contributors
 // All rights reserved.
-// 
+//
 // This work is licensed under the terms of the BSD 3-Clause License.
 // For a copy, see the LICENSE file.
 //
@@ -51,7 +51,7 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, sleep, JoinHandle};
 use std::time::Duration;
 
-use mesabox::{self, UtilSetup};
+use mesabox::{self, UtilData};
 use tempfile::TempDir;
 
 const TESTS_DIR: &str = "tests";
@@ -620,7 +620,7 @@ impl UCommand {
                 let mut stdout = stdout_clone.lock().unwrap();
                 let mut stderr = stderr_clone.lock().unwrap();
                 let mut setup =
-                    UtilSetup::new(&stdin[..], &mut *stdout, &mut *stderr, env, current_dir);
+                    UtilData::new(&stdin[..], &mut *stdout, &mut *stderr, env, current_dir);
                 mesabox::execute(&mut setup, &mut args)
             }),
             stdout,

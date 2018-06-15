@@ -45,11 +45,9 @@ struct Options {
     previous_printed: bool,
 }
 
-pub fn execute<I, O, E, T>(setup: &mut UtilSetup<I, O, E>, mut args: T) -> Result<()>
+pub fn execute<S, T>(setup: &mut S, mut args: T) -> Result<()>
 where
-    I: for<'a> UtilRead<'a>,
-    O: for<'a> UtilWrite<'a>,
-    E: for<'a> UtilWrite<'a>,
+    S: UtilSetup,
     T: ArgsIter,
 {
     let mut default_lines = 10;
@@ -122,10 +120,12 @@ where
         previous_printed: false,
     };
 
-    let mut output = setup.stdout.lock_writer()?;
+    let mut output = setup.output();
+    let mut output = output.lock_writer()?;
     if matches.is_present("FILES") {
         let mut result = Ok(());
-        let mut err_stream = setup.stderr.lock_writer()?;
+        let mut err_stream = setup.error();
+        let mut err_stream = err_stream.lock_writer()?;
 
         let file_count = matches.occurrences_of("FILES");
 
@@ -137,9 +137,9 @@ where
             };
             let res = if file == OsStr::new("-") {
                 let filename = filename.map(|_| OsStr::new("standard input"));
-                handle_stdin(&mut output, &mut setup.stdin, filename, &mut options)
+                handle_stdin(&mut output, &mut *setup.input(), filename, &mut options)
             } else {
-                let path = util::actual_path(&setup.current_dir, file);
+                let path = util::actual_path(&setup.current_dir(), file);
                 handle_file(&mut output, &path, filename, &mut options)
             };
 
@@ -157,7 +157,7 @@ where
         } else {
             None
         };
-        handle_stdin(output, &mut setup.stdin, filename, &mut options)
+        handle_stdin(output, &mut *setup.input(), filename, &mut options)
     }
 }
 

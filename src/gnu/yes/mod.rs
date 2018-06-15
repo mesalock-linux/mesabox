@@ -31,7 +31,7 @@
 //     SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 //
 
-use super::{UtilSetup, Result, ArgsIter, UtilRead, UtilWrite};
+use super::{UtilSetup, Result, ArgsIter, UtilWrite};
 
 use clap::Arg;
 use std::borrow::Cow;
@@ -45,11 +45,9 @@ pub(crate) const DESCRIPTION: &str = "Repeatedly print 'y' or a series of user-p
 // systems, but this is probably good enough
 const BUF_SIZE: usize = 16 * 1024;
 
-pub fn execute<I, O, E, T>(setup: &mut UtilSetup<I, O, E>, args: T) -> Result<()>
+pub fn execute<S, T>(setup: &mut S, args: T) -> Result<()>
 where
-    I: for<'a> UtilRead<'a>,
-    O: for<'a> UtilWrite<'a>,
-    E: for<'a> UtilWrite<'a>,
+    S: UtilSetup,
     T: ArgsIter,
 {
     let matches = {
@@ -100,13 +98,12 @@ fn prepare_buffer<'a>(input: &'a str, _buffer: &'a mut [u8; BUF_SIZE]) -> &'a [u
     input
 }
 
-pub fn run<I, O, E>(setup: &mut UtilSetup<I, O, E>, bytes: &[u8]) -> Result<()>
+pub fn run<S>(setup: &mut S, bytes: &[u8]) -> Result<()>
 where
-    I: for<'a> UtilRead<'a>,
-    O: for<'a> UtilWrite<'a>,
-    E: for<'a> UtilWrite<'a>,
+    S: UtilSetup,
 {
-    let mut stdout = setup.stdout.lock_writer()?;
+    let mut stdout = setup.output();
+    let mut stdout = stdout.lock_writer()?;
     loop {
         stdout.write_all(bytes)?;
     }

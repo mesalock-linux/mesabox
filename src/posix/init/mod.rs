@@ -313,15 +313,13 @@ fn reset_signals(set: &SigSet) -> nix::Result<()> {
     signal::sigprocmask(SigmaskHow::SIG_UNBLOCK, Some(set), None)
 }
 
-pub fn execute<I, O, E, T>(setup: &mut UtilSetup<I, O, E>, _args: T) -> Result<()>
+pub fn execute<S, T>(setup: &mut S, _args: T) -> Result<()>
 where
-    I: for<'a> UtilRead<'a>,
-    O: for<'a> UtilWrite<'a>,
-    E: for<'a> UtilWrite<'a>,
+    S: UtilSetup,
     T: ArgsIter,
 {
     if unistd::getpid() != Pid::from_raw(1) {
-        display_msg!(setup.stderr, "already running")?;
+        display_msg!(setup.error(), "already running")?;
         return Err(MesaError {
             progname: None,
             exitcode: 1,
@@ -329,9 +327,10 @@ where
         });
     }
 
-    let mut stdin = setup.stdin.lock_reader()?;
-    let mut stdout = setup.stdout.lock_writer()?;
-    let mut stderr = setup.stderr.lock_writer()?;
+    let (mut stdin, mut stdout, mut stderr) = setup.stdio();
+    let mut stdin = stdin.lock_reader()?;
+    let mut stdout = stdout.lock_writer()?;
+    let mut stderr = stderr.lock_writer()?;
 
     display_msg!(stdout, "starting")?;
 

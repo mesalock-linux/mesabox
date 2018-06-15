@@ -400,11 +400,9 @@ where
 
 type CatResult<T> = ::std::result::Result<T, CatError>;
 
-pub fn execute<I, O, E, T>(setup: &mut UtilSetup<I, O, E>, args: T) -> super::Result<()>
+pub fn execute<S, T>(setup: &mut S, args: T) -> super::Result<()>
 where
-    I: for<'a> UtilRead<'a>,
-    O: for<'a> UtilWrite<'a>,
-    E: for<'a> UtilWrite<'a>,
+    S: UtilSetup,
     T: ArgsIter,
 {
     let matches = {
@@ -472,21 +470,22 @@ where
     }
 }
 
-fn run<'a, 'b, I, O, E, T>(setup: &mut UtilSetup<I, O, E>, files: T, mut options: OutputOptions<'b>) -> super::Result<()>
+fn run<'a, 'b, S, T>(setup: &mut S, files: T, mut options: OutputOptions<'b>) -> super::Result<()>
 where
-    I: for<'c> UtilRead<'c>,
-    O: for<'c> UtilWrite<'c>,
-    E: for<'c> UtilWrite<'c>,
+    S: UtilSetup,
     T: Iterator<Item = &'a OsStr>,
 {
     let can_write_fast = options.can_write_fast();
     
-    let interactive = is_tty(setup.stdin.raw_fd());
-    let stdin = setup.stdin.lock_reader()?;
-    let stdout = setup.stdout.lock_writer()?;
-    let stderr = setup.stderr.lock_writer()?;
+    let interactive = is_tty(setup.input().raw_fd());
+    // XXX: should current_dir() just return Option<Rc<Path>> or something similar to avoid the cloning?
+    let curdir = setup.current_dir().map(|p| p.to_path_buf());
+    let (mut input, mut output, mut error) = setup.stdio();
+    let stdin = input.lock_reader()?;
+    let stdout = output.lock_writer()?;
+    let stderr = error.lock_writer()?;
 
-    let mut util = Cat::new(stdin, stdout, stderr, setup.current_dir.as_ref().map(|p| p.as_path()), interactive);
+    let mut util = Cat::new(stdin, stdout, stderr, curdir.as_ref().map(|p| p.as_path()), interactive);
 
     if can_write_fast {
         util.write_fast(files)?;

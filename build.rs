@@ -84,13 +84,12 @@ fn main() {
 
     writeln!(
         output,
-        "pub fn dump_commands<I, O, E>(setup: &mut UtilSetup<I, O, E>) -> Result<()>
+        "pub fn dump_commands<S>(setup: &mut S) -> Result<()>
 where
-    I: for<'a> UtilRead<'a>,
-    O: for<'a> UtilWrite<'a>,
-    E: for<'a> UtilWrite<'a>,
+    S: UtilSetup,
 {{
-    let mut stdout = setup.stdout.lock_writer()?;"
+    let mut stdout = setup.output();
+    let mut stdout = stdout.lock_writer()?;"
     ).unwrap();
     for util in &utils {
         writeln!(output, "writeln!(stdout, {:?})?;", util).unwrap();

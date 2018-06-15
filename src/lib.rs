@@ -29,6 +29,7 @@ extern crate walkdir;
 use clap::{App, SubCommand};
 use failure::{Error, Fail};
 use libc::EXIT_FAILURE;
+use std::cell::{RefCell, RefMut};
 use std::convert::From;
 use std::ffi::{OsStr, OsString};
 use std::fmt::{self, Display};
@@ -100,20 +101,20 @@ pub struct LockError {
     file: String,
 }
 
-pub struct UtilSetup<I, O, E>
+pub struct UtilData<I, O, E>
 where
     I: for<'a> UtilRead<'a>,
     O: for<'a> UtilWrite<'a>,
     E: for<'a> UtilWrite<'a>,
 {
-    pub stdin: I,
-    pub stdout: O,
-    pub stderr: E,
+    pub stdin: RefCell<I>,
+    pub stdout: RefCell<O>,
+    pub stderr: RefCell<E>,
     pub env: Box<Iterator<Item = (OsString, OsString)>>,
     pub current_dir: Option<PathBuf>,
 }
 
-impl<I, O, E> UtilSetup<I, O, E>
+impl<I, O, E> UtilData<I, O, E>
 where
     I: for<'a> UtilRead<'a>,
     O: for<'a> UtilWrite<'a>,
@@ -127,12 +128,69 @@ where
         current_dir: Option<PathBuf>,
     ) -> Self {
         Self {
-            stdin: stdin,
-            stdout: stdout,
-            stderr: stderr,
+            stdin: RefCell::new(stdin),
+            stdout: RefCell::new(stdout),
+            stderr: RefCell::new(stderr),
             env: env,
             current_dir: current_dir,
         }
+    }
+}
+
+pub trait UtilSetup {
+    type Input: for<'a> UtilRead<'a>;
+    type Output: for<'a> UtilWrite<'a>;
+    type Error: for<'a> UtilWrite<'a>;
+
+    fn input(&self) -> RefMut<Self::Input>;
+    fn output(&self) -> RefMut<Self::Output>;
+    fn error(&self) -> RefMut<Self::Error>;
+
+    fn stdio(
+        &self,
+    ) -> (
+        RefMut<Self::Input>,
+        RefMut<Self::Output>,
+        RefMut<Self::Error>,
+    );
+
+    fn current_dir(&self) -> Option<&Path>;
+}
+
+impl<I, O, E> UtilSetup for UtilData<I, O, E>
+where
+    I: for<'a> UtilRead<'a>,
+    O: for<'a> UtilWrite<'a>,
+    E: for<'a> UtilWrite<'a>,
+{
+    type Input = I;
+    type Output = O;
+    type Error = E;
+
+    fn input(&self) -> RefMut<Self::Input> {
+        self.stdin.borrow_mut()
+    }
+
+    fn output(&self) -> RefMut<Self::Output> {
+        self.stdout.borrow_mut()
+    }
+
+    fn error(&self) -> RefMut<Self::Error> {
+        self.stderr.borrow_mut()
+    }
+
+    fn stdio(
+        &self,
+    ) -> (
+        RefMut<Self::Input>,
+        RefMut<Self::Output>,
+        RefMut<Self::Error>,
+    ) {
+        (self.input(), self.output(), self.error())
+    }
+
+    fn current_dir(&self) -> Option<&Path> {
+        self.current_dir.as_ref().map(|p| p.as_path())
     }
 }
 
@@ -267,15 +325,9 @@ impl<'a, T: Into<OsString> + Clone, U: Iterator<Item = T>> ArgsIter for &'a mut 
 
 pub type Result<T> = StdResult<T, MesaError>;
 
-fn execute_util<I, O, E, T>(
-    setup: &mut UtilSetup<I, O, E>,
-    name: &OsStr,
-    args: T,
-) -> Option<Result<()>>
+fn execute_util<S, T>(setup: &mut S, name: &OsStr, args: T) -> Option<Result<()>>
 where
-    I: for<'a> UtilRead<'a>,
-    O: for<'a> UtilWrite<'a>,
-    E: for<'a> UtilWrite<'a>,
+    S: UtilSetup,
     T: ArgsIter,
 {
     include!(concat!(env!("OUT_DIR"), "/execute_utils.rs"))
@@ -287,11 +339,9 @@ fn generate_app() -> App<'static, 'static, impl BufRead, impl Write, impl Write>
     include!(concat!(env!("OUT_DIR"), "/generate_app.rs"))
 }
 
-pub fn execute<I, O, E, T, U, V>(setup: &mut UtilSetup<I, O, E>, args: T) -> Result<()>
+pub fn execute<S, T, U, V>(setup: &mut S, args: T) -> Result<()>
 where
-    I: for<'a> UtilRead<'a>,
-    O: for<'a> UtilWrite<'a>,
-    E: for<'a> UtilWrite<'a>,
+    S: UtilSetup,
     T: IntoIterator<IntoIter = V, Item = U>,
     U: Into<OsString> + Clone,
     V: ArgsIter<ArgItem = U>,
@@ -304,50 +354,50 @@ where
         .or_else(|| start(setup, &mut args))
         .or_else(|| {
             // no valid util was found, so just display a help menu
-            let _ = generate_app().write_help(&mut setup.stderr);
-            let _ = writeln!(setup.stderr);
+            let _ = generate_app().write_help(&mut *setup.error());
+            let _ = writeln!(setup.error());
 
             Some(Err(MesaError::new(None, EXIT_FAILURE, None)))
         })
         .unwrap();
 
-    let _ = setup.stdout.flush();
-    let _ = setup.stderr.flush();
+    let _ = setup.output().flush();
+    let _ = setup.error().flush();
 
     res
 }
 
-fn start<I, O, E, T>(setup: &mut UtilSetup<I, O, E>, args: &mut T) -> Option<Result<()>>
+fn start<S, T>(setup: &mut S, args: &mut T) -> Option<Result<()>>
 where
-    I: for<'a> UtilRead<'a>,
-    O: for<'a> UtilWrite<'a>,
-    E: for<'a> UtilWrite<'a>,
+    S: UtilSetup,
     T: ArgsIter,
 {
     if let Some(progname) = args.next() {
         if let Some(filename) = Path::new(&progname.clone().into()).file_name() {
             // we pass along the args in case the util requires non-standard argument
             // parsing (e.g. dd)
-            return execute_util(setup, filename, &mut iter::once(progname).chain(args)).map(|res| {
-                // XXX: note that this currently is useless as we are temporarily overriding -V and --help
-                res.or_else(|mut mesa_err| {
-                    if let Some(ref e) = mesa_err.err {
-                        if let Some(clap_err) = e.downcast_ref::<clap::Error>() {
-                            if clap_err.kind == clap::ErrorKind::HelpDisplayed
-                                || clap_err.kind == clap::ErrorKind::VersionDisplayed
-                            {
-                                write!(setup.stdout, "{}", clap_err)?;
-                                return Ok(());
+            return execute_util(setup, filename, &mut iter::once(progname).chain(args)).map(
+                |res| {
+                    // XXX: note that this currently is useless as we are temporarily overriding -V and --help
+                    res.or_else(|mut mesa_err| {
+                        if let Some(ref e) = mesa_err.err {
+                            if let Some(clap_err) = e.downcast_ref::<clap::Error>() {
+                                if clap_err.kind == clap::ErrorKind::HelpDisplayed
+                                    || clap_err.kind == clap::ErrorKind::VersionDisplayed
+                                {
+                                    write!(setup.output(), "{}", clap_err)?;
+                                    return Ok(());
+                                }
                             }
                         }
-                    }
-                    // TODO: check for --help and -V/--version probably
-                    if mesa_err.progname.is_none() {
-                        mesa_err.progname = Some(filename.to_os_string());
-                    }
-                    Err(mesa_err)
-                })
-            });
+                        // TODO: check for --help and -V/--version probably
+                        if mesa_err.progname.is_none() {
+                            mesa_err.progname = Some(filename.to_os_string());
+                        }
+                        Err(mesa_err)
+                    })
+                },
+            );
         }
     }
 

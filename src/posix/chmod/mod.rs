@@ -31,7 +31,7 @@
 //     SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 //
 
-use super::{MesaError, UtilSetup, Result, ArgsIter, UtilRead, UtilWrite};
+use super::{MesaError, UtilSetup, Result, ArgsIter, UtilWrite};
 use util;
 
 use clap::{Arg, ArgGroup, AppSettings, OsValues};
@@ -66,11 +66,9 @@ enum Verbosity {
     Verbose,
 }
 
-pub fn execute<I, O, E, T>(setup: &mut UtilSetup<I, O, E>, args: T) -> Result<()>
+pub fn execute<S, T>(setup: &mut S, args: T) -> Result<()>
 where
-    I: for<'a> UtilRead<'a>,
-    O: for<'a> UtilWrite<'a>,
-    E: for<'a> UtilWrite<'a>,
+    S: UtilSetup,
     T: ArgsIter,
 {
     let matches = {
@@ -142,15 +140,17 @@ where
         None => None,
     };
 
+    let mut stdout = setup.output();
+    let mut stderr = setup.error();
     let mut chmoder = Chmoder {
         verbosity: verbosity,
         preserve_root: preserve_root,
         recursive: recursive,
         fmode: fmode,
         cmode: matches.value_of("MODE"),
-        stdout: setup.stdout.lock_writer()?,
-        stderr: setup.stderr.lock_writer()?,
-        current_dir: setup.current_dir.as_ref().map(|p| p.as_path()),
+        stdout: stdout.lock_writer()?,
+        stderr: stderr.lock_writer()?,
+        current_dir: setup.current_dir(),
     };
 
     let exitcode = chmoder.chmod(matches.values_of_os("FILES").unwrap())?;

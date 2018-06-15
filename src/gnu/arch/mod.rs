@@ -8,23 +8,21 @@
 
 extern crate platform_info;
 
-use super::{UtilSetup, Result, ArgsIter, UtilRead, UtilWrite};
-
+use super::{UtilSetup, Result, ArgsIter};
+use std::io::Write;
 use self::platform_info::*;
 
 pub(crate) const NAME: &str = "arch";
 pub(crate) const DESCRIPTION: &str = "Print the architecture type";
 
-pub fn execute<I, O, E, T>(setup: &mut UtilSetup<I, O, E>, args: T) -> Result<()>
+pub fn execute<S, T>(setup: &mut S, args: T) -> Result<()>
 where
-    I: for<'a> UtilRead<'a>,
-    O: for<'a> UtilWrite<'a>,
-    E: for<'a> UtilWrite<'a>,
+    S: UtilSetup,
     T: ArgsIter,
 {
     let _ = util_app!(NAME, setup).get_matches_from_safe_borrow(args)?;
 
-    writeln!(setup.stdout, "{}", PlatformInfo::new()?.machine().trim())?;
+    writeln!(setup.output(), "{}", PlatformInfo::new()?.machine().trim())?;
 
     Ok(())
 }
