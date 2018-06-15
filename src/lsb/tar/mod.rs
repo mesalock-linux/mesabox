@@ -192,7 +192,7 @@ where
 {
     // TODO: figure out how to support bundled syntax
     let matches = {
-        let app = util_app!("tar", setup)
+        let app = util_app!(NAME, setup)
                     // operations
                     .group(ArgGroup::with_name("mode")
                             .args(&["create", "append", "list", "update", "extract"])

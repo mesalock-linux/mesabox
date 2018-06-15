@@ -232,7 +232,7 @@ where
     U: Into<OsString> + Clone,
 {
     let matches = {
-        let app = util_app!("ping", setup)
+        let app = util_app!(NAME, setup)
                     .arg(Arg::with_name("count")
                                 .short("c")
                                 .takes_value(true)

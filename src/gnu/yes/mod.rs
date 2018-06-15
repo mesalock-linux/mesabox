@@ -55,7 +55,7 @@ where
     U: Into<OsString> + Clone,
 {
     let matches = {
-        let app = util_app!("yes", setup)
+        let app = util_app!(NAME, setup)
                     .arg(Arg::with_name("STRING").index(1).multiple(true));
 
         app.get_matches_from_safe(args)?
