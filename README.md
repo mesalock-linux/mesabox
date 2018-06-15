@@ -26,6 +26,7 @@ arch    | GNU  | **Complete**
 base32  | GNU  | **Complete**
 base64  | GNU  | **Complete**
 yes     | GNU  | **Complete**
+getty   | Login | Simple Version
 tar     | LSB  | Beginning Stages
 ping    | Networking | Simple Version
 cat     | POSIX/GNU | **Complete**
