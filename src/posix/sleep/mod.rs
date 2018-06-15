@@ -47,7 +47,7 @@ where
     S: UtilSetup,
     T: ArgsIter,
 {
-    let app = util_app!(NAME).arg(Arg::with_name("NUMBER[SUFFIX]").index(1).multiple(true).required(true).help("hi"));
+    let app = util_app!(NAME).arg(Arg::with_name("NUMBER[SUFFIX]").index(1).multiple(true).required(true));
 
     let matches = app.get_matches_from_safe(args)?;
 
