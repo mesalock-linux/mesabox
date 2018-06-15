@@ -11,19 +11,33 @@ extern crate clap;
 extern crate failure;
 #[macro_use]
 extern crate failure_derive;
-extern crate byteorder;
-extern crate chrono;
-extern crate crossbeam;
-extern crate fnv;
-extern crate globset;
 extern crate libc;
+
+#[cfg(feature = "byteorder")]
+extern crate byteorder;
+#[cfg(feature = "chrono")]
+extern crate chrono;
+#[cfg(feature = "crossbeam")]
+extern crate crossbeam;
+#[cfg(feature = "fnv")]
+extern crate fnv;
+#[cfg(feature = "globset")]
+extern crate globset;
+#[cfg(feature = "mio")]
 extern crate mio;
+#[cfg(feature = "nix")]
 extern crate nix;
+#[cfg(feature = "pnet")]
 extern crate pnet;
+#[cfg(feature = "regex")]
 extern crate regex;
+#[cfg(feature = "socket2")]
 extern crate socket2;
+#[cfg(feature = "trust-dns-resolver")]
 extern crate trust_dns_resolver;
+#[cfg(feature = "uucore")]
 extern crate uucore;
+#[cfg(feature = "walkdir")]
 extern crate walkdir;
 
 use clap::{App, SubCommand};
@@ -40,6 +54,7 @@ use std::os::unix::io::{AsRawFd, RawFd};
 use std::path::{Path, PathBuf};
 use std::result::Result as StdResult;
 
+#[allow(unused)]
 pub(crate) use util::*;
 
 #[macro_use]

@@ -6,9 +6,9 @@ description = "A collection of utilities important to basic system functionality
 build = "build.rs"
 
 [features]
-arch = []
-base32 = []
-base64 = []
+arch = ["platform-info"]
+base32 = ["uucore"]
+base64 = ["uucore"]
 yes = []
 gnu = [
     "arch",
@@ -17,27 +17,27 @@ gnu = [
     "yes"
 ]
 
-getty = []
+getty = ["nix"]
 loginutils = [
     "getty"
 ]
 
 # XXX: temporary until renaming dependencies is supported
-tar_util = []
+tar_util = ["tar", "globset"]
 lsb = [
     "tar_util"
 ]
 
-ping = []
+ping = ["nix", "chrono", "crossbeam", "pnet", "byteorder", "trust-dns-resolver", "mio", "socket2"]
 networking = [
     "ping"
 ]
 
 cat = []
-chmod = []
+chmod = ["regex", "walkdir", "uucore"]
 head = []
-init = []
-sleep = []
+init = ["fnv", "nix"]
+sleep = ["uucore"]
 posix = [
     "cat",
     "chmod",
@@ -53,21 +53,22 @@ clap = "2.31.2"
 failure = "0.1.1"
 failure_derive = "0.1.1"
 libc = "0.2.40"
-platform-info = { git = "https://github.com/uutils/platform-info" }
-uucore = { git = "https://github.com/uutils/coreutils", features = ["encoding", "fs", "mode", "parse_time"] }
-tar = "0.4.15"
-globset = "0.4.0"
-nix = "0.10.0"
-chrono = "0.4.2"
-crossbeam = "0.3.2"
-pnet = "0.21.0"
-byteorder = "1.2.3"
-trust-dns-resolver = "0.9.0"
-mio = "0.6.14"
-socket2 = "0.3.5"
-walkdir = "2.1.4"
-fnv = "1.0.6"
-regex = "1.0.0"
+
+platform-info = { git = "https://github.com/uutils/platform-info", optional = true }
+uucore = { git = "https://github.com/uutils/coreutils", features = ["encoding", "fs", "mode", "parse_time"], optional = true }
+tar = { version = "0.4.15", optional = true }
+globset = { version = "0.4.0", optional = true }
+nix = { version = "0.10.0", optional = true }
+chrono = { version = "0.4.2", optional = true }
+crossbeam = { version = "0.3.2", optional = true }
+pnet = { version = "0.21.0", optional = true }
+byteorder = { version = "1.2.3", optional = true }
+trust-dns-resolver = { version = "0.9.0", optional = true }
+mio = { version = "0.6.14", optional = true }
+socket2 = { version = "0.3.5", optional = true }
+walkdir = { version = "2.1.4", optional = true }
+fnv = { version = "1.0.6", optional = true }
+regex = { version = "1.0.0", optional = true }
 
 [dev-dependencies]
 tempfile = "3.0.2"
