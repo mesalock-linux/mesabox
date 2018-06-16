@@ -605,7 +605,7 @@ impl UCommand {
 
         let stdin = self.stdin.clone().unwrap_or_default();
         let current_dir = Some(self.current_dir.clone());
-        let env = Box::new(self.env.clone().into_iter());
+        let env = self.env.clone().into_iter();
         let args = self.args.clone().into_iter();
 
         let stdout = Arc::new(Mutex::new(vec![]));

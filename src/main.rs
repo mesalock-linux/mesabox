@@ -19,7 +19,7 @@ fn main() {
     let stdin = io::stdin();
     let stderr = io::stderr();
 
-    let mut setup = UtilData::new(stdin, stdout, stderr, Box::new(env::vars_os()), None);
+    let mut setup = UtilData::new(stdin, stdout, stderr, env::vars_os(), None);
 
     if let Err(f) = mesabox::execute(&mut setup, &mut env::args_os()) {
         if let Some(ref err) = f.err {

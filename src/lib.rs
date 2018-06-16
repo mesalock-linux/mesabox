@@ -41,105 +41,57 @@ extern crate uucore;
 extern crate walkdir;
 
 use clap::{App, SubCommand};
-use failure::{Error, Fail};
 use libc::EXIT_FAILURE;
 use std::cell::{RefCell, RefMut};
-use std::convert::From;
 use std::ffi::{OsStr, OsString};
-use std::fmt::{self, Display};
-use std::fs::File;
-use std::io::{self, BufRead, BufReader, BufWriter, Read, Write};
+use std::io::{BufRead, Read, Write};
 use std::iter;
-use std::os::unix::io::{AsRawFd, RawFd};
+use std::os::unix::io::RawFd;
 use std::path::{Path, PathBuf};
 use std::result::Result as StdResult;
 
 #[allow(unused)]
 pub(crate) use util::*;
+pub use error::*;
+pub use setup::*;
 
+mod error;
 #[macro_use]
 #[allow(unused_macros)]
 mod macros;
+mod setup;
 #[allow(dead_code)]
 mod util;
 
 // contains all the "mod"s which allow us to use the utils
 include!(concat!(env!("OUT_DIR"), "/utils.rs"));
 
-#[derive(Debug)]
-pub struct MesaError {
-    pub(crate) progname: Option<OsString>,
-    pub exitcode: libc::c_int,
-    pub err: Option<Error>,
-}
-
-impl MesaError {
-    pub fn new(progname: Option<OsString>, exitcode: libc::c_int, err: Option<Error>) -> Self {
-        Self {
-            progname: progname,
-            exitcode: exitcode,
-            err: err,
-        }
-    }
-
-    pub fn with_exitcode(mut self, code: libc::c_int) -> Self {
-        self.exitcode = code;
-        self
-    }
-}
-
-impl<E: Fail + Send + Sync + 'static> From<E> for MesaError {
-    fn from(error: E) -> Self {
-        Self {
-            progname: None,
-            exitcode: 1,
-            err: Some(error.into()),
-        }
-    }
-}
-
-impl Display for MesaError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match (&self.progname, &self.err) {
-            (Some(ref progname), Some(ref err)) => {
-                write!(f, "{}: {}", progname.to_string_lossy(), err)
-            }
-            (None, Some(ref err)) => err.fmt(f),
-            _ => Ok(()),
-        }
-    }
-}
-
-#[derive(Fail, Debug)]
-#[fail(display = "{}: failed to lock", file)]
-pub struct LockError {
-    file: String,
-}
-
-pub struct UtilData<I, O, E>
+pub struct UtilData<I, O, E, T>
 where
     I: for<'a> UtilRead<'a>,
     O: for<'a> UtilWrite<'a>,
     E: for<'a> UtilWrite<'a>,
+    T: Iterator<Item = (OsString, OsString)>,
 {
     pub stdin: RefCell<I>,
     pub stdout: RefCell<O>,
     pub stderr: RefCell<E>,
-    pub env: Box<Iterator<Item = (OsString, OsString)>>,
+    pub env: T,
     pub current_dir: Option<PathBuf>,
 }
 
-impl<I, O, E> UtilData<I, O, E>
+impl<I, O, E, T> UtilData<I, O, E, T>
 where
     I: for<'a> UtilRead<'a>,
     O: for<'a> UtilWrite<'a>,
     E: for<'a> UtilWrite<'a>,
+    T: Iterator<Item = (OsString, OsString)>,
 {
     pub fn new(
         stdin: I,
         stdout: O,
         stderr: E,
-        env: Box<Iterator<Item = (OsString, OsString)>>,
+        env: T,
         current_dir: Option<PathBuf>,
     ) -> Self {
         Self {
@@ -156,6 +108,7 @@ pub trait UtilSetup {
     type Input: for<'a> UtilRead<'a>;
     type Output: for<'a> UtilWrite<'a>;
     type Error: for<'a> UtilWrite<'a>;
+    type Env: Iterator<Item = (OsString, OsString)>;
 
     fn input(&self) -> RefMut<Self::Input>;
     fn output(&self) -> RefMut<Self::Output>;
@@ -169,18 +122,22 @@ pub trait UtilSetup {
         RefMut<Self::Error>,
     );
 
+    fn env(&mut self) -> &mut Self::Env;
+
     fn current_dir(&self) -> Option<&Path>;
 }
 
-impl<I, O, E> UtilSetup for UtilData<I, O, E>
+impl<I, O, E, T> UtilSetup for UtilData<I, O, E, T>
 where
     I: for<'a> UtilRead<'a>,
     O: for<'a> UtilWrite<'a>,
     E: for<'a> UtilWrite<'a>,
+    T: Iterator<Item = (OsString, OsString)>,
 {
     type Input = I;
     type Output = O;
     type Error = E;
+    type Env = T;
 
     fn input(&self) -> RefMut<Self::Input> {
         self.stdin.borrow_mut()
@@ -204,6 +161,10 @@ where
         (self.input(), self.output(), self.error())
     }
 
+    fn env(&mut self) -> &mut Self::Env {
+        &mut self.env
+    }
+
     fn current_dir(&self) -> Option<&Path> {
         self.current_dir.as_ref().map(|p| p.as_path())
     }
@@ -218,6 +179,7 @@ pub trait UtilRead<'a>: Read + Send + Sync {
         None
     }
 }
+
 pub trait UtilWrite<'a>: Write + Send + Sync {
     type Lock: Write + 'a;
 
@@ -225,108 +187,6 @@ pub trait UtilWrite<'a>: Write + Send + Sync {
 
     fn raw_fd(&self) -> Option<RawFd> {
         None
-    }
-}
-
-impl<'a, 'b, T: UtilRead<'a>> UtilRead<'a> for &'b mut T {
-    type Lock = T::Lock;
-
-    fn lock_reader<'c: 'a>(&'c mut self) -> StdResult<Self::Lock, LockError> {
-        (**self).lock_reader()
-    }
-
-    fn raw_fd(&self) -> Option<RawFd> {
-        (**self).raw_fd()
-    }
-}
-
-impl<'a, 'b, T: UtilWrite<'a>> UtilWrite<'a> for &'b mut T {
-    type Lock = T::Lock;
-
-    fn lock_writer<'c: 'a>(&'c mut self) -> StdResult<Self::Lock, LockError> {
-        (**self).lock_writer()
-    }
-
-    fn raw_fd(&self) -> Option<RawFd> {
-        (**self).raw_fd()
-    }
-}
-
-// TODO: implement for other common things like File, BufReader, etc.
-
-impl<'a, 'b> UtilRead<'a> for &'b [u8] {
-    type Lock = &'a [u8];
-
-    fn lock_reader<'c: 'a>(&'c mut self) -> StdResult<Self::Lock, LockError> {
-        Ok(self)
-    }
-}
-
-impl<'a> UtilWrite<'a> for Vec<u8> {
-    type Lock = &'a mut Self;
-
-    fn lock_writer<'b: 'a>(&'b mut self) -> StdResult<Self::Lock, LockError> {
-        Ok(self)
-    }
-}
-
-impl<'a> UtilRead<'a> for File {
-    type Lock = BufReader<&'a mut Self>;
-
-    fn lock_reader<'b: 'a>(&'b mut self) -> StdResult<Self::Lock, LockError> {
-        Ok(BufReader::new(self))
-    }
-
-    fn raw_fd(&self) -> Option<RawFd> {
-        Some(self.as_raw_fd())
-    }
-}
-
-impl<'a> UtilRead<'a> for io::Stdin {
-    type Lock = io::StdinLock<'a>;
-
-    fn lock_reader<'b: 'a>(&'b mut self) -> StdResult<Self::Lock, LockError> {
-        Ok(self.lock())
-    }
-
-    fn raw_fd(&self) -> Option<RawFd> {
-        Some(self.as_raw_fd())
-    }
-}
-
-impl<'a> UtilWrite<'a> for File {
-    type Lock = BufWriter<&'a mut Self>;
-
-    fn lock_writer<'b: 'a>(&'b mut self) -> StdResult<Self::Lock, LockError> {
-        Ok(BufWriter::new(self))
-    }
-
-    fn raw_fd(&self) -> Option<RawFd> {
-        Some(self.as_raw_fd())
-    }
-}
-
-impl<'a> UtilWrite<'a> for io::Stdout {
-    type Lock = io::StdoutLock<'a>;
-
-    fn lock_writer<'b: 'a>(&'b mut self) -> StdResult<Self::Lock, LockError> {
-        Ok(self.lock())
-    }
-
-    fn raw_fd(&self) -> Option<RawFd> {
-        Some(self.as_raw_fd())
-    }
-}
-
-impl<'a> UtilWrite<'a> for io::Stderr {
-    type Lock = io::StderrLock<'a>;
-
-    fn lock_writer<'b: 'a>(&'b mut self) -> StdResult<Self::Lock, LockError> {
-        Ok(self.lock())
-    }
-
-    fn raw_fd(&self) -> Option<RawFd> {
-        Some(self.as_raw_fd())
     }
 }
 
