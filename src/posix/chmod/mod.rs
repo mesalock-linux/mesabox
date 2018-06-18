@@ -72,7 +72,7 @@ where
     T: ArgsIter,
 {
     let matches = {
-        let app = util_app!(NAME, setup)
+        let app = util_app!(NAME)
                     .after_help(MODE_SYNTAX)
                     .setting(AppSettings::AllowLeadingHyphen)
                     .arg(Arg::with_name("recursive")

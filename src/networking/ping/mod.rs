@@ -228,7 +228,7 @@ where
     T: ArgsIter,
 {
     let matches = {
-        let app = util_app!(NAME, setup)
+        let app = util_app!(NAME)
                     .arg(Arg::with_name("count")
                                 .short("c")
                                 .takes_value(true)

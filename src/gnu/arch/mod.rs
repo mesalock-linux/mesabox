@@ -20,7 +20,7 @@ where
     S: UtilSetup,
     T: ArgsIter,
 {
-    let _ = util_app!(NAME, setup).get_matches_from_safe_borrow(args)?;
+    let _ = util_app!(NAME).get_matches_from_safe_borrow(args)?;
 
     writeln!(setup.output(), "{}", PlatformInfo::new()?.machine().trim())?;
 

@@ -50,10 +50,10 @@ use std::os::unix::io::RawFd;
 use std::path::{Path, PathBuf};
 use std::result::Result as StdResult;
 
-#[allow(unused)]
-pub(crate) use util::*;
 pub use error::*;
 pub use setup::*;
+#[allow(unused)]
+pub(crate) use util::*;
 
 mod error;
 #[macro_use]
@@ -87,13 +87,7 @@ where
     E: for<'a> UtilWrite<'a>,
     T: Iterator<Item = (OsString, OsString)>,
 {
-    pub fn new(
-        stdin: I,
-        stdout: O,
-        stderr: E,
-        env: T,
-        current_dir: Option<PathBuf>,
-    ) -> Self {
+    pub fn new(stdin: I, stdout: O, stderr: E, env: T, current_dir: Option<PathBuf>) -> Self {
         Self {
             stdin: RefCell::new(stdin),
             stdout: RefCell::new(stdout),
@@ -251,30 +245,33 @@ where
         if let Some(filename) = Path::new(&progname.clone().into()).file_name() {
             // we pass along the args in case the util requires non-standard argument
             // parsing (e.g. dd)
-            return execute_util(setup, filename, &mut iter::once(progname).chain(args)).map(
-                |res| {
-                    // XXX: note that this currently is useless as we are temporarily overriding -V and --help
-                    res.or_else(|mut mesa_err| {
-                        if let Some(ref e) = mesa_err.err {
-                            if let Some(clap_err) = e.downcast_ref::<clap::Error>() {
-                                if clap_err.kind == clap::ErrorKind::HelpDisplayed
-                                    || clap_err.kind == clap::ErrorKind::VersionDisplayed
-                                {
-                                    write!(setup.output(), "{}", clap_err)?;
-                                    return Ok(());
-                                }
-                            }
-                        }
-                        // TODO: check for --help and -V/--version probably
-                        if mesa_err.progname.is_none() {
-                            mesa_err.progname = Some(filename.to_os_string());
-                        }
-                        Err(mesa_err)
-                    })
-                },
-            );
+            return execute_util(setup, filename, &mut iter::once(progname).chain(args))
+                .map(|res| handle_util_result(setup, filename, res));
         }
     }
 
     None
+}
+
+fn handle_util_result<S>(setup: &mut S, filename: &OsStr, res: Result<()>) -> Result<()>
+where
+    S: UtilSetup,
+{
+    res.or_else(|mut mesa_err| {
+        if let Some(ref e) = mesa_err.err {
+            if let Some(clap_err) = e.downcast_ref::<clap::Error>() {
+                if clap_err.kind == clap::ErrorKind::HelpDisplayed
+                    || clap_err.kind == clap::ErrorKind::VersionDisplayed
+                {
+                    write!(setup.output(), "{}", clap_err)?;
+                    return Ok(());
+                }
+            }
+        }
+        // TODO: check for --help and -V/--version probably
+        if mesa_err.progname.is_none() {
+            mesa_err.progname = Some(filename.to_os_string());
+        }
+        Err(mesa_err)
+    })
 }

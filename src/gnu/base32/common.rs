@@ -58,7 +58,7 @@ where
     T: ArgsIter,
 {
     let matches = {
-        let app = util_app!(name, setup, desc)
+        let app = util_app!(name, desc)
                     .arg(Arg::with_name("decode")
                             .short("d")
                             .long("decode")

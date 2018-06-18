@@ -51,7 +51,7 @@ where
     T: ArgsIter,
 {
     let matches = {
-        let app = util_app!(NAME, setup)
+        let app = util_app!(NAME)
                     .arg(Arg::with_name("STRING").index(1).multiple(true));
 
         app.get_matches_from_safe(args)?

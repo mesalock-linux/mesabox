@@ -53,7 +53,7 @@ where
     let mut default_lines = 10;
 
     let matches = {
-        let app = util_app!("head", setup)
+        let app = util_app!("head")
                     .setting(AppSettings::AllowLeadingHyphen)
                     .after_help(AFTER_HELP)
                     .group(ArgGroup::with_name("mode")

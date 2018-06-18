@@ -1,8 +1,8 @@
+use super::{LockError, UtilRead, UtilWrite};
 use std::fs::File;
 use std::io::{self, BufReader, BufWriter};
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::result::Result as StdResult;
-use super::{UtilRead, UtilWrite, LockError};
 
 impl<'a, 'b, T: UtilRead<'a>> UtilRead<'a> for &'b mut T {
     type Lock = T::Lock;

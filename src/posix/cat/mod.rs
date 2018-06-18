@@ -406,7 +406,7 @@ where
     T: ArgsIter,
 {
     let matches = {
-        let app = util_app!("cat", setup)
+        let app = util_app!("cat")
                     .arg(Arg::with_name("show-all")
                             .short("A")
                             .long("show-all")
