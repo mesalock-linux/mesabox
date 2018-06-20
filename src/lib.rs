@@ -39,6 +39,11 @@ extern crate trust_dns_resolver;
 extern crate uucore;
 #[cfg(feature = "walkdir")]
 extern crate walkdir;
+#[cfg(feature = "either")]
+extern crate either;
+#[cfg(feature = "nom")]
+#[macro_use]
+extern crate nom;
 
 use clap::{App, SubCommand};
 use libc::EXIT_FAILURE;

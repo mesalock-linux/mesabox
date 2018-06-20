@@ -37,12 +37,14 @@ cat = []
 chmod = ["regex", "walkdir", "uucore"]
 head = []
 init = ["fnv", "nix"]
+sh = ["either", "fnv", "nom"]
 sleep = ["uucore"]
 posix = [
     "cat",
     "chmod",
     "head",
     "init",
+    "sh",
     "sleep"
 ]
 
@@ -69,6 +71,8 @@ socket2 = { version = "0.3.5", optional = true }
 walkdir = { version = "2.1.4", optional = true }
 fnv = { version = "1.0.6", optional = true }
 regex = { version = "1.0.0", optional = true }
+either = { version = "1.5.0", optional = true }
+nom = { version = "4.0.0", features = ["verbose-errors"], optional = true }
 
 [dev-dependencies]
 tempfile = "3.0.2"
