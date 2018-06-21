@@ -1,9 +1,13 @@
 use either::Either;
 use libc;
 
+use std::cell::RefCell;
 use std::ffi::OsString;
+use std::io::Write;
 use std::iter::FromIterator;
 use std::os::unix::io::RawFd;
+use std::process::{Child, Stdio};
+use std::rc::Rc;
 
 use super::env::Environment;
 use ::UtilSetup;
@@ -472,22 +476,42 @@ impl SimpleCommand {
 
         if let Some(ref name) = self.name {
             let mut cmd = RealCommand::new(name);
-            println!("{}", name.to_string_lossy());
+            //println!("{}", name.to_string_lossy());
             cmd.env_clear();
 
             cmd.envs(env.iter());
             // TODO: redirects and pre/post actions (other than args)
             if let Some(ref actions) = self.post_actions {
                 for act in actions.iter() {
-                    if let Either::Right(ref word) = act {
-                        cmd.arg(word);
+                    match act {
+                        Either::Left(ref redirect) => {
+                            // FIXME: only works after spawning process i guess
+                            redirect.setup(&mut cmd);
+                        }
+                        Either::Right(ref word) => {
+                            cmd.arg(word);
+                        }
                     }
                 }
             }
 
             // TODO: this probably shouldn't wait but not sure what to do exactly
             // FIXME: don't unwrap
-            return cmd.spawn().unwrap().wait().unwrap().code().unwrap();
+            let mut child = cmd.spawn().unwrap();
+            if let Some(ref actions) = self.post_actions {
+                // FIXME: don't unwrap
+                for act in actions.iter() {
+                    match act {
+                        Either::Left(ref redirect) => {
+                            // FIXME: only works after spawning process i guess
+                            redirect.handle_child(&mut child);
+                        }
+                        _ => {}
+                        //Either::Right(ref word) => cmd.arg(word)
+                    }
+                }
+            }
+            child.wait().unwrap().code().unwrap();
         }
 
         0
@@ -500,7 +524,35 @@ pub type PostAction = Either<IoRedirect, Word>;
 #[derive(Debug)]
 pub enum IoRedirect {
     File(Option<RawFd>, IoRedirectFile),
-    Heredoc(Option<RawFd>, HereDoc)
+    Heredoc(Option<RawFd>, Rc<RefCell<HereDoc>>)
+}
+
+impl IoRedirect {
+    pub fn setup(&self, cmd: &mut ::std::process::Command) {
+        use self::IoRedirect::*;
+
+        // TODO: both file and check for fds
+        match self {
+            Heredoc(_, ref doc) => {
+                cmd.stdin(Stdio::piped());
+            }
+            _ => {}
+        }
+    }
+
+    // FIXME: this can prob error
+    pub fn handle_child(&self, child: &mut Child) {
+        use self::IoRedirect::*;
+
+        // TODO: if we need to handle something other than heredocs do so
+        match self {
+            Heredoc(_, ref doc) => {
+                // FIXME: don't unwrap
+                child.stdin.as_mut().unwrap().write_all(&doc.borrow().data).unwrap();
+            }
+            _ => {}
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -531,16 +583,20 @@ pub enum IoRedirectKind {
 
 #[derive(Debug)]
 pub struct HereDoc {
-    strip: bool,
-    end: Word
+    pub data: Vec<u8>,
 }
 
 impl HereDoc {
-    pub fn new(strip: bool, end: Word) -> Self {
+    pub fn new(data: Vec<u8>) -> Self {
         Self {
-            strip: strip,
-            end: end
+            data: data
         }
+    }
+}
+
+impl Default for HereDoc {
+    fn default() -> Self {
+        Self::new(vec![])
     }
 }
 

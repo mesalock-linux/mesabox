@@ -1,38 +1,59 @@
 use either::Either;
 use nom::{alphanumeric1, space0, newline};
 
+use std::cell::RefCell;
 use std::ffi::OsString;
 use std::os::unix::ffi::{OsStringExt, OsStrExt};
 use std::os::unix::io::RawFd;
+use std::rc::Rc;
 
 use super::ast::*;
 
-/*
-named!(script<&[u8], Script>,
-    do_parse!(
-        separated_nonempty_list_complete!()
-        eof!() >>
-    )
-);*/
+struct HereDocMarker {
+    marker: OsString,
+    strip_tabs: bool,
+    heredoc: Rc<RefCell<HereDoc>>,
+}
 
-named!(pub complete_command<&[u8], CompleteCommand>,
-    do_parse!(
-        ignore >>
-        res: separated_nonempty_list_complete!(separator, list) >>
-        //eof!() >>
-        (CompleteCommand::new(res))
-    )
+pub struct Parser {
+    heredoc_markers: Vec<HereDocMarker>,
+}
+
+impl Parser {
+    pub fn new() -> Self {
+        Self {
+            heredoc_markers: vec![],
+        }
+    }
+
+    /*
+    named!(script<&[u8], Script>,
+        do_parse!(
+            separated_nonempty_list_complete!()
+            eof!() >>
+        )
+    );*/
+
+    method!(pub complete_command<Parser, &[u8], CompleteCommand>, mut self,
+        do_parse!(
+            ignore >>
+            call!(linebreak, &mut self) >>
+            res: separated_nonempty_list_complete!(call!(separator, &mut self), call!(list, &mut self)) >>
+            //eof!() >>
+            (CompleteCommand::new(res))
+        )
+    );
+}
+
+named_args!(list<'a>(parser: &mut Parser)<&'a [u8], Vec<Vec<AndOr>>>,
+    separated_nonempty_list_complete!(call!(separator_op, parser), call!(and_or, parser))
 );
 
-named!(list<&[u8], Vec<Vec<AndOr>>>,
-    separated_nonempty_list_complete!(separator_op, and_or)
-);
-
-named!(and_or<&[u8], Vec<AndOr>>,
+named_args!(and_or<'a>(parser: &mut Parser)<&'a [u8], Vec<AndOr>>,
     do_parse!(
-        first: pipeline >>
+        first: call!(pipeline, parser) >>
         res: fold_many0!(
-            and_or_inner,
+            call!(and_or_inner, parser),
             vec![AndOr::new(first, SepKind::First)],
             |mut acc: Vec<_>, item| { acc.push(item); acc }
         ) >>
@@ -40,27 +61,27 @@ named!(and_or<&[u8], Vec<AndOr>>,
     )
 );
 
-named!(and_or_inner<&[u8], AndOr>,
+named_args!(and_or_inner<'a>(parser: &mut Parser)<&'a [u8], AndOr>,
     do_parse!(
-        sep: and_or_sep >>
-        pipe: pipeline >>
+        sep: call!(and_or_sep, parser) >>
+        pipe: call!(pipeline, parser) >>
         (AndOr::new(pipe, sep))
     )
 );
 
-named!(and_or_sep<&[u8], SepKind>,
+named_args!(and_or_sep<'a>(parser: &mut Parser)<&'a [u8], SepKind>,
     do_parse!(
         res: alt!(
             tag!("&&") => { |_| SepKind::And } |
             tag!("||") => { |_| SepKind::Or }
         ) >>
         ignore >>
-        linebreak >>
+        call!(linebreak, parser) >>
         (res)
     )
 );
 
-named!(var_name<&[u8], OsString>,
+named_args!(var_name<'a>(parser: &mut Parser)<&'a [u8], OsString>,
     do_parse!(
         name: alphanumeric1 >>
         ignore >>
@@ -68,9 +89,9 @@ named!(var_name<&[u8], OsString>,
     )
 );
 
-named!(var_assign<&[u8], VarAssign>,
+named_args!(var_assign<'a>(parser: &mut Parser)<&'a [u8], VarAssign>,
     do_parse!(
-        name: var_name >>
+        name: call!(var_name, parser) >>
         tag!("=") >>
         expr: value!(()) >>
         ignore >>
@@ -78,74 +99,82 @@ named!(var_assign<&[u8], VarAssign>,
     )
 );
 
-named!(pipe_seq<&[u8], Pipeline>,
-    map!(separated_nonempty_list_complete!(pipe_sep, command), |vec| {
+named_args!(pipe_seq<'a>(parser: &mut Parser)<&'a [u8], Pipeline>,
+    map!(separated_nonempty_list_complete!(call!(pipe_sep, parser), call!(command, parser)), |vec| {
         vec.into_iter().collect()
     })
 );
 
-named!(pipe_sep,
-    recognize!(tuple!(tag!("|"), ignore, linebreak))
+named_args!(pipe_sep<'a>(parser: &mut Parser)<&'a [u8], &'a [u8]>,
+    recognize!(tuple!(tag!("|"), ignore, call!(linebreak, parser)))
 );
 
-named!(pipeline<&[u8], Pipeline>,
+named_args!(pipeline<'a>(parser: &mut Parser)<&'a [u8], Pipeline>,
     do_parse!(
         bang: opt!(tag!("!")) >>
-        seq: pipe_seq >>
+        seq: call!(pipe_seq, parser) >>
         ({ let mut seq = seq; seq.bang = bang.is_some(); seq })
     )
 );
 
-named!(command<&[u8], Command>,
+named_args!(command<'a>(parser: &mut Parser)<&'a [u8], Command>,
     alt!(
-        function_def => { |def: FunctionDef| def.into() } |
+        call!(function_def, parser) => { |def: FunctionDef| def.into() } |
         do_parse!(
-            cmd: compound_command >>
-            redir: opt!(redirect_list) >>
+            cmd: call!(compound_command, parser) >>
+            redir: opt!(call!(redirect_list, parser)) >>
             ({ let mut cmd = cmd; cmd.redirect_list = redir; cmd })
         ) => { |cmd| cmd } |
-        simple_command => { |cmd: SimpleCommand| cmd.into() }
+        call!(simple_command, parser) => { |cmd: SimpleCommand| cmd.into() }
     )
 );
 
-named!(compound_command<&[u8], Command>,
+named_args!(compound_command<'a>(parser: &mut Parser)<&'a [u8], Command>,
     alt!(
-        brace_group |
-        subshell |
-        for_clause => { |clause: ForClause| clause.into() } |
-        case_clause => { |clause: CaseClause| clause.into() } |
-        if_clause => { |clause: IfClause| clause.into() } |
-        while_clause => { |clause: WhileClause| clause.into() } |
-        until_clause => { |clause: WhileClause| clause.into() }
+        call!(brace_group, parser) |
+        call!(subshell, parser) |
+        call!(for_clause, parser) => { |clause: ForClause| clause.into() } |
+        call!(case_clause, parser) => { |clause: CaseClause| clause.into() } |
+        call!(if_clause, parser) => { |clause: IfClause| clause.into() } |
+        call!(while_clause, parser) => { |clause: WhileClause| clause.into() } |
+        call!(until_clause, parser) => { |clause: WhileClause| clause.into() }
     )
 );
 
-named!(subshell<&[u8], Command>,
-    delimited!(
+named_args!(subshell<'a>(parser: &mut Parser)<&'a [u8], Command>,
+    /*delimited!(
         pair!(tag!("("), ignore),
-        compound_list,
+        call!(compound_list, parser),
         pair!(tag!(")"), ignore)
+    )*/
+    do_parse!(
+        tag!("(") >>
+        ignore >>
+        res: call!(compound_list, parser) >>
+        tag!(")") >>
+        ignore >>
+        (res)
     )
 );
 
-named!(compound_list<&[u8], Command>,
+named_args!(compound_list<'a>(parser: &mut Parser)<&'a [u8], Command>,
     do_parse!(
         // XXX: this is technically an optional newline_list in the spec
-        linebreak >>
-        res: map!(term, |and_ors| Command::with_inner(CommandInner::AndOr(and_ors))) >>
-        opt!(separator) >>
+        call!(linebreak, parser) >>
+        res: map!(call!(term, parser), |and_ors| Command::with_inner(CommandInner::AndOr(and_ors))) >>
+        opt!(call!(separator, parser)) >>
         (res)
     )
 );
 
 // FIXME: check if this sketchy parsing is still needed
-named!(term<&[u8], Vec<Vec<AndOr>>>,
+named_args!(term<'a>(parser: &mut Parser)<&'a [u8], Vec<Vec<AndOr>>>,
     //terminated!(separated_nonempty_list_complete!(separator, and_or), opt!(separator))
     do_parse!(
-        first: and_or >>
+        first: call!(and_or, parser) >>
         res: many_till!(
-            complete!(term_inner),
-            pair!(opt!(separator), not!(and_or))
+            complete!(call!(term_inner, parser)),
+            pair!(opt!(call!(separator, parser)), not!(call!(and_or, parser)))
         ) >>
         //    vec![first],
         //    |mut acc: Vec<_>, item| { acc.push(item); acc }
@@ -154,34 +183,34 @@ named!(term<&[u8], Vec<Vec<AndOr>>>,
     )
 );
 
-named!(term_inner<&[u8], Vec<AndOr>>,
+named_args!(term_inner<'a>(parser: &mut Parser)<&'a [u8], Vec<AndOr>>,
     do_parse!(
-        separator >>
-        and_or: and_or >>
+        call!(separator, parser) >>
+        and_or: call!(and_or, parser) >>
         (and_or)
     )
 );
 
-named!(for_clause<&[u8], ForClause>,
-    dbg_dmp!(do_parse!(
+named_args!(for_clause<'a>(parser: &mut Parser)<&'a [u8], ForClause>,
+    do_parse!(
         tag!("for") >>
         ignore >>
-        name: name >>
-        linebreak >>
+        name: call!(name, parser) >>
+        call!(linebreak, parser) >>
         words: opt!(
             do_parse!(
-                in_tok >>
+                call!(in_tok, parser) >>
                 words: many0!(word) >>
-                sequential_sep >>
+                call!(sequential_sep, parser) >>
                 (words)
             )
         ) >>
-        do_stmt: do_group >>
+        do_stmt: call!(do_group, parser) >>
         (ForClause::new(name, words, do_stmt))
-    ))
+    )
 );
 
-named!(name<&[u8], Name>,
+named_args!(name<'a>(parser: &mut Parser)<&'a [u8], Name>,
     do_parse!(
         val: map!(alphanumeric1, |res| OsString::from_vec(res.to_owned())) >>
         ignore >>
@@ -189,21 +218,21 @@ named!(name<&[u8], Name>,
     )
 );
 
-named!(in_tok,
+named_args!(in_tok<'a>(parser: &mut Parser)<&'a [u8], &'a [u8]>,
     // TODO: parse in (apply rule 6)
     recognize!(pair!(tag!("in"), ignore))
 );
 
-named!(case_clause<&[u8], CaseClause>,
+named_args!(case_clause<'a>(parser: &mut Parser)<&'a [u8], CaseClause>,
     do_parse!(
         tag!("case") >>
         ignore >>
         word: word >>
-        linebreak >>
-        in_tok >>
-        linebreak >>
+        call!(linebreak, parser) >>
+        call!(in_tok, parser) >>
+        call!(linebreak, parser) >>
         case_list: many0!(
-            alt!(case_item | case_item_ns)
+            alt!(call!(case_item, parser) | call!(case_item_ns, parser))
         ) >>
         tag!("esac") >>
         ignore >>
@@ -211,152 +240,152 @@ named!(case_clause<&[u8], CaseClause>,
     )
 );
 
-named!(case_item_ns<&[u8], CaseItem>,
+named_args!(case_item_ns<'a>(parser: &mut Parser)<&'a [u8], CaseItem>,
     do_parse!(
         opt!(pair!(tag!("("), ignore)) >>
-        pattern: pattern >>
+        pattern: call!(pattern, parser) >>
         tag!(")") >>
         ignore >>
-        list: opt!(compound_list) >>
-        linebreak >>
+        list: opt!(call!(compound_list, parser)) >>
+        call!(linebreak, parser) >>
         (CaseItem::new(pattern, list))
     )
 );
 
-named!(case_item<&[u8], CaseItem>,
+named_args!(case_item<'a>(parser: &mut Parser)<&'a [u8], CaseItem>,
     do_parse!(
-        item: case_item_ns >>
+        item: call!(case_item_ns, parser) >>
         tag!(";;") >>
         ignore >>
-        linebreak >>
+        call!(linebreak, parser) >>
         (item)
     )
 );
 
 // TODO: clearly
-named!(pattern<&[u8], Pattern>,
+named_args!(pattern<'a>(parser: &mut Parser)<&'a [u8], Pattern>,
     value!(())
 );
 
-named!(if_clause<&[u8], IfClause>,
+named_args!(if_clause<'a>(parser: &mut Parser)<&'a [u8], IfClause>,
     do_parse!(
         tag!("if") >>
         ignore >>
-        cond: compound_list >>
+        cond: call!(compound_list, parser) >>
         tag!("then") >>
         ignore >>
-        body: compound_list >>
-        else_stmt: opt!(else_part) >>
+        body: call!(compound_list, parser) >>
+        else_stmt: opt!(call!(else_part, parser)) >>
         tag!("fi") >>
         ignore >>
         (IfClause::new(cond, body, else_stmt))
     )
 );
 
-named!(else_part<&[u8], ElseClause>,
+named_args!(else_part<'a>(parser: &mut Parser)<&'a [u8], ElseClause>,
     alt!(
         do_parse!(
             tag!("elif") >>
             ignore >>
-            cond: compound_list >>
+            cond: call!(compound_list, parser) >>
             tag!("then") >>
             ignore >>
-            body: compound_list >>
-            else_stmt: else_part >>
+            body: call!(compound_list, parser) >>
+            else_stmt: call!(else_part, parser) >>
             (ElseClause::new(Some(cond), body, Some(Box::new(else_stmt))))
         ) |
         do_parse!(
             tag!("else") >>
             ignore >>
-            body: compound_list >>
+            body: call!(compound_list, parser) >>
             (ElseClause::new(None, body, None))
         )
     )
 );
 
-named!(while_clause<&[u8], WhileClause>,
-    // FIXME: maybe these clauses should use space1?
+named_args!(while_clause<'a>(parser: &mut Parser)<&'a [u8], WhileClause>,
+    // FIXME: maybe these clauses should use space1? (they definitely need to, otherwise stuff like whilex is parsed as while x)
     do_parse!(
         tag!("while") >>
         ignore >>
-        cond: compound_list >>
-        do_stmt: do_group >>
+        cond: call!(compound_list, parser) >>
+        do_stmt: call!(do_group, parser) >>
         (WhileClause::new(cond, true, do_stmt))
     )
 );
 
-named!(until_clause<&[u8], WhileClause>,
+named_args!(until_clause<'a>(parser: &mut Parser)<&'a [u8], WhileClause>,
     do_parse!(
         tag!("until") >>
         ignore >>
-        cond: compound_list >>
-        do_stmt: do_group >>
+        cond: call!(compound_list, parser) >>
+        do_stmt: call!(do_group, parser) >>
         (WhileClause::new(cond, false, do_stmt))
     )
 );
 
-named!(function_def<&[u8], FunctionDef>,
+named_args!(function_def<'a>(parser: &mut Parser)<&'a [u8], FunctionDef>,
     do_parse!(
-        name: fname >>
+        name: call!(fname, parser) >>
         tag!("()") >>
         ignore >>
-        linebreak >>
-        body: function_body >>
+        call!(linebreak, parser) >>
+        body: call!(function_body, parser) >>
         (FunctionDef::new(name, body))
     )
 );
 
-named!(function_body<&[u8], FunctionBody>,
+named_args!(function_body<'a>(parser: &mut Parser)<&'a [u8], FunctionBody>,
     do_parse!(
         // TODO: apply rule 9
-        cmd: compound_command >>
-        redir: opt!(redirect_list) >>
+        cmd: call!(compound_command, parser) >>
+        redir: opt!(call!(redirect_list, parser)) >>
         (FunctionBody::new(cmd, redir))
     )
 );
 
-named!(fname<&[u8], Name>,
+named_args!(fname<'a>(parser: &mut Parser)<&'a [u8], Name>,
     // FIXME: this do_parse should not be necessary
-    do_parse!(n: name >> (n))
+    call!(name, parser)
 );
 
-named!(brace_group<&[u8], Command>,
+named_args!(brace_group<'a>(parser: &mut Parser)<&'a [u8], Command>,
     delimited!(
         pair!(tag!("{"), ignore),
-        compound_list,
+        call!(compound_list, parser),
         pair!(tag!("}"), ignore)
     )
 );
 
-named!(do_group<&[u8], Command>,
+named_args!(do_group<'a>(parser: &mut Parser)<&'a [u8], Command>,
     do_parse!(
         tag!("do") >>
         ignore >>
-        lst: compound_list >>
+        lst: call!(compound_list, parser) >>
         tag!("done") >>
         ignore >>
         (lst)
     )
 );
 
-named!(simple_command<&[u8], SimpleCommand>,
+named_args!(simple_command<'a>(parser: &mut Parser)<&'a [u8], SimpleCommand>,
     alt!(
         do_parse!(
-            prefix: cmd_prefix >>
-            others: map!(opt!(pair!(cmd_word, opt!(cmd_suffix))), |others| {
+            prefix: call!(cmd_prefix, parser) >>
+            others: map!(opt!(pair!(call!(cmd_word, parser), opt!(call!(cmd_suffix, parser)))), |others| {
                 others.map(|(word, suffix)| (Some(word), suffix)).unwrap_or((None, None))
             }) >>
             (SimpleCommand::new(others.0, Some(prefix), others.1))
         ) |
         do_parse!(
-            name: cmd_name >>
-            suffix: opt!(cmd_suffix) >>
+            name: call!(cmd_name, parser) >>
+            suffix: opt!(call!(cmd_suffix, parser)) >>
             (SimpleCommand::new(Some(name), None, suffix))
         )
     )
 );
 
-named!(cmd_name<&[u8], CommandName>,
+named_args!(cmd_name<'a>(parser: &mut Parser)<&'a [u8], CommandName>,
     // TODO: apply rule 7a
     map_opt!(word, |word: OsString| {
         // TODO: this prob needs to check all keywords (ensure that e.g. in and then are actually not allowed)
@@ -367,35 +396,35 @@ named!(cmd_name<&[u8], CommandName>,
     })
 );
 
-named!(cmd_word<&[u8], CommandName>,
+named_args!(cmd_word<'a>(parser: &mut Parser)<&'a [u8], CommandName>,
     // TODO: apply rule 7b
     // FIXME: this do_parse should not be necessary
     do_parse!(w: word >> (w))
 );
 
-named!(cmd_prefix<&[u8], Vec<PreAction>>,
+named_args!(cmd_prefix<'a>(parser: &mut Parser)<&'a [u8], Vec<PreAction>>,
     many1!(
         alt!(
-            io_redirect => { |redir| Either::Left(redir) } |
-            var_assign => { |assign| Either::Right(assign) }
+            call!(io_redirect, parser) => { |redir| Either::Left(redir) } |
+            call!(var_assign, parser) => { |assign| Either::Right(assign) }
         )
     )
 );
 
-named!(cmd_suffix<&[u8], Vec<PostAction>>,
+named_args!(cmd_suffix<'a>(parser: &mut Parser)<&'a [u8], Vec<PostAction>>,
     many1!(
         alt!(
-            io_redirect => { |redir| Either::Left(redir) } |
+            call!(io_redirect, parser) => { |redir| Either::Left(redir) } |
             word => { |word| Either::Right(word) }
         )
     )
 );
 
-named!(redirect_list<&[u8], Vec<IoRedirect>>,
-    many1!(io_redirect)
+named_args!(redirect_list<'a>(parser: &mut Parser)<&'a [u8], Vec<IoRedirect>>,
+    many1!(call!(io_redirect, parser))
 );
 
-named!(io_redirect<&[u8], IoRedirect>,
+named_args!(io_redirect<'a>(parser: &mut Parser)<&'a [u8], IoRedirect>,
     alt!(
         do_parse!(
             num: opt!(io_number) >>
@@ -404,9 +433,99 @@ named!(io_redirect<&[u8], IoRedirect>,
         ) |
         do_parse!(
             num: opt!(io_number) >>
-            here: io_here >>
+            here: call!(io_here, parser) >>
             (IoRedirect::Heredoc(num, here))
         )
+    )
+);
+
+named_args!(io_here<'a>(parser: &mut Parser)<&'a [u8], Rc<RefCell<HereDoc>>>,
+    do_parse!(
+        tag!("<<") >>
+        dash: opt!(tag!("-")) >>
+        ignore >>
+        delim: call!(here_end, parser) >>
+        // XXX: can there be more than one heredoc at a time? (the answer is yes, for different commands on the same line)
+        ({
+            // NOTE: not really happy about using an Rc here, so see if there's an easy way to do without it
+            let heredoc = Rc::new(RefCell::new(HereDoc::default()));
+            parser.heredoc_markers.push(HereDocMarker {
+                marker: delim,
+                strip_tabs: dash.is_some(),
+                heredoc: heredoc.clone()
+            });
+            heredoc
+        })
+    )
+);
+
+named_args!(here_end<'a>(parser: &mut Parser)<&'a [u8], Word>,
+    // TODO: apply rule 3
+    // FIXME: this do_parse should not be necessary
+    do_parse!(w: word >> (w))
+);
+
+// this needs to read a heredoc until it encounters "\nEND MARKER\n"
+// XXX: this could probably use some improvement
+fn parse_heredoc<'a>(mut input: &'a [u8], parser: &mut Parser) -> ::nom::IResult<&'a [u8], ()> {
+    for marker in &mut parser.heredoc_markers {
+        let mut heredoc = marker.heredoc.borrow_mut();
+        let res = do_parse!(input,
+            res: fold_many1!(
+                do_parse!(
+                    not!(tuple!(newline, tag!(marker.marker.as_bytes()), newline)) >>
+                    val: take!(1) >>
+                    (val)
+                ),
+                vec![],
+                |mut acc: Vec<_>, item: &[u8]| {
+                    acc.extend(item.iter());
+                    acc
+                }
+            ) >>
+            nl: newline >>
+            tag!(marker.marker.as_bytes()) >>
+            newline >>
+            ({ let mut res = res; res.push(nl as _); res })
+         )?;
+        input = res.0;
+        heredoc.data = res.1.to_owned();
+    }
+    parser.heredoc_markers.clear();
+
+    Ok((input, ()))
+}
+
+named_args!(linebreak<'a>(parser: &mut Parser)<&'a [u8], Option<&'a [u8]>>,
+    opt!(call!(newline_list, parser))
+);
+
+// XXX: not sure if this is gonna make a Vec (which we don't want as we don't use the result)
+named_args!(newline_list<'a>(parser: &mut Parser)<&'a [u8], &'a [u8]>,
+    // XXX: spec doesn't actually seem to give value of newline (am guessing for portability)
+    //recognize!(pair!(take_while1!(|byte| byte == b'\n'), ignore))
+    recognize!(many1!(tuple!(newline, cond!(!parser.heredoc_markers.is_empty(), call!(parse_heredoc, parser)), ignore)))
+);
+
+// XXX: is & just run in background for this?
+named_args!(separator_op<'a>(parser: &mut Parser)<&'a [u8], &'a [u8]>,
+    recognize!(pair!(alt!(tag!("&") | tag!(";")), ignore))
+);
+
+named_args!(separator<'a>(parser: &mut Parser)<&'a [u8], &'a [u8]>,
+    alt!(recognize!(pair!(call!(separator_op, parser), call!(linebreak, parser))) | call!(newline_list, parser))
+);
+
+named_args!(sequential_sep<'a>(parser: &mut Parser)<&'a [u8], &'a [u8]>,
+    alt!(recognize!(tuple!(tag!(";"), ignore, call!(linebreak, parser))) | call!(newline_list, parser))
+);
+
+named!(word<&[u8], Word>,
+    // TODO: this might need to be able to parse quoted strings/words following different rules
+    do_parse!(
+        val: map!(alphanumeric1, |res| OsString::from_vec(res.to_owned())) >>
+        ignore >>
+        (val)
     )
 );
 
@@ -431,59 +550,6 @@ named!(filename<&[u8], Name>,
     // TODO: apply rule 2
     // FIXME: this do_parse should not be necessary
     do_parse!(w: word >> (w))
-);
-
-named!(io_here<&[u8], HereDoc>,
-    do_parse!(
-        tag!("<<") >>
-        dash: opt!(tag!("-")) >>
-        ignore >>
-        delim: here_end >>
-        // TODO: figure out how to parse heredoc
-        (unimplemented!())
-    )
-);
-
-named!(here_end<&[u8], Word>,
-    // TODO: apply rule 3
-    // FIXME: this do_parse should not be necessary
-    do_parse!(w: word >> (w))
-);
-
-named!(linebreak<&[u8], Option<&[u8]>>,
-    opt!(newline_list)
-    /*alt!(
-        newline_list | space1
-    )*/
-);
-
-// XXX: not sure if this is gonna make a Vec (which we don't want as we don't use the result)
-named!(newline_list,
-    // XXX: spec doesn't actually seem to give value of newline (am guessing for portability)
-    //recognize!(pair!(take_while1!(|byte| byte == b'\n'), ignore))
-    recognize!(many1!(pair!(newline, ignore)))
-);
-
-// XXX: is & just run in background for this?
-named!(separator_op,
-    recognize!(pair!(alt!(tag!("&") | tag!(";")), ignore))
-);
-
-named!(separator,
-    alt!(recognize!(pair!(separator_op, linebreak)) | newline_list)
-);
-
-named!(sequential_sep,
-    alt!(recognize!(tuple!(tag!(";"), ignore, linebreak)) | newline_list)
-);
-
-named!(word<&[u8], Word>,
-    // TODO: this might need to be able to parse quoted strings/words following different rules
-    do_parse!(
-        val: map!(alphanumeric1, |res| OsString::from_vec(res.to_owned())) >>
-        ignore >>
-        (val)
-    )
 );
 
 named!(io_number<&[u8], RawFd>,

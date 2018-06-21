@@ -1,6 +1,6 @@
 use super::{UtilSetup, ArgsIter, Result};
 
-use self::parser::complete_command;
+use self::parser::Parser;
 
 mod ast;
 mod env;
@@ -23,7 +23,7 @@ where
     let mut data = Vec::new();
     input.read_to_end(&mut data).unwrap();
 
-    let res = complete!(data.as_slice(), complete_command);
+    let res = Parser::new().complete_command(data.as_slice()).1;
     match res {
         Ok(m) => {
             let mut env = setup.env().into();
