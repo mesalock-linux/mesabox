@@ -54,9 +54,64 @@ impl CompleteCommand {
 
 pub type VarName = OsString;
 
-pub type Word = OsString;
+//pub type Word = OsString;
 pub type Name = OsString;
-pub type CommandName = OsString;
+pub type CommandName = Word;
+
+// split into the two types to avoid allocating an extra vector for every word
+// XXX: maybe store ParamExpand (at least) too?
+#[derive(Debug)]
+pub enum Word {
+    Text(OsString),
+    Complex(Vec<WordPart>),
+}
+
+impl Word {
+    pub fn eval<'a, S>(&'a self, setup: &mut S, env: &mut Environment<'a>) -> OsString
+    where
+        S: UtilSetup,
+    {
+        use self::Word::*;
+
+        match self {
+            Text(ref s) => s.clone(),
+            Complex(ref parts) => {
+                parts.iter().fold(OsString::new(), |mut acc, item| {
+                    acc.push(&item.eval(setup, env));
+                    acc
+                })
+            }
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum WordPart {
+    Text(OsString),
+    ParamExpand,        // TODO
+    CommandSubst,       // TODO
+}
+
+impl WordPart {
+    pub fn eval<'a, S>(&'a self, setup: &mut S, env: &mut Environment<'a>) -> OsString
+    where
+        S: UtilSetup,
+    {
+        use self::WordPart::*;
+
+        match self {
+            Text(ref s) => s.clone(),
+            _ => unimplemented!()
+        }
+    }
+
+    pub fn is_text(&self) -> bool {
+        match self {
+            WordPart::Text(_) => true,
+            _ => false
+        }
+    }
+}
 
 #[derive(Debug)]
 pub struct AndOr {
@@ -343,7 +398,8 @@ impl ForClause {
 
         let mut code = 0;
         for word in words {
-            env.set_var(&self.name, word.clone());
+            let value = word.eval(setup, env);
+            env.set_var(&self.name, value);
             code = self.body.execute(setup, env);
         }
         code
@@ -456,11 +512,11 @@ impl FunctionBody {
 pub struct SimpleCommand {
     pre_actions: Option<Vec<PreAction>>,
     post_actions: Option<Vec<PostAction>>,
-    name: Option<Name>,
+    name: Option<Word>,
 }
 
 impl SimpleCommand {
-    pub fn new(name: Option<Name>, pre_actions: Option<Vec<PreAction>>, post_actions: Option<Vec<PostAction>>) -> Self {
+    pub fn new(name: Option<Word>, pre_actions: Option<Vec<PreAction>>, post_actions: Option<Vec<PostAction>>) -> Self {
         Self {
             name: name,
             pre_actions: pre_actions,
@@ -468,14 +524,14 @@ impl SimpleCommand {
         }
     }
 
-    pub fn execute<S>(&self, setup: &mut S, env: &mut Environment) -> ExitCode
+    pub fn execute<'a, S>(&'a self, setup: &mut S, env: &mut Environment<'a>) -> ExitCode
     where
         S: UtilSetup,
     {
         use std::process::Command as RealCommand;
 
         if let Some(ref name) = self.name {
-            let mut cmd = RealCommand::new(name);
+            let mut cmd = RealCommand::new(name.eval(setup, env));
             //println!("{}", name.to_string_lossy());
             cmd.env_clear();
 
@@ -489,7 +545,7 @@ impl SimpleCommand {
                             redirect.setup(&mut cmd);
                         }
                         Either::Right(ref word) => {
-                            cmd.arg(word);
+                            cmd.arg(word.eval(setup, env));
                         }
                     }
                 }
@@ -557,7 +613,7 @@ impl IoRedirect {
 
 #[derive(Debug)]
 pub struct IoRedirectFile {
-    filename: OsString,
+    filename: Word,
     kind: IoRedirectKind
 }
 
@@ -597,6 +653,67 @@ impl HereDoc {
 impl Default for HereDoc {
     fn default() -> Self {
         Self::new(vec![])
+    }
+}
+
+// TODO: figure out how to get this to work (pass the child up the call chain?)
+#[derive(Debug)]
+pub struct CommandSubst {
+    command: Command,
+}
+
+impl CommandSubst {
+    pub fn new(cmd: Command) -> Self {
+        Self {
+            command: cmd,
+        }
+    }
+
+    pub fn eval<S>(&self, setup: &mut S, env: &mut Environment) -> OsString
+    where
+        S: UtilSetup,
+    {
+        unimplemented!()
+    }
+}
+
+#[derive(Debug)]
+pub struct DoubleQuote {
+    items: Vec<Quotable>
+}
+
+impl DoubleQuote {
+    pub fn eval<S>(&self, setup: &mut S, env: &mut Environment) -> OsString
+    where
+        S: UtilSetup,
+    {
+        self.items.iter().fold(OsString::new(), |mut acc, item| {
+            acc.push(&item.eval(setup, env));
+            acc
+        })
+    }
+}
+
+#[derive(Debug)]
+pub enum Quotable {
+    CommandSubst(CommandSubst),
+    ArithExpr,      // TODO: actually add support for this
+    ParamExpand,    // TODO: add support
+    Text(OsString),
+}
+
+impl Quotable {
+    pub fn eval<S>(&self, setup: &mut S, env: &mut Environment) -> OsString
+    where
+        S: UtilSetup,
+    {
+        use self::Quotable::*;
+
+        match self {
+            CommandSubst(ref sub) => sub.eval(setup, env),
+            Text(ref s) => s.clone(),
+            _ => unimplemented!()
+        }
     }
 }
 

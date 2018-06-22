@@ -1,5 +1,5 @@
 use either::Either;
-use nom::{alphanumeric1, space0, newline};
+use nom::{alpha1, alphanumeric1, space0, newline};
 
 use std::cell::RefCell;
 use std::ffi::OsString;
@@ -10,10 +10,14 @@ use std::rc::Rc;
 use super::ast::*;
 
 struct HereDocMarker {
-    marker: OsString,
+    marker: HereDocWord,
     strip_tabs: bool,
     heredoc: Rc<RefCell<HereDoc>>,
 }
+
+// NOTE: for better or worse, the heredoc ending word seems to be pretty much literal (it removes quotes but does not expand anything)
+//       we thus need to process it specially
+pub type HereDocWord = OsString;
 
 pub struct Parser {
     heredoc_markers: Vec<HereDocMarker>,
@@ -199,7 +203,8 @@ named_args!(for_clause<'a>(parser: &mut Parser)<&'a [u8], ForClause>,
         call!(linebreak, parser) >>
         words: opt!(
             do_parse!(
-                call!(in_tok, parser) >>
+                tag!("in") >>
+                ignore >>
                 words: many0!(word) >>
                 call!(sequential_sep, parser) >>
                 (words)
@@ -210,17 +215,21 @@ named_args!(for_clause<'a>(parser: &mut Parser)<&'a [u8], ForClause>,
     )
 );
 
+// FIXME: i think this will split like name @ on name@ (dunno if that's wrong though?)
 named_args!(name<'a>(parser: &mut Parser)<&'a [u8], Name>,
     do_parse!(
-        val: map!(alphanumeric1, |res| OsString::from_vec(res.to_owned())) >>
+        val: map!(
+            recognize!(
+                pair!(
+                    alt!(alpha1 | tag!("_")),
+                    many0!(alt!(alphanumeric1 | tag!("_")))
+                )
+            ),
+            |res| OsString::from_vec(res.to_owned())
+        ) >>
         ignore >>
         (val)
     )
-);
-
-named_args!(in_tok<'a>(parser: &mut Parser)<&'a [u8], &'a [u8]>,
-    // TODO: parse in (apply rule 6)
-    recognize!(pair!(tag!("in"), ignore))
 );
 
 named_args!(case_clause<'a>(parser: &mut Parser)<&'a [u8], CaseClause>,
@@ -229,7 +238,8 @@ named_args!(case_clause<'a>(parser: &mut Parser)<&'a [u8], CaseClause>,
         ignore >>
         word: word >>
         call!(linebreak, parser) >>
-        call!(in_tok, parser) >>
+        tag!("in") >>
+        ignore >>
         call!(linebreak, parser) >>
         case_list: many0!(
             alt!(call!(case_item, parser) | call!(case_item_ns, parser))
@@ -387,12 +397,17 @@ named_args!(simple_command<'a>(parser: &mut Parser)<&'a [u8], SimpleCommand>,
 
 named_args!(cmd_name<'a>(parser: &mut Parser)<&'a [u8], CommandName>,
     // TODO: apply rule 7a
-    map_opt!(word, |word: OsString| {
+    map_opt!(word, |word: Word| {
         // TODO: this prob needs to check all keywords (ensure that e.g. in and then are actually not allowed)
-        match word.as_os_str().as_bytes() {
-            b"done" | b"for" | b"done" | b"if" | b"fi" | b"while" | b"until" | b"case" | b"esac" | b"in" | b"then" => None,
-            _ => Some(word)
+        // FIXME: not sure if this should behave differently if the command is surrounded with single quotes
+        //        dash gives a syntax error without quotes and a command not found with quotes
+        if let Word::Text(ref text) = word {
+            match text.as_os_str().as_bytes() {
+                b"done" | b"for" | b"done" | b"if" | b"fi" | b"while" | b"until" | b"case" | b"esac" | b"in" | b"then" => return None,
+                _ => {}
+            }
         }
+        Some(word)
     })
 );
 
@@ -459,10 +474,10 @@ named_args!(io_here<'a>(parser: &mut Parser)<&'a [u8], Rc<RefCell<HereDoc>>>,
     )
 );
 
-named_args!(here_end<'a>(parser: &mut Parser)<&'a [u8], Word>,
+named_args!(here_end<'a>(parser: &mut Parser)<&'a [u8], HereDocWord>,
     // TODO: apply rule 3
-    // FIXME: this do_parse should not be necessary
-    do_parse!(w: word >> (w))
+    // FIXME: this is wrong (need to do quote removal and such)
+    map!(alphanumeric1, |res| OsString::from_vec(res.to_owned()))
 );
 
 // this needs to read a heredoc until it encounters "\nEND MARKER\n"
@@ -496,6 +511,71 @@ fn parse_heredoc<'a>(mut input: &'a [u8], parser: &mut Parser) -> ::nom::IResult
     Ok((input, ()))
 }
 
+named_args!(command_subst<'a>(parser: &mut Parser)<&'a [u8], CommandSubst>,
+    alt!(call!(command_subst_dollar, parser) | call!(command_subst_backtick, parser))
+);
+
+// FIXME: it seems stuff like $(NEWLINE cmd NEWLINE) should be supported, so ensure it is
+named_args!(command_subst_dollar<'a>(parser: &mut Parser)<&'a [u8], CommandSubst>,
+    do_parse!(
+        tag!("$(") >>
+        not!(tag!("(")) >>        // avoid ambiguity between subshell and arithmetic expression
+        ignore >>
+        cmd: call!(command, parser) >>
+        tag!(")") >>
+        ignore >>
+        (CommandSubst::new(cmd))
+    )
+);
+
+// XXX: strategy should probably be collect input until first unescaped backtick (handling escaped dollar signs and such by perhaps adding single quotes around them and then feeding them to command for processing)
+named_args!(command_subst_backtick<'a>(parser: &mut Parser)<&'a [u8], CommandSubst>,
+    do_parse!(
+        tag!("`") >>
+        // TODO
+        tag!("`") >>
+        ignore >>
+        (unimplemented!())
+    )
+);
+/*
+named_args!(arith_expr<'a>(parser: &mut Parser)<&'a [u8], ArithExpr>,
+    do_parse!(
+        tag!("$((") >>
+        ignore >>
+        
+        tag!("))") >>
+        ignore
+        ()
+    )
+);
+*/
+named!(single_quote<&[u8], WordPart>,
+    delimited!(
+        tag!("'"),
+        map!(
+            take_until!("'"),
+            |res| WordPart::Text(OsString::from_vec(res.to_owned()))
+        ),
+        tag!("'")
+    )
+);
+
+/*named!(double_quote<&[u8], DoubleQuote>,
+    delimited!(
+        tag!("\""),
+        // parse param_expand, command_subst, arith_expr (for $ and `) and escape (for $ ` " \ and <newline>)
+        escaped!(
+            do_parse!(
+
+            ),
+            b'\\',
+            one_of!("$`")
+        )
+        tag!("\"")
+    )
+);*/
+
 named_args!(linebreak<'a>(parser: &mut Parser)<&'a [u8], Option<&'a [u8]>>,
     opt!(call!(newline_list, parser))
 );
@@ -522,10 +602,48 @@ named_args!(sequential_sep<'a>(parser: &mut Parser)<&'a [u8], &'a [u8]>,
 
 named!(word<&[u8], Word>,
     // TODO: this might need to be able to parse quoted strings/words following different rules
+
+    // TODO: there should be many possible "val"s, so we need to collect them all and throw them into a word
+    //       note that if there is just one value and it is text it should be stored as such rather than a complex
+    //       word made of word parts (also, should check if all word parts are just text (e.g. single quote + word + single quote),
+    //       if so just combine them and store as text)
     do_parse!(
-        val: map!(alphanumeric1, |res| OsString::from_vec(res.to_owned())) >>
+        val: fold_many1!(
+            alt!(
+                single_quote |
+                // FIXME: should this actually be anything that is separated by a space? i think so
+                map!(alphanumeric1, |res| WordPart::Text(OsString::from_vec(res.to_owned())))
+            ),
+            vec![],
+            |mut acc: Vec<_>, item| {
+                // this placates the borrow checker
+                loop {
+                    if let WordPart::Text(text) = item {
+                        if let Some(WordPart::Text(ref mut prev_text)) = acc.last_mut() {
+                            prev_text.push(&text);
+                            break;
+                        }
+                        acc.push(WordPart::Text(text));
+                    } else {
+                        acc.push(item);
+                    }
+                    break;
+                }
+                acc
+            }
+        ) >>
         ignore >>
-        (val)
+        ({
+            if val.len() == 1 && val.first().unwrap().is_text() {
+                if let Some(WordPart::Text(text)) = val.into_iter().next() {
+                    Word::Text(text)
+                } else {
+                    unreachable!()
+                }
+            } else {
+                Word::Complex(val)
+            }
+        })
     )
 );
 
@@ -546,7 +664,7 @@ named!(io_file<&[u8], IoRedirectFile>,
     )
 );
 
-named!(filename<&[u8], Name>,
+named!(filename<&[u8], Word>,
     // TODO: apply rule 2
     // FIXME: this do_parse should not be necessary
     do_parse!(w: word >> (w))
@@ -572,7 +690,7 @@ named!(ignore,
             space0,
             opt!(pair!(
                 tag!("#"),
-                // FIXME: we use newline() else where
+                // FIXME: we use newline() elsewhere
                 take_till!(|byte| byte == b'\n')
             ))
         )

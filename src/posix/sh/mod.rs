@@ -23,9 +23,12 @@ where
     let mut data = Vec::new();
     input.read_to_end(&mut data).unwrap();
 
-    let res = Parser::new().complete_command(data.as_slice()).1;
+    let mut parser = Parser::new();
+    let res = complete!(data.as_slice(), call_m!(parser.complete_command));
+    //let res = Parser::new().complete_command(data.as_slice());
     match res {
         Ok(m) => {
+            println!("{:#?}", m);
             let mut env = setup.env().into();
 
             //println!("{:#?}", m);
