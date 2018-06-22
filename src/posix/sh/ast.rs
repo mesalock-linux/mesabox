@@ -567,7 +567,7 @@ impl SimpleCommand {
                     }
                 }
             }
-            child.wait().unwrap().code().unwrap();
+            return child.wait().unwrap().code().unwrap();
         }
 
         0

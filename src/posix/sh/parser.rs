@@ -403,7 +403,7 @@ named_args!(cmd_name<'a>(parser: &mut Parser)<&'a [u8], CommandName>,
         //        dash gives a syntax error without quotes and a command not found with quotes
         if let Word::Text(ref text) = word {
             match text.as_os_str().as_bytes() {
-                b"done" | b"for" | b"done" | b"if" | b"fi" | b"while" | b"until" | b"case" | b"esac" | b"in" | b"then" => return None,
+                b"done" | b"for" | b"done" | b"if" | b"elif" | b"else" | b"fi" | b"while" | b"until" | b"case" | b"esac" | b"in" | b"then" => return None,
                 _ => {}
             }
         }
@@ -583,11 +583,10 @@ named_args!(linebreak<'a>(parser: &mut Parser)<&'a [u8], Option<&'a [u8]>>,
 // XXX: not sure if this is gonna make a Vec (which we don't want as we don't use the result)
 named_args!(newline_list<'a>(parser: &mut Parser)<&'a [u8], &'a [u8]>,
     // XXX: spec doesn't actually seem to give value of newline (am guessing for portability)
-    //recognize!(pair!(take_while1!(|byte| byte == b'\n'), ignore))
     recognize!(many1!(tuple!(newline, cond!(!parser.heredoc_markers.is_empty(), call!(parse_heredoc, parser)), ignore)))
 );
 
-// XXX: is & just run in background for this?
+// XXX: is & just run in background for this? (answer is yes, so need to keep track of which one was given)
 named_args!(separator_op<'a>(parser: &mut Parser)<&'a [u8], &'a [u8]>,
     recognize!(pair!(alt!(tag!("&") | tag!(";")), ignore))
 );
@@ -611,7 +610,7 @@ named!(word<&[u8], Word>,
         val: fold_many1!(
             alt!(
                 single_quote |
-                // FIXME: should this actually be anything that is separated by a space? i think so
+                // FIXME: should this actually be anything that is separated by a space? i think so (also needs to tilde expand)
                 map!(alphanumeric1, |res| WordPart::Text(OsString::from_vec(res.to_owned())))
             ),
             vec![],
