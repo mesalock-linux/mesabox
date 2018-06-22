@@ -44,6 +44,8 @@ extern crate either;
 #[cfg(feature = "nom")]
 #[macro_use]
 extern crate nom;
+#[cfg(feature = "rustyline")]
+extern crate rustyline;
 
 use clap::{App, SubCommand};
 use libc::EXIT_FAILURE;

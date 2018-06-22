@@ -1,10 +1,14 @@
 use either::Either;
 use libc;
+use globset::{self, GlobBuilder, GlobSetBuilder, Glob};
+use walkdir::WalkDir;
 
+use std::borrow::Cow;
 use std::cell::RefCell;
-use std::ffi::OsString;
+use std::ffi::{OsString, OsStr};
 use std::io::Write;
 use std::iter::FromIterator;
+use std::os::unix::ffi::OsStrExt;
 use std::os::unix::io::RawFd;
 use std::process::{Child, Stdio};
 use std::rc::Rc;
@@ -60,6 +64,9 @@ pub type CommandName = Word;
 
 // split into the two types to avoid allocating an extra vector for every word
 // XXX: maybe store ParamExpand (at least) too?
+// FIXME: needs to store more than just text (text works fine without globbing, but once you add that single quotes no longer
+//        function the same as just straight up text (single quotes won't evaluate the glob, whereas the glob needs to be
+//        evaluated if given like `echo *`))
 #[derive(Debug)]
 pub enum Word {
     Text(OsString),
@@ -80,6 +87,91 @@ impl Word {
                     acc.push(&item.eval(setup, env));
                     acc
                 })
+            }
+        }
+    }
+
+    pub fn matches_glob<'a, S>(&'a self, setup: &mut S, env: &mut Environment<'a>, value: &OsStr) -> bool
+    where
+        S: UtilSetup,
+    {
+        let text = self.eval(setup, env);
+
+        // FIXME: what to do here, error out?
+        let glob = match self.create_glob(&text) {
+            Ok(m) => m,
+            _ => return false
+        };
+        let matcher = glob.compile_matcher();
+
+        if matcher.is_match(value) {
+            true
+        } else {
+            false
+        }
+    }
+
+    // NOTE: globset seems to implement filename{a,b} syntax, which is not valid for posix shell technically
+    // NOTE: * shouldn't list hidden files
+    pub fn eval_glob_fs<'a, S>(&'a self, setup: &mut S, env: &mut Environment<'a>) -> WordEval
+    where
+        S: UtilSetup,
+    {
+        let text = self.eval(setup, env);
+
+        match self.create_glob(&text).and_then(|glob| GlobSetBuilder::new().add(glob).build()) {
+            Ok(set) => {
+                // FIXME: this should use the current_dir in setup (or whatever it has been changed
+                //        to during the course of the program's lifetime)
+                /*let mut res = GlobWalker::from_globset(set)/*.base_dir()*/.into_iter().fold(vec![], |mut acc, entry| {
+                    // FIXME: not sure what to do on entry failure (do we bail or just report an error?)
+                    if let Ok(entry) = entry {
+                        acc.push(entry.path().as_os_str().to_owned());
+                    }
+                    acc
+                });*/
+                // TODO: need to create custom walker first
+                let res = vec![];
+                if res.is_empty() {
+                    WordEval::Text(text)
+                } else {
+                    WordEval::Globbed(res)
+                }
+            }
+            Err(_) => {
+                // in this case, we just assume that the "glob" is actual meant to be a literal
+                WordEval::Text(text)
+            }
+        }
+    }
+
+    fn create_glob(&self, text: &OsStr) -> Result<Glob, globset::Error> {
+        // sadly, we need to convert any non-utf8 values to hex escapes to compile the regex, which
+        // wastes some time
+        let glob_str = self.escape_glob(&text);
+
+        GlobBuilder::new(&glob_str).literal_separator(true).build()
+    }
+
+    // NOTE: i think we may need to escape in any case (e.g. if * is in single quotes like abc'*', we need
+    //       to match literally abc* not abcdef (for example)).  we'll have to escape the */?/whatever is
+    //       used in patterns if they are in single quotes
+    fn escape_glob<'a>(&self, text: &'a OsStr) -> Cow<'a, str> {
+        // this is optimized for utf8 (try to convert and then go back through the string and
+        // escape incorrect values on failure), as i imagine most given strings will be valid utf8
+        match text.to_str() {
+            Some(s) => Cow::from(s),
+            None => {
+                // the text is invalid utf8, so convert manually by escaping
+                Cow::from(text.as_bytes().iter().fold(String::new(), |mut acc, &byte| {
+                    let ch: char = byte.into();
+                    if ch.is_ascii() {
+                        acc.push(ch);
+                    } else {
+                        acc.extend(ch.escape_default());
+                    }
+                    acc
+                }))
             }
         }
     }
@@ -111,6 +203,12 @@ impl WordPart {
             _ => false
         }
     }
+}
+
+#[derive(Debug)]
+pub enum WordEval {
+    Text(OsString),
+    Globbed(Vec<OsString>),
 }
 
 #[derive(Debug)]
@@ -420,13 +518,12 @@ impl CaseClause {
         }
     }
 
-    pub fn execute<'a, S>(&self, setup: &mut S, env: &mut Environment<'a>) -> ExitCode
+    pub fn execute<'a, S>(&'a self, setup: &mut S, env: &mut Environment<'a>) -> ExitCode
     where
         S: UtilSetup,
     {
-        // TODO: patterns need to be set up first
         // TODO: redirects
-        unimplemented!()
+        self.case_list.execute(setup, env, &self.word)
     }
 }
 
@@ -440,6 +537,19 @@ impl CaseList {
         Self {
             items: items
         }
+    }
+
+    pub fn execute<'a, S>(&'a self, setup: &mut S, env: &mut Environment<'a>, word: &'a Word) -> ExitCode
+    where
+        S: UtilSetup,
+    {
+        let word_str = word.eval(setup, env);
+        for item in &self.items {
+            if let Some(code) = item.execute(setup, env, &word_str) {
+                return code;
+            }
+        }
+        0
     }
 }
 
@@ -456,10 +566,47 @@ impl CaseItem {
             actions: actions
         }
     }
+
+    pub fn execute<'a, S>(&'a self, setup: &mut S, env: &mut Environment<'a>, word: &OsStr) -> Option<ExitCode>
+    where
+        S: UtilSetup,
+    {
+        if self.pattern.matches(setup, env, word) {
+            Some(if let Some(ref cmd) = self.actions {
+                cmd.execute(setup, env)
+            } else {
+                0
+            })
+        } else {
+            None
+        }
+    }
 }
 
-// FIXME: CLEARLY TEMPORARY
-pub type Pattern = ();
+#[derive(Debug)]
+pub struct Pattern {
+    items: Vec<Word>,
+}
+
+impl Pattern {
+    pub fn new(items: Vec<Word>) -> Self {
+        Self {
+            items: items
+        }
+    }
+
+    pub fn matches<'a, S>(&'a self, setup: &mut S, env: &mut Environment<'a>, word: &OsStr) -> bool
+    where
+        S: UtilSetup,
+    {
+        for item in &self.items {
+            if item.matches_glob(setup, env, word) {
+                return true;
+            }
+        }
+        false
+    }
+}
 
 #[derive(Debug)]
 pub struct FunctionDef {
@@ -545,7 +692,10 @@ impl SimpleCommand {
                             redirect.setup(&mut cmd);
                         }
                         Either::Right(ref word) => {
-                            cmd.arg(word.eval(setup, env));
+                            match word.eval_glob_fs(setup, env) {
+                                WordEval::Text(text) => cmd.arg(text),
+                                WordEval::Globbed(glob) => cmd.args(glob.iter()),
+                            };
                         }
                     }
                 }

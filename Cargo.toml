@@ -37,7 +37,7 @@ cat = []
 chmod = ["regex", "walkdir", "uucore"]
 head = []
 init = ["fnv", "nix"]
-sh = ["either", "fnv", "nom"]
+sh = ["either", "fnv", "nom", "globset", "rustyline"]
 sleep = ["uucore"]
 posix = [
     "cat",
@@ -73,6 +73,7 @@ fnv = { version = "1.0.6", optional = true }
 regex = { version = "1.0.0", optional = true }
 either = { version = "1.5.0", optional = true }
 nom = { version = "4.0.0", features = ["verbose-errors"], optional = true }
+rustyline = { version = "1.0.0", optional = true }
 
 [dev-dependencies]
 tempfile = "3.0.2"

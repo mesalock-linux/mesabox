@@ -1,5 +1,6 @@
 use either::Either;
 use nom::{alpha1, alphanumeric1, space0, newline};
+use globset::{GlobBuilder, Glob};
 
 use std::cell::RefCell;
 use std::ffi::OsString;
@@ -272,9 +273,17 @@ named_args!(case_item<'a>(parser: &mut Parser)<&'a [u8], CaseItem>,
     )
 );
 
-// TODO: clearly
+// TODO: this needs to actually match "patterns" (i believe they are satisfied by globset, but need to figure out how to get nom to read them
+//       so they can be given to globset)
 named_args!(pattern<'a>(parser: &mut Parser)<&'a [u8], Pattern>,
-    value!(())
+    do_parse!(
+        not!(tag!("esac")) >>
+        res: map!(
+            separated_nonempty_list_complete!(pair!(tag!("|"), ignore), word),
+            |values| Pattern::new(values)
+        ) >>
+        (res)
+    )
 );
 
 named_args!(if_clause<'a>(parser: &mut Parser)<&'a [u8], IfClause>,
@@ -599,6 +608,10 @@ named_args!(sequential_sep<'a>(parser: &mut Parser)<&'a [u8], &'a [u8]>,
     alt!(recognize!(tuple!(tag!(";"), ignore, call!(linebreak, parser))) | call!(newline_list, parser))
 );
 
+// XXX: list of things that use word and accept patterns: wordlist (used by for), case_item/case_item_ns, cmd_name, cmd_word, cmd_suffix, cmd_prefix (the right side)
+//      things that do not accept patterns (afaict): case WORD in, name (used by e.g. for, fname), here_end, filename
+//      Pattern/Glob and Text should probably be separate parts of WordPart enum because of this (or we could just store in Text and then always run a glob for things that accept globs)
+//      we are going with the second option as it's easier to parse
 named!(word<&[u8], Word>,
     // TODO: this might need to be able to parse quoted strings/words following different rules
 
@@ -610,8 +623,10 @@ named!(word<&[u8], Word>,
         val: fold_many1!(
             alt!(
                 single_quote |
-                // FIXME: should this actually be anything that is separated by a space? i think so (also needs to tilde expand)
-                map!(alphanumeric1, |res| WordPart::Text(OsString::from_vec(res.to_owned())))
+                // XXX: there may be more that need to be checked for
+                // FIXME: need to handle escapes for e.g. $ and (
+                // FIXME: this should not ignore "}" (this is why i likely need to tokenize first)
+                map!(verify!(is_not!(" \t\r\n'\"$();&}<>|"), |arr: &[u8]| arr.len() > 0), |res| WordPart::Text(OsString::from_vec(res.to_owned())))
             ),
             vec![],
             |mut acc: Vec<_>, item| {
