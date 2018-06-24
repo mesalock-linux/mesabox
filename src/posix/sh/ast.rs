@@ -43,7 +43,7 @@ impl CompleteCommand {
         }
     }
 
-    pub fn execute<'a, S>(&'a self, setup: &mut S, env: &mut Environment<'a>) -> ExitCode
+    pub fn execute<S>(&self, setup: &mut S, env: &mut Environment) -> ExitCode
     where
         S: UtilSetup,
     {
@@ -74,7 +74,7 @@ pub enum Word {
 }
 
 impl Word {
-    pub fn eval<'a, S>(&'a self, setup: &mut S, env: &mut Environment<'a>) -> OsString
+    pub fn eval<S>(&self, setup: &mut S, env: &mut Environment) -> OsString
     where
         S: UtilSetup,
     {
@@ -91,7 +91,7 @@ impl Word {
         }
     }
 
-    pub fn matches_glob<'a, S>(&'a self, setup: &mut S, env: &mut Environment<'a>, value: &OsStr) -> bool
+    pub fn matches_glob<'a, S>(&self, setup: &mut S, env: &mut Environment, value: &OsStr) -> bool
     where
         S: UtilSetup,
     {
@@ -113,7 +113,7 @@ impl Word {
 
     // NOTE: globset seems to implement filename{a,b} syntax, which is not valid for posix shell technically
     // NOTE: * shouldn't list hidden files
-    pub fn eval_glob_fs<'a, S>(&'a self, setup: &mut S, env: &mut Environment<'a>) -> WordEval
+    pub fn eval_glob_fs<'a, S>(&self, setup: &mut S, env: &mut Environment) -> WordEval
     where
         S: UtilSetup,
     {
@@ -185,7 +185,7 @@ pub enum WordPart {
 }
 
 impl WordPart {
-    pub fn eval<'a, S>(&'a self, setup: &mut S, env: &mut Environment<'a>) -> OsString
+    pub fn eval<S>(&self, setup: &mut S, env: &mut Environment) -> OsString
     where
         S: UtilSetup,
     {
@@ -225,7 +225,7 @@ impl AndOr {
         }
     }
 
-    pub fn execute<'a, S>(&'a self, setup: &mut S, env: &mut Environment<'a>, prev_res: ExitCode) -> ExitCode
+    pub fn execute<S>(&self, setup: &mut S, env: &mut Environment, prev_res: ExitCode) -> ExitCode
     where
         S: UtilSetup,
     {
@@ -257,7 +257,7 @@ pub struct Pipeline {
 }
 
 impl Pipeline {
-    pub fn execute<'a, S>(&'a self, setup: &mut S, env: &mut Environment<'a>) -> ExitCode
+    pub fn execute<S>(&self, setup: &mut S, env: &mut Environment) -> ExitCode
     where
         S: UtilSetup,
     {
@@ -298,7 +298,7 @@ impl Command {
         }
     }
 
-    pub fn execute<'a, S>(&'a self, setup: &mut S, env: &mut Environment<'a>) -> ExitCode
+    pub fn execute<S>(&self, setup: &mut S, env: &mut Environment) -> ExitCode
     where
         S: UtilSetup,
     {
@@ -319,7 +319,7 @@ pub enum CommandInner {
 }
 
 impl CommandInner {
-    pub fn execute<'a, S>(&'a self, setup: &mut S, env: &mut Environment<'a>) -> ExitCode
+    pub fn execute<S>(&self, setup: &mut S, env: &mut Environment) -> ExitCode
     where
         S: UtilSetup,
     {
@@ -390,7 +390,7 @@ impl IfClause {
         }
     }
 
-    pub fn execute<'a, S>(&'a self, setup: &mut S, env: &mut Environment<'a>) -> ExitCode
+    pub fn execute<S>(&self, setup: &mut S, env: &mut Environment) -> ExitCode
     where
         S: UtilSetup,
     {
@@ -421,7 +421,7 @@ impl ElseClause {
         }
     }
 
-    pub fn execute<'a, S>(&'a self, setup: &mut S, env: &mut Environment<'a>) -> ExitCode
+    pub fn execute<S>(&self, setup: &mut S, env: &mut Environment) -> ExitCode
     where
         S: UtilSetup,
     {
@@ -454,7 +454,7 @@ impl WhileClause {
         }
     }
 
-    pub fn execute<'a, S>(&'a self, setup: &mut S, env: &mut Environment<'a>) -> ExitCode
+    pub fn execute<S>(&self, setup: &mut S, env: &mut Environment) -> ExitCode
     where
         S: UtilSetup,
     {
@@ -483,7 +483,7 @@ impl ForClause {
         }
     }
 
-    pub fn execute<'a, S>(&'a self, setup: &mut S, env: &mut Environment<'a>) -> ExitCode
+    pub fn execute<S>(&self, setup: &mut S, env: &mut Environment) -> ExitCode
     where
         S: UtilSetup,
     {
@@ -497,7 +497,7 @@ impl ForClause {
         let mut code = 0;
         for word in words {
             let value = word.eval(setup, env);
-            env.set_var(&self.name, value);
+            env.set_var(Cow::Borrowed(&self.name), value);
             code = self.body.execute(setup, env);
         }
         code
@@ -518,7 +518,7 @@ impl CaseClause {
         }
     }
 
-    pub fn execute<'a, S>(&'a self, setup: &mut S, env: &mut Environment<'a>) -> ExitCode
+    pub fn execute<S>(&self, setup: &mut S, env: &mut Environment) -> ExitCode
     where
         S: UtilSetup,
     {
@@ -539,7 +539,7 @@ impl CaseList {
         }
     }
 
-    pub fn execute<'a, S>(&'a self, setup: &mut S, env: &mut Environment<'a>, word: &'a Word) -> ExitCode
+    pub fn execute<S>(&self, setup: &mut S, env: &mut Environment, word: &Word) -> ExitCode
     where
         S: UtilSetup,
     {
@@ -567,7 +567,7 @@ impl CaseItem {
         }
     }
 
-    pub fn execute<'a, S>(&'a self, setup: &mut S, env: &mut Environment<'a>, word: &OsStr) -> Option<ExitCode>
+    pub fn execute<S>(&self, setup: &mut S, env: &mut Environment, word: &OsStr) -> Option<ExitCode>
     where
         S: UtilSetup,
     {
@@ -595,7 +595,7 @@ impl Pattern {
         }
     }
 
-    pub fn matches<'a, S>(&'a self, setup: &mut S, env: &mut Environment<'a>, word: &OsStr) -> bool
+    pub fn matches<'a, S>(&self, setup: &mut S, env: &mut Environment, word: &OsStr) -> bool
     where
         S: UtilSetup,
     {
@@ -611,22 +611,22 @@ impl Pattern {
 #[derive(Debug)]
 pub struct FunctionDef {
     name: Name,
-    body: FunctionBody
+    body: Rc<FunctionBody>
 }
 
 impl FunctionDef {
-    pub fn new(name: Name, body: FunctionBody) -> Self {
+    pub fn new(name: Name, body: Rc<FunctionBody>) -> Self {
         Self {
             name: name,
             body: body
         }
     }
 
-    pub fn execute<'a, S>(&'a self, setup: &mut S, env: &mut Environment<'a>) -> ExitCode
+    pub fn execute<S>(&self, setup: &mut S, env: &mut Environment) -> ExitCode
     where
         S: UtilSetup,
     {
-        env.set_func(&self.name, &self.body);
+        env.set_func(&self.name, self.body.clone());
         // XXX: is there actually a way for this to not be 0?  spec says non-zero on failure, so is this just in parsing?
         0
     }
@@ -646,7 +646,7 @@ impl FunctionBody {
         }
     }
 
-    pub fn execute<'a, S>(&'a self, setup: &mut S, env: &mut Environment<'a>) -> ExitCode
+    pub fn execute<S>(&self, setup: &mut S, env: &mut Environment) -> ExitCode
     where
         S: UtilSetup,
     {
@@ -671,7 +671,7 @@ impl SimpleCommand {
         }
     }
 
-    pub fn execute<'a, S>(&'a self, setup: &mut S, env: &mut Environment<'a>) -> ExitCode
+    pub fn execute<S>(&self, setup: &mut S, env: &mut Environment) -> ExitCode
     where
         S: UtilSetup,
     {
@@ -867,7 +867,7 @@ impl Quotable {
     }
 }
 
-fn exec_andor_chain<'a, S>(setup: &mut S, env: &mut Environment<'a>, chain: &'a [AndOr]) -> ExitCode
+fn exec_andor_chain<'a, S>(setup: &mut S, env: &mut Environment, chain: &'a [AndOr]) -> ExitCode
 where
     S: UtilSetup,
 {
@@ -878,7 +878,7 @@ where
     code
 }
 
-fn exec_list<'a, S>(setup: &mut S, env: &mut Environment<'a>, list: &'a [Vec<AndOr>]) -> ExitCode
+fn exec_list<'a, S>(setup: &mut S, env: &mut Environment, list: &'a [Vec<AndOr>]) -> ExitCode
 where
     S: UtilSetup,
 {

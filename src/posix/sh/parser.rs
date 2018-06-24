@@ -350,7 +350,7 @@ named_args!(function_def<'a>(parser: &mut Parser)<&'a [u8], FunctionDef>,
         ignore >>
         call!(linebreak, parser) >>
         body: call!(function_body, parser) >>
-        (FunctionDef::new(name, body))
+        (FunctionDef::new(name, Rc::new(body)))
     )
 );
 
