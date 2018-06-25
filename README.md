@@ -3,6 +3,7 @@ MesaBox
 
 [![Build Status](https://ci.mesalock-linux.org/api/badges/mesalock-linux/mesabox/status.svg?branch=master)](https://ci.mesalock-linux.org/mesalock-linux/mesabox)
 [![License](https://img.shields.io/badge/license-BSD-blue.svg)](LICENSE)
+[![Coverage Status](https://coveralls.io/repos/github/mesalock-linux/mesabox/badge.svg?branch=master)](https://coveralls.io/github/mesalock-linux/mesabox?branch=master)
 
 MesaBox is a collection of core system utilities written in Rust for Unix-like
 systems.  

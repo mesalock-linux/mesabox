@@ -1,13 +1,23 @@
 pipeline:
   build:
     image: ${RUST_VERSION}
+    secrets: [ coveralls_token ]
     commands:
       - rustup show
       - cargo build
       - cargo test
+      - |
+        if [ "${RUST_VERSION}" = "${RUST_COV_VERSION}" ]; then
+          apt-get update
+          apt-get install -y --no-install-recommends cmake
+          RUSTFLAGS="--cfg procmacro2_semver_exempt" cargo install cargo-tarpaulin
+          cargo tarpaulin --coveralls $COVERALLS_TOKEN
+        fi
 
 matrix:
   RUST_VERSION:
     - rust:1.26
     - rust:latest
     - rustlang/rust:nightly
+  RUST_COV_VERSION:
+    - rust:1.26
