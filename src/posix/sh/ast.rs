@@ -714,11 +714,8 @@ impl SimpleCommand {
                 //       would then cause that builtin/function to be freed (if the borrow checker
                 //       didn't catch it, that is))
                 if let Some(builtin) = env.get_builtin(&cmdname) {
-                    println!("got builtin '{}'", cmdname.to_string_lossy());
-
                     self.run_command(setup, env, ExecEnv::new(&*builtin))
                 } else if let Some(func) = env.get_func(&cmdname) {
-                    println!("got func '{}'", cmdname.to_string_lossy());
                     self.run_command(setup, env, ExecEnv::new(&*func))
                 } else {
                     let mut cmd = RealCommand::new(cmdname);
