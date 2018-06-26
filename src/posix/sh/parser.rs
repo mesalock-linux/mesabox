@@ -814,13 +814,18 @@ named!(io_number<&[u8], RawFd>,
 
 named!(ignore,
     recognize!(
-        pair!(
+        tuple!(
             space0,
-            opt!(pair!(
-                tag!("#"),
-                // FIXME: we use newline() elsewhere
-                take_till!(|byte| byte == b'\n')
-            ))
+            opt!(
+                alt!(
+                    recognize!(tuple!(tag!(r"\"), newline, ignore)) |
+                    recognize!(pair!(
+                        tag!("#"),
+                        // FIXME: we use newline() elsewhere
+                        take_till!(|byte| byte == b'\n')
+                    ))
+                )
+            )
         )
     )
 );
