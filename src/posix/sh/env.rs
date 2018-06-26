@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::collections::hash_map::Iter as HashIter;
 use std::ffi::{OsString, OsStr};
 use std::hash::Hash;
-use std::iter::{FromIterator, FusedIterator};
+use std::iter::{Chain, FromIterator, FusedIterator};
 use std::mem;
 use std::rc::Rc;
 
@@ -12,6 +12,7 @@ use super::ast::FunctionBody;
 #[derive(Clone, Debug)]
 pub struct Environment {
     vars: HashMap<OsString, OsString>,
+    export_vars: HashMap<OsString, OsString>,
     funcs: HashMap<OsString, Rc<FunctionBody>>,
 }
 
@@ -19,25 +20,38 @@ impl Environment {
     pub fn new() -> Self {
         Self {
             vars: HashMap::new(),
+            export_vars: HashMap::new(),
             funcs: HashMap::new(),
         }
     }
 
     // NOTE: using Cow with OsStr is annoying as From<OsStr> is not implemented apparently
+    // TODO: switch to entry api
     pub fn set_var(&mut self, name: Cow<OsStr>, new_val: OsString) -> Option<OsString> {
         //self.vars.get_mut(name).map(|value| mem::replace(value, new_val)).or_else(|| self.vars.insert(name.clone().into(), new_val))
         // this is why NLL will be a good thing
         if let Some(value) = self.vars.get_mut::<OsStr>(name.as_ref()) {
             return Some(mem::replace(value, new_val));
+        } else if let Some(value) = self.export_vars.get_mut::<OsStr>(name.as_ref()) {
+            return Some(mem::replace(value, new_val));
         }
         self.vars.insert(name.into_owned(), new_val)
+    }
+
+    pub fn set_export_var(&mut self, name: Cow<OsStr>, new_val: OsString) -> Option<OsString> {
+        if let Some(value) = self.export_vars.get_mut::<OsStr>(name.as_ref()) {
+            return Some(mem::replace(value, new_val));
+        }
+        self.export_vars.insert(name.into_owned(), new_val)
     }
 
     pub fn get_var<Q: ?Sized>(&self, name: &Q) -> Option<&OsString>
     where
         Q: AsRef<OsStr>,
     {
-        self.vars.get(name.as_ref())
+        let name = name.as_ref();
+        // XXX: maybe the opposite order is better, not sure
+        self.vars.get(name).or_else(|| self.export_vars.get(name))
     }
 
     pub fn set_func<Q: ?Sized>(&mut self, name: &Q, new_val: Rc<FunctionBody>) -> Option<Rc<FunctionBody>>
@@ -59,8 +73,12 @@ impl Environment {
         self.funcs.get(name)
     }
 
-    pub fn iter(&self) -> EnvIter {
-        EnvIter { inner: self.vars.iter() }
+    pub fn iter(&self) -> EnvIter<impl Iterator<Item = (&OsString, &OsString)>> {
+        EnvIter { inner: self.vars.iter().chain(self.export_vars.iter()) }
+    }
+
+    pub fn export_iter(&self) -> EnvIter<impl Iterator<Item = (&OsString, &OsString)>> {
+        EnvIter { inner: self.export_vars.iter() }
     }
 }
 
@@ -74,17 +92,18 @@ impl<T: Iterator<Item = (OsString, OsString)>> From<T> for Environment {
     fn from(iter: T) -> Self {
         Self {
             vars: iter.collect(),
+            export_vars: HashMap::new(),
             funcs: HashMap::new(),
         }
     }
 }
 
 #[derive(Clone, Debug)]
-pub struct EnvIter<'a> {
-    inner: HashIter<'a, OsString, OsString>,
+pub struct EnvIter<'a, I: Iterator<Item = (&'a OsString, &'a OsString)>> {
+    inner: I,
 }
 
-impl<'a> Iterator for EnvIter<'a> {
+impl<'a, I: Iterator<Item = (&'a OsString, &'a OsString)>> Iterator for EnvIter<'a, I> {
     type Item = (&'a OsStr, &'a OsStr);
 
     fn next(&mut self) -> Option<(&'a OsStr, &'a OsStr)> {
@@ -96,5 +115,5 @@ impl<'a> Iterator for EnvIter<'a> {
     }
 }
 
-impl<'a> ExactSizeIterator for EnvIter<'a> { }
-impl<'a> FusedIterator for EnvIter<'a> { }
+impl<'a, I: Iterator<Item = (&'a OsString, &'a OsString)>> ExactSizeIterator for EnvIter<'a, I> { }
+impl<'a, I: Iterator<Item = (&'a OsString, &'a OsString)>> FusedIterator for EnvIter<'a, I> { }

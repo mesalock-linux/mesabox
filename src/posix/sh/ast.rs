@@ -257,7 +257,24 @@ pub enum SepKind {
 #[derive(Debug)]
 pub struct VarAssign {
     pub varname: VarName,
-    pub value: ()//Expr,
+    pub value: Option<Word>,
+}
+
+impl VarAssign {
+    pub fn execute<S>(&self, setup: &mut S, env: &mut Environment)
+    where
+        S: UtilSetup,
+    {
+        let value = self.value.as_ref().map(|w| w.eval(setup, env)).unwrap_or_default();
+        env.set_var(Cow::Borrowed(&self.varname), value);
+    }
+
+    pub fn eval<S>(&self, setup: &mut S, env: &mut Environment) -> (&OsStr, OsString)
+    where
+        S: UtilSetup,
+    {
+        (&self.varname, self.value.as_ref().map(|w| w.eval(setup, env)).unwrap_or_default())
+    }
 }
 
 #[derive(Debug)]
@@ -692,8 +709,19 @@ impl SimpleCommand {
             //println!("{}", name.to_string_lossy());
             cmd.env_clear();
 
-            cmd.envs(env.iter());
+            cmd.envs(env.export_iter());
             // TODO: redirects and pre/post actions (other than args)
+            if let Some(ref actions) = self.pre_actions {
+                for act in actions.iter() {
+                    match act {
+                        Either::Right(ref assign) => {
+                            let (k, v) = assign.eval(setup, env);
+                            cmd.env(k, v);
+                        }
+                        _ => unimplemented!()
+                    }
+                }
+            }
             if let Some(ref actions) = self.post_actions {
                 for act in actions.iter() {
                     match act {
@@ -727,7 +755,17 @@ impl SimpleCommand {
                     }
                 }
             }
+
             return child.wait().unwrap().code().unwrap();
+        } else if let Some(ref actions) = self.pre_actions {
+            for act in actions.iter() {
+                match act {
+                    Either::Right(ref assign) => {
+                        assign.execute(setup, env);
+                    }
+                    _ => unimplemented!()
+                }
+            }
         }
 
         0

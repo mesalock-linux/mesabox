@@ -94,8 +94,8 @@ named_args!(var_assign<'a>(parser: &mut Parser)<&'a [u8], VarAssign>,
     do_parse!(
         name: var_name >>
         tag!("=") >>
-        expr: value!(()) >>
-        ignore >>
+        expr: opt!(word) >>
+        cond!(expr.is_none(), ignore) >>
         (VarAssign { varname: name, value: expr })
     )
 );
@@ -525,7 +525,7 @@ named_args!(cmd_name<'a>(parser: &mut Parser)<&'a [u8], CommandName>,
         //        dash gives a syntax error without quotes and a command not found with quotes
         if let Word::Text(ref text) = word {
             match text.as_os_str().as_bytes() {
-                b"done" | b"for" | b"done" | b"if" | b"elif" | b"else" | b"fi" | b"while" | b"until" | b"case" | b"esac" | b"in" | b"then" => return None,
+                b"done" | b"for" | b"if" | b"elif" | b"else" | b"fi" | b"while" | b"until" | b"case" | b"esac" | b"in" | b"then" => return None,
                 _ => {}
             }
         }

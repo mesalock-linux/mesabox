@@ -111,17 +111,17 @@ where
     S: UtilSetup,
 {
     // prompt
-    env.set_var(Cow::Borrowed(OsStr::new("PS1")), OsString::from("$ "));
-    env.set_var(Cow::Borrowed(OsStr::new("PS2")), OsString::from("> "));
-    env.set_var(Cow::Borrowed(OsStr::new("PS4")), OsString::from("+ "));
+    env.set_export_var(Cow::Borrowed(OsStr::new("PS1")), OsString::from("$ "));
+    env.set_export_var(Cow::Borrowed(OsStr::new("PS2")), OsString::from("> "));
+    env.set_export_var(Cow::Borrowed(OsStr::new("PS4")), OsString::from("+ "));
 
-    env.set_var(Cow::Borrowed(OsStr::new("LINENO")), OsString::from("1"));
+    env.set_export_var(Cow::Borrowed(OsStr::new("LINENO")), OsString::from("1"));
 
     let cur_dir = match setup.current_dir() {
         Some(p) => p.to_path_buf(),
         None => ::std::env::current_dir()?,
     };
-    env.set_var(Cow::Borrowed(OsStr::new("PWD")), cur_dir.into());
+    env.set_export_var(Cow::Borrowed(OsStr::new("PWD")), cur_dir.into());
     // FIXME: what to do about PWD and stuff?  just go based on env or set explicitly?
 
     // although HOME and PATH and stuff are used, we shouldn't set them explicitly
