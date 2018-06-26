@@ -86,21 +86,142 @@ named_args!(and_or_sep<'a>(parser: &mut Parser)<&'a [u8], SepKind>,
     )
 );
 
-named_args!(var_name<'a>(parser: &mut Parser)<&'a [u8], OsString>,
-    do_parse!(
-        name: alphanumeric1 >>
-        ignore >>
-        (OsString::from_vec(name.to_owned()))
-    )
+named!(var_name<&[u8], OsString>,
+    do_parse!(name: name >> (name))
 );
 
 named_args!(var_assign<'a>(parser: &mut Parser)<&'a [u8], VarAssign>,
     do_parse!(
-        name: call!(var_name, parser) >>
+        name: var_name >>
         tag!("=") >>
         expr: value!(()) >>
         ignore >>
         (VarAssign { varname: name, value: expr })
+    )
+);
+
+named!(parameter<&[u8], ParamExpr>,
+    do_parse!(
+        tag!("$") >>
+        res: alt!(
+            delimited!(
+                tag!("{"),
+                param_expr,
+                tag!("}")
+            ) |
+            map!(param_name, |name| ParamExpr::new(name, ParamExprKind::Value))
+        ) >>
+        (res)
+    )
+);
+
+named!(param_expr<&[u8], ParamExpr>,
+    alt!(
+        do_parse!(
+            tag!("#") >>
+            name: map!(opt!(param_name), |name| {
+                // NOTE: this is to be compatible with dash (the standard doesn't explicitly say
+                //       what to do in this case)
+                name.unwrap_or_else(|| Param::Var(OsString::new()))
+            }) >>
+            (ParamExpr::new(name, ParamExprKind::Length))
+        ) |
+        do_parse!(
+            name: param_name >>
+            res: call!(param_subst, name) >>
+            (res)
+        ) |
+        map!(param_name, |name| ParamExpr::new(name, ParamExprKind::Value))
+    )
+);
+
+named_args!(param_subst(name: Param)<&[u8], ParamExpr>,
+    map!(alt!(
+        preceded!(
+            tag!(":"),
+            map!(param_subst_value, |kind| {
+                match kind {
+                    ParamExprKind::AssignNull(value) => ParamExprKind::Assign(value),
+                    ParamExprKind::UseNull(value) => ParamExprKind::Use(value),
+                    ParamExprKind::ErrorNull(value) => ParamExprKind::Error(value),
+                    ParamExprKind::Alternate(value) => ParamExprKind::AlternateNull(value),
+                    _ => unreachable!()
+                }
+            })
+        ) |
+        preceded!(
+            tag!("%"),
+            map!(param_subst_suffix, |kind| {
+                if let ParamExprKind::SmallSuffix(value) = kind {
+                    ParamExprKind::LargeSuffix(value)
+                } else {
+                    unreachable!()
+                }
+            })
+        ) |
+        preceded!(
+            tag!("#"),
+            map!(param_subst_prefix, |kind| {
+                if let ParamExprKind::SmallPrefix(value) = kind {
+                    ParamExprKind::LargePrefix(value)
+                } else {
+                    unreachable!()
+                }
+            })
+        ) |
+        param_subst_value |
+        param_subst_suffix |
+        param_subst_prefix
+    ), |kind| {
+        ParamExpr::new(name, kind)
+    })
+);
+
+// FIXME: word may be incorrect as dash accepts ${var:=hello there} (i.e. two words)
+//        maybe just take text until the brace and interpret after reading?
+named!(param_subst_value<&[u8], ParamExprKind>,
+    alt!(
+        preceded!(
+            tag!("-"),
+            map!(word, |val| ParamExprKind::UseNull(val))
+        ) |
+        preceded!(
+            tag!("="),
+            map!(word, |val| ParamExprKind::AssignNull(val))
+        ) |
+        preceded!(
+            tag!("?"),
+            map!(opt!(word), |val| ParamExprKind::ErrorNull(val))
+        ) |
+        preceded!(
+            tag!("+"),
+            map!(word, |val| ParamExprKind::Alternate(val))
+        )
+    )
+);
+
+named!(param_subst_prefix<&[u8], ParamExprKind>,
+    preceded!(
+        tag!("#"),
+        map!(word, |val| ParamExprKind::SmallPrefix(val))
+    )
+);
+
+named!(param_subst_suffix<&[u8], ParamExprKind>,
+    preceded!(
+        tag!("%"),
+        map!(word, |val| ParamExprKind::SmallSuffix(val))
+    )
+);
+
+// TODO: define all of these
+// FIXME: these names suck
+named!(param_name<&[u8], Param>,
+    alt!(
+        var_name => { |name| Param::Var(name) } |
+        tag!("*") => { |_| Param::Star } |
+        tag!("?") => { |_| Param::Question } |
+        tag!("@") => { |_| Param::At }
     )
 );
 
@@ -147,18 +268,10 @@ named_args!(compound_command<'a>(parser: &mut Parser)<&'a [u8], Command>,
 );
 
 named_args!(subshell<'a>(parser: &mut Parser)<&'a [u8], Command>,
-    /*delimited!(
+    delimited!(
         pair!(tag!("("), ignore),
         call!(compound_list, parser),
         pair!(tag!(")"), ignore)
-    )*/
-    do_parse!(
-        tag!("(") >>
-        ignore >>
-        res: call!(compound_list, parser) >>
-        tag!(")") >>
-        ignore >>
-        (res)
     )
 );
 
@@ -200,7 +313,7 @@ named_args!(for_clause<'a>(parser: &mut Parser)<&'a [u8], ForClause>,
     do_parse!(
         tag!("for") >>
         ignore >>
-        name: call!(name, parser) >>
+        name: name >>
         call!(linebreak, parser) >>
         words: opt!(
             do_parse!(
@@ -217,7 +330,7 @@ named_args!(for_clause<'a>(parser: &mut Parser)<&'a [u8], ForClause>,
 );
 
 // FIXME: i think this will split like name @ on name@ (dunno if that's wrong though?)
-named_args!(name<'a>(parser: &mut Parser)<&'a [u8], Name>,
+named!(name<&[u8], Name>,
     do_parse!(
         val: map!(
             recognize!(
@@ -345,7 +458,7 @@ named_args!(until_clause<'a>(parser: &mut Parser)<&'a [u8], WhileClause>,
 
 named_args!(function_def<'a>(parser: &mut Parser)<&'a [u8], FunctionDef>,
     do_parse!(
-        name: call!(fname, parser) >>
+        name: fname >>
         tag!("()") >>
         ignore >>
         call!(linebreak, parser) >>
@@ -363,9 +476,9 @@ named_args!(function_body<'a>(parser: &mut Parser)<&'a [u8], FunctionBody>,
     )
 );
 
-named_args!(fname<'a>(parser: &mut Parser)<&'a [u8], Name>,
+named!(fname<&[u8], Name>,
     // FIXME: this do_parse should not be necessary
-    call!(name, parser)
+    do_parse!(name: name >> (name))
 );
 
 named_args!(brace_group<'a>(parser: &mut Parser)<&'a [u8], Command>,
@@ -623,6 +736,7 @@ named!(word<&[u8], Word>,
         val: fold_many1!(
             alt!(
                 single_quote |
+                map!(parameter, |param| WordPart::Param(param)) |
                 // XXX: there may be more that need to be checked for
                 // FIXME: need to handle escapes for e.g. $ and (
                 // FIXME: this should not ignore "}" (this is why i likely need to tokenize first)

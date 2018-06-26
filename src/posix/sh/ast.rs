@@ -13,6 +13,7 @@ use std::os::unix::io::RawFd;
 use std::process::{Child, Stdio};
 use std::rc::Rc;
 
+use super::NAME;
 use super::env::Environment;
 use ::UtilSetup;
 
@@ -67,6 +68,12 @@ pub type CommandName = Word;
 // FIXME: needs to store more than just text (text works fine without globbing, but once you add that single quotes no longer
 //        function the same as just straight up text (single quotes won't evaluate the glob, whereas the glob needs to be
 //        evaluated if given like `echo *`))
+//        according to the standard, quote removal is supposed to be last, so this is why
+// Order of word expansion:
+//    1. tilde expansion, parameter expansion, command substitution, arithmetic expansion
+//    2. field splitting (i.e. IFS)
+//    3. pathname expansion (i.e. globbing)
+//    4. quote removal
 #[derive(Debug)]
 pub enum Word {
     Text(OsString),
@@ -180,7 +187,7 @@ impl Word {
 #[derive(Debug)]
 pub enum WordPart {
     Text(OsString),
-    ParamExpand,        // TODO
+    Param(ParamExpr),
     CommandSubst,       // TODO
 }
 
@@ -193,6 +200,7 @@ impl WordPart {
 
         match self {
             Text(ref s) => s.clone(),
+            Param(ref param) => param.eval(setup, env),
             _ => unimplemented!()
         }
     }
@@ -205,6 +213,8 @@ impl WordPart {
     }
 }
 
+// FIXME: this is actually totally unnecessary (the result of the glob should be one big text string which gets
+//        split according to IFS in the next step)
 #[derive(Debug)]
 pub enum WordEval {
     Text(OsString),
@@ -862,6 +872,143 @@ impl Quotable {
         match self {
             CommandSubst(ref sub) => sub.eval(setup, env),
             Text(ref s) => s.clone(),
+            _ => unimplemented!()
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum Param {
+    Var(OsString),
+    Star,
+    Question,
+    At
+}
+
+impl Param {
+    pub fn eval<'a: 'b, 'b, S>(&self, setup: &mut S, env: &'a mut Environment) -> Option<&'b OsString>
+    where
+        S: UtilSetup,
+    {
+        use self::Param::*;
+
+        match self {
+            Var(ref s) => env.get_var(s),
+            // TODO
+            _ => unimplemented!()
+        }
+    }
+
+    pub fn to_os_string(&self) -> OsString {
+        use self::Param::*;
+
+        match self {
+            Var(ref s) => s.clone(),
+            Star => OsString::from("*"),
+            Question => OsString::from("?"),
+            At => OsString::from("@"),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct ParamExpr {
+    param: Param,
+    kind: ParamExprKind,
+}
+
+#[derive(Debug)]
+pub enum ParamExprKind {
+    Assign(Word),
+    AssignNull(Word),
+
+    Use(Word),
+    UseNull(Word),
+
+    Error(Option<Word>),
+    ErrorNull(Option<Word>),
+
+    Alternate(Word),
+    AlternateNull(Word),
+
+    SmallPrefix(Word),
+    LargePrefix(Word),
+
+    SmallSuffix(Word),
+    LargeSuffix(Word),
+
+    Value,
+    Length,
+}
+
+impl ParamExpr {
+    pub fn new(name: Param, kind: ParamExprKind) -> Self {
+        Self {
+            param: name,
+            kind: kind,
+        }
+    }
+
+    pub fn eval<S>(&self, setup: &mut S, env: &mut Environment) -> OsString
+    where
+        S: UtilSetup,
+    {
+        use self::ParamExprKind::*;
+
+        let pval_valid;
+        let not_null;
+
+        // NOTE: this entire setup is to get around the borrow checker
+        loop {
+            let pval = self.param.eval(setup, env);
+            pval_valid = pval.is_some();
+            not_null = pval.as_ref().map(|v| v.len() > 0).unwrap_or(false);
+            return match self.kind {
+                Assign(_) | Use(_) | Error(_) if not_null => pval.unwrap().clone(),
+                AssignNull(_) | UseNull(_) | ErrorNull(_) if pval_valid => pval.unwrap().clone(),
+
+                Length => pval.map(|v| OsString::from(v.len().to_string())).unwrap_or_else(|| OsString::from("0")),
+                Value => pval.map(|v| v.clone()).unwrap_or_default(),
+
+                _ => break,
+            };
+        }
+
+        match self.kind {
+            Alternate(ref word) if not_null => word.eval(setup, env),
+            AlternateNull(ref word) if pval_valid => word.eval(setup, env),
+            Alternate(_) | AlternateNull(_) => OsString::from(""),
+
+            Assign(ref word) | AssignNull(ref word) => {
+                let new_val = word.eval(setup, env);
+                // TODO: figure out what to do when not Var (e.g. $*)
+                if let Param::Var(ref name) = self.param {
+                    env.set_var(Cow::Borrowed(name), new_val.clone());
+                }
+                new_val
+            }
+
+            Use(ref word) | UseNull(ref word) => {
+                word.eval(setup, env)
+            }
+
+            Error(ref word) | ErrorNull(ref word) => {
+                // TODO: figure out how to cleanly exit for scripts
+                // FIXME: we should probably just return a Result (all the way up to
+                //        CompleteCommand) and then print to stderr there
+                let msg = word.as_ref().map(|w| w.eval(setup, env));
+                display_err!(
+                    setup.error(),
+                    "{}: {}",
+                    self.param.to_os_string().to_string_lossy(),
+                    msg.as_ref().map(|m| m.to_string_lossy()).unwrap_or(Cow::from("parameter not set"))
+                );
+                // TODO: i assume this is where the result would go
+                unimplemented!()
+            }
+
+            // TODO: prefixes and suffixes
+
             _ => unimplemented!()
         }
     }
