@@ -10,6 +10,8 @@ use self::env::Environment;
 use self::parser::Parser;
 
 mod ast;
+mod builtin;
+mod command;
 mod env;
 mod parser;
 
@@ -106,7 +108,7 @@ where
     Ok(())
 }
 
-fn setup_default_env<S>(setup: &mut S, env: &mut Environment) -> Result<()>
+fn setup_default_env<S>(setup: &mut S, env: &mut Environment<S>) -> Result<()>
 where
     S: UtilSetup,
 {
@@ -125,6 +127,8 @@ where
     // FIXME: what to do about PWD and stuff?  just go based on env or set explicitly?
 
     // although HOME and PATH and stuff are used, we shouldn't set them explicitly
+
+    env.add_builtins(builtin::default_builtins());
 
     Ok(())
 }

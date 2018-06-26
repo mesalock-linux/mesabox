@@ -14,10 +14,11 @@ use std::process::{Child, Stdio};
 use std::rc::Rc;
 
 use super::NAME;
+use super::command::{CommandEnv, ExecData, ExecEnv, InProcessCommand};
 use super::env::Environment;
 use ::UtilSetup;
 
-type ExitCode = libc::c_int;
+pub type ExitCode = libc::c_int;
 
 #[derive(Debug)]
 pub struct Script {
@@ -44,7 +45,7 @@ impl CompleteCommand {
         }
     }
 
-    pub fn execute<S>(&self, setup: &mut S, env: &mut Environment) -> ExitCode
+    pub fn execute<S>(&self, setup: &mut S, env: &mut Environment<S>) -> ExitCode
     where
         S: UtilSetup,
     {
@@ -81,7 +82,7 @@ pub enum Word {
 }
 
 impl Word {
-    pub fn eval<S>(&self, setup: &mut S, env: &mut Environment) -> OsString
+    pub fn eval<S>(&self, setup: &mut S, env: &mut Environment<S>) -> OsString
     where
         S: UtilSetup,
     {
@@ -98,7 +99,7 @@ impl Word {
         }
     }
 
-    pub fn matches_glob<'a, S>(&self, setup: &mut S, env: &mut Environment, value: &OsStr) -> bool
+    pub fn matches_glob<'a, S>(&self, setup: &mut S, env: &mut Environment<S>, value: &OsStr) -> bool
     where
         S: UtilSetup,
     {
@@ -120,7 +121,7 @@ impl Word {
 
     // NOTE: globset seems to implement filename{a,b} syntax, which is not valid for posix shell technically
     // NOTE: * shouldn't list hidden files
-    pub fn eval_glob_fs<'a, S>(&self, setup: &mut S, env: &mut Environment) -> WordEval
+    pub fn eval_glob_fs<'a, S>(&self, setup: &mut S, env: &mut Environment<S>) -> WordEval
     where
         S: UtilSetup,
     {
@@ -192,7 +193,7 @@ pub enum WordPart {
 }
 
 impl WordPart {
-    pub fn eval<S>(&self, setup: &mut S, env: &mut Environment) -> OsString
+    pub fn eval<S>(&self, setup: &mut S, env: &mut Environment<S>) -> OsString
     where
         S: UtilSetup,
     {
@@ -235,7 +236,7 @@ impl AndOr {
         }
     }
 
-    pub fn execute<S>(&self, setup: &mut S, env: &mut Environment, prev_res: ExitCode) -> ExitCode
+    pub fn execute<S>(&self, setup: &mut S, env: &mut Environment<S>, prev_res: ExitCode) -> ExitCode
     where
         S: UtilSetup,
     {
@@ -261,7 +262,7 @@ pub struct VarAssign {
 }
 
 impl VarAssign {
-    pub fn execute<S>(&self, setup: &mut S, env: &mut Environment)
+    pub fn execute<S>(&self, setup: &mut S, env: &mut Environment<S>)
     where
         S: UtilSetup,
     {
@@ -269,7 +270,7 @@ impl VarAssign {
         env.set_var(Cow::Borrowed(&self.varname), value);
     }
 
-    pub fn eval<S>(&self, setup: &mut S, env: &mut Environment) -> (&OsStr, OsString)
+    pub fn eval<S>(&self, setup: &mut S, env: &mut Environment<S>) -> (&OsStr, OsString)
     where
         S: UtilSetup,
     {
@@ -284,7 +285,7 @@ pub struct Pipeline {
 }
 
 impl Pipeline {
-    pub fn execute<S>(&self, setup: &mut S, env: &mut Environment) -> ExitCode
+    pub fn execute<S>(&self, setup: &mut S, env: &mut Environment<S>) -> ExitCode
     where
         S: UtilSetup,
     {
@@ -325,7 +326,7 @@ impl Command {
         }
     }
 
-    pub fn execute<S>(&self, setup: &mut S, env: &mut Environment) -> ExitCode
+    pub fn execute<S>(&self, setup: &mut S, env: &mut Environment<S>) -> ExitCode
     where
         S: UtilSetup,
     {
@@ -346,7 +347,7 @@ pub enum CommandInner {
 }
 
 impl CommandInner {
-    pub fn execute<S>(&self, setup: &mut S, env: &mut Environment) -> ExitCode
+    pub fn execute<S>(&self, setup: &mut S, env: &mut Environment<S>) -> ExitCode
     where
         S: UtilSetup,
     {
@@ -417,7 +418,7 @@ impl IfClause {
         }
     }
 
-    pub fn execute<S>(&self, setup: &mut S, env: &mut Environment) -> ExitCode
+    pub fn execute<S>(&self, setup: &mut S, env: &mut Environment<S>) -> ExitCode
     where
         S: UtilSetup,
     {
@@ -448,7 +449,7 @@ impl ElseClause {
         }
     }
 
-    pub fn execute<S>(&self, setup: &mut S, env: &mut Environment) -> ExitCode
+    pub fn execute<S>(&self, setup: &mut S, env: &mut Environment<S>) -> ExitCode
     where
         S: UtilSetup,
     {
@@ -481,7 +482,7 @@ impl WhileClause {
         }
     }
 
-    pub fn execute<S>(&self, setup: &mut S, env: &mut Environment) -> ExitCode
+    pub fn execute<S>(&self, setup: &mut S, env: &mut Environment<S>) -> ExitCode
     where
         S: UtilSetup,
     {
@@ -510,7 +511,7 @@ impl ForClause {
         }
     }
 
-    pub fn execute<S>(&self, setup: &mut S, env: &mut Environment) -> ExitCode
+    pub fn execute<S>(&self, setup: &mut S, env: &mut Environment<S>) -> ExitCode
     where
         S: UtilSetup,
     {
@@ -545,7 +546,7 @@ impl CaseClause {
         }
     }
 
-    pub fn execute<S>(&self, setup: &mut S, env: &mut Environment) -> ExitCode
+    pub fn execute<S>(&self, setup: &mut S, env: &mut Environment<S>) -> ExitCode
     where
         S: UtilSetup,
     {
@@ -566,7 +567,7 @@ impl CaseList {
         }
     }
 
-    pub fn execute<S>(&self, setup: &mut S, env: &mut Environment, word: &Word) -> ExitCode
+    pub fn execute<S>(&self, setup: &mut S, env: &mut Environment<S>, word: &Word) -> ExitCode
     where
         S: UtilSetup,
     {
@@ -594,7 +595,7 @@ impl CaseItem {
         }
     }
 
-    pub fn execute<S>(&self, setup: &mut S, env: &mut Environment, word: &OsStr) -> Option<ExitCode>
+    pub fn execute<S>(&self, setup: &mut S, env: &mut Environment<S>, word: &OsStr) -> Option<ExitCode>
     where
         S: UtilSetup,
     {
@@ -622,7 +623,7 @@ impl Pattern {
         }
     }
 
-    pub fn matches<'a, S>(&self, setup: &mut S, env: &mut Environment, word: &OsStr) -> bool
+    pub fn matches<'a, S>(&self, setup: &mut S, env: &mut Environment<S>, word: &OsStr) -> bool
     where
         S: UtilSetup,
     {
@@ -649,7 +650,7 @@ impl FunctionDef {
         }
     }
 
-    pub fn execute<S>(&self, setup: &mut S, env: &mut Environment) -> ExitCode
+    pub fn execute<S>(&self, setup: &mut S, env: &mut Environment<S>) -> ExitCode
     where
         S: UtilSetup,
     {
@@ -672,11 +673,10 @@ impl FunctionBody {
             redirect_list: redirect_list
         }
     }
+}
 
-    pub fn execute<S>(&self, setup: &mut S, env: &mut Environment) -> ExitCode
-    where
-        S: UtilSetup,
-    {
+impl<S: UtilSetup> InProcessCommand<S> for FunctionBody {
+    fn execute(&self, setup: &mut S, env: &mut Environment<S>, data: ExecData) -> ExitCode {
         // TODO: redirects
         self.command.execute(setup, env)
     }
@@ -698,65 +698,34 @@ impl SimpleCommand {
         }
     }
 
-    pub fn execute<S>(&self, setup: &mut S, env: &mut Environment) -> ExitCode
+    pub fn execute<S>(&self, setup: &mut S, env: &mut Environment<S>) -> ExitCode
     where
         S: UtilSetup,
     {
         use std::process::Command as RealCommand;
 
         if let Some(ref name) = self.name {
-            let mut cmd = RealCommand::new(name.eval(setup, env));
-            //println!("{}", name.to_string_lossy());
-            cmd.env_clear();
+            let cmdname = name.eval(setup, env);
 
-            cmd.envs(env.export_iter());
-            // TODO: redirects and pre/post actions (other than args)
-            if let Some(ref actions) = self.pre_actions {
-                for act in actions.iter() {
-                    match act {
-                        Either::Right(ref assign) => {
-                            let (k, v) = assign.eval(setup, env);
-                            cmd.env(k, v);
-                        }
-                        _ => unimplemented!()
-                    }
-                }
-            }
-            if let Some(ref actions) = self.post_actions {
-                for act in actions.iter() {
-                    match act {
-                        Either::Left(ref redirect) => {
-                            // FIXME: only works after spawning process i guess
-                            redirect.setup(&mut cmd);
-                        }
-                        Either::Right(ref word) => {
-                            match word.eval_glob_fs(setup, env) {
-                                WordEval::Text(text) => cmd.arg(text),
-                                WordEval::Globbed(glob) => cmd.args(glob.iter()),
-                            };
-                        }
-                    }
-                }
-            }
+            return {
+                // NOTE: needed to make builtins and functions return Rcs rather than borrowed
+                //       pointers for this to function (it is possible that an execution of a
+                //       builtin or function could remove something that is being executed, which
+                //       would then cause that builtin/function to be freed (if the borrow checker
+                //       didn't catch it, that is))
+                if let Some(builtin) = env.get_builtin(&cmdname) {
+                    println!("got builtin '{}'", cmdname.to_string_lossy());
 
-            // TODO: this probably shouldn't wait but not sure what to do exactly
-            // FIXME: don't unwrap
-            let mut child = cmd.spawn().unwrap();
-            if let Some(ref actions) = self.post_actions {
-                // FIXME: don't unwrap
-                for act in actions.iter() {
-                    match act {
-                        Either::Left(ref redirect) => {
-                            // FIXME: only works after spawning process i guess
-                            redirect.handle_child(&mut child);
-                        }
-                        _ => {}
-                        //Either::Right(ref word) => cmd.arg(word)
-                    }
+                    self.run_command(setup, env, ExecEnv::new(&*builtin))
+                } else if let Some(func) = env.get_func(&cmdname) {
+                    println!("got func '{}'", cmdname.to_string_lossy());
+                    self.run_command(setup, env, ExecEnv::new(&*func))
+                } else {
+                    let mut cmd = RealCommand::new(cmdname);
+                    cmd.env_clear();
+                    self.run_command(setup, env, cmd)
                 }
-            }
-
-            return child.wait().unwrap().code().unwrap();
+            };
         } else if let Some(ref actions) = self.pre_actions {
             for act in actions.iter() {
                 match act {
@@ -769,6 +738,62 @@ impl SimpleCommand {
         }
 
         0
+    }
+
+    fn run_command<S, E>(&self, setup: &mut S, env: &mut Environment<S>, mut cmd: E) -> ExitCode
+    where
+        S: UtilSetup,
+        E: CommandEnv<S>,
+    {
+        cmd.envs(env.export_iter().map(|(k, v)| (Cow::Borrowed(k), Cow::Borrowed(v))));
+        // TODO: redirects and pre/post actions (other than args)
+        if let Some(ref actions) = self.pre_actions {
+            for act in actions.iter() {
+                match act {
+                    Either::Right(ref assign) => {
+                        let (k, v) = assign.eval(setup, env);
+                        cmd.env(Cow::Borrowed(k), Cow::Owned(v));
+                    }
+                    _ => unimplemented!()
+                }
+            }
+        }
+        if let Some(ref actions) = self.post_actions {
+            for act in actions.iter() {
+                match act {
+                    Either::Left(ref redirect) => {
+                        // FIXME: only works after spawning process i guess (SOLUTION STORE REDIRECTS IN OBJECT THAT IMPLEMENTS CommandEnv AND WAIT TO ACTUALLY REDIRECT UNTIL AFTER THE CHILD IS STARTED)
+                        //redirect.setup(&mut cmd);
+                    }
+                    Either::Right(ref word) => {
+                        match word.eval_glob_fs(setup, env) {
+                            WordEval::Text(text) => cmd.arg(Cow::Owned(text)),
+                            WordEval::Globbed(glob) => cmd.args(glob.into_iter().map(|v| Cow::Owned(v))),
+                        };
+                    }
+                }
+            }
+        }
+
+        // TODO: this probably shouldn't wait but not sure what to do exactly
+        // FIXME: don't unwrap
+        //let mut child = cmd.spawn().unwrap();
+        if let Some(ref actions) = self.post_actions {
+            // FIXME: don't unwrap
+            for act in actions.iter() {
+                match act {
+                    Either::Left(ref redirect) => {
+                        // FIXME: only works after spawning process i guess
+                        //redirect.handle_child(&mut child);
+                    }
+                    _ => {}
+                    //Either::Right(ref word) => cmd.arg(word)
+                }
+            }
+        }
+
+        //return child.wait().unwrap().code().unwrap();
+        cmd.status(setup, env).unwrap()
     }
 }
 
@@ -867,7 +892,7 @@ impl CommandSubst {
         }
     }
 
-    pub fn eval<S>(&self, setup: &mut S, env: &mut Environment) -> OsString
+    pub fn eval<S>(&self, setup: &mut S, env: &mut Environment<S>) -> OsString
     where
         S: UtilSetup,
     {
@@ -881,7 +906,7 @@ pub struct DoubleQuote {
 }
 
 impl DoubleQuote {
-    pub fn eval<S>(&self, setup: &mut S, env: &mut Environment) -> OsString
+    pub fn eval<S>(&self, setup: &mut S, env: &mut Environment<S>) -> OsString
     where
         S: UtilSetup,
     {
@@ -901,7 +926,7 @@ pub enum Quotable {
 }
 
 impl Quotable {
-    pub fn eval<S>(&self, setup: &mut S, env: &mut Environment) -> OsString
+    pub fn eval<S>(&self, setup: &mut S, env: &mut Environment<S>) -> OsString
     where
         S: UtilSetup,
     {
@@ -924,7 +949,7 @@ pub enum Param {
 }
 
 impl Param {
-    pub fn eval<'a: 'b, 'b, S>(&self, setup: &mut S, env: &'a mut Environment) -> Option<&'b OsString>
+    pub fn eval<'a: 'b, 'b, S>(&self, setup: &mut S, env: &'a mut Environment<S>) -> Option<&'b OsString>
     where
         S: UtilSetup,
     {
@@ -987,7 +1012,7 @@ impl ParamExpr {
         }
     }
 
-    pub fn eval<S>(&self, setup: &mut S, env: &mut Environment) -> OsString
+    pub fn eval<S>(&self, setup: &mut S, env: &mut Environment<S>) -> OsString
     where
         S: UtilSetup,
     {
@@ -1052,7 +1077,7 @@ impl ParamExpr {
     }
 }
 
-fn exec_andor_chain<'a, S>(setup: &mut S, env: &mut Environment, chain: &'a [AndOr]) -> ExitCode
+fn exec_andor_chain<'a, S>(setup: &mut S, env: &mut Environment<S>, chain: &'a [AndOr]) -> ExitCode
 where
     S: UtilSetup,
 {
@@ -1063,7 +1088,7 @@ where
     code
 }
 
-fn exec_list<'a, S>(setup: &mut S, env: &mut Environment, list: &'a [Vec<AndOr>]) -> ExitCode
+fn exec_list<'a, S>(setup: &mut S, env: &mut Environment<S>, list: &'a [Vec<AndOr>]) -> ExitCode
 where
     S: UtilSetup,
 {
