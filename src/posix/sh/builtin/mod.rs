@@ -1,10 +1,12 @@
 use clap::{App, Arg, AppSettings};
 
 use std::borrow::Cow;
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::fmt;
-use std::io::Write;
+use std::io::{BufRead, Write};
+use std::os::unix::ffi::OsStrExt;
 
+use ::UtilRead;
 use super::{UtilSetup, Result};
 use super::ast::ExitCode;
 use super::command::{ExecData, InProcessCommand};
@@ -52,6 +54,7 @@ where
     vec![
         (OsString::from("exit"), Builtin::new(exit_handler)),
         (OsString::from("export"), Builtin::new(export_handler)),
+        (OsString::from("read"), Builtin::new(read_handler)),
         (OsString::from("unset"), Builtin::new(unset_handler)),
     ]
 }
@@ -106,6 +109,72 @@ where
                 env.remove_var(name);
             }
         }
+    }
+
+    Ok(0)
+}
+
+fn read_handler<S>(setup: &mut S, env: &mut Environment<S>, data: ExecData) -> Result<ExitCode>
+where
+    S: UtilSetup,
+{
+    let matches = App::new("read")
+        .setting(AppSettings::NoBinaryName)
+        // if present we treat backslash as a normal character rather than the start of an escape
+        // sequence
+        .arg(Arg::with_name("backslash")
+            .short("r"))
+        .arg(Arg::with_name("VARS")
+            .index(1)
+            .multiple(true)
+            .required(true))
+        .get_matches_from_safe(data.args)?;
+
+    let mut input = setup.input();
+    let mut input = input.lock_reader()?;
+
+    let ignore_backslash = matches.is_present("backslash");
+
+    let check_backslash = |buffer: &mut Vec<u8>| {
+        loop {
+            let res = match buffer.iter().last() {
+                Some(b'\n') => {
+                    buffer.pop();
+                    continue;
+                }
+                Some(b'\\') => false,
+                _ => true,
+            };
+            return res;
+        }
+    };
+
+    let mut buffer = vec![];
+    loop {
+        // TODO: check for EOF
+        input.read_until(b'\n', &mut buffer)?;
+        let not_backslash = check_backslash(&mut buffer);
+        // TODO: handle heredoc portion?
+        if ignore_backslash || not_backslash {
+            break;
+        }
+        // we need to remove the backslash
+        buffer.pop();
+    }
+
+    let vars = matches.values_of_os("VARS").unwrap();
+    let var_count = vars.clone().count();
+
+    let field_iter = {
+        // XXX: maybe this should be extracted into a separate function (i feel like this will be used
+        //      to split fields normally too)
+        let ifs = env.get_var("IFS").map(|v| v.clone()).unwrap_or_else(|| OsString::from(" \t\n"));
+        buffer.splitn(var_count, move |byte| {
+            ifs.as_bytes().contains(byte)
+        })
+    };
+    for (var, value) in vars.zip(field_iter) {
+        env.set_var(Cow::Borrowed(var), OsStr::from_bytes(value).to_owned());
     }
 
     Ok(0)

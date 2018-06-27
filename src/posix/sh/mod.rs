@@ -159,6 +159,7 @@ where
     env.set_export_var(Cow::Borrowed(OsStr::new("PS4")), OsString::from("+ "));
 
     env.set_export_var(Cow::Borrowed(OsStr::new("LINENO")), OsString::from("1"));
+    env.set_export_var(Cow::Borrowed(OsStr::new("IFS")), OsString::from(" \t\n"));
 
     let cur_dir = match setup.current_dir() {
         Some(p) => p.to_path_buf(),
