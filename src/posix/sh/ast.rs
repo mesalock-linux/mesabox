@@ -650,12 +650,14 @@ impl FunctionDef {
         }
     }
 
-    pub fn execute<S>(&self, setup: &mut S, env: &mut Environment<S>) -> ExitCode
+    pub fn execute<S>(&self, _setup: &mut S, env: &mut Environment<S>) -> ExitCode
     where
         S: UtilSetup,
     {
         env.set_func(&self.name, self.body.clone());
         // XXX: is there actually a way for this to not be 0?  spec says non-zero on failure, so is this just in parsing?
+        //      from experimenting i think the only way for this to fail is if we try to define a
+        //      function using a reserved name
         0
     }
 }

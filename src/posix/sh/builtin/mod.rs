@@ -53,7 +53,8 @@ where
     unimplemented!()
 }
 
-fn export_handler<S>(setup: &mut S, env: &mut Environment<S>, data: ExecData) -> ExitCode
+// TODO: needs to support -p option
+fn export_handler<S>(_setup: &mut S, env: &mut Environment<S>, data: ExecData) -> ExitCode
 where
     S: UtilSetup,
 {

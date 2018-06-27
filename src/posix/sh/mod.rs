@@ -1,4 +1,5 @@
-use rustyline::{Config, Editor, KeyPress, Cmd, CompletionType};
+use nom;
+use rustyline::{Config, Editor, CompletionType};
 use rustyline::error::ReadlineError;
 
 use std::borrow::Cow;
@@ -18,7 +19,7 @@ mod parser;
 pub const NAME: &str = "sh";
 pub const DESCRIPTION: &str = "Minimal POSIX shell";
 
-pub fn execute<S, T>(setup: &mut S, mut args: T) -> Result<()>
+pub fn execute<S, T>(setup: &mut S, args: T) -> Result<()>
 where
     S: UtilSetup,
     T: ArgsIter,
@@ -33,7 +34,6 @@ where
 
     let mut parser = Parser::new();
     let res = complete!(data.as_slice(), call_m!(parser.complete_command));
-    //let res = Parser::new().complete_command(data.as_slice());
     match res {
         Ok(m) => {
             println!("{:#?}", m);
@@ -76,16 +76,57 @@ where
         match readline {
             Ok(mut line) => {
                 line.push('\n');
-                {
+                'outer: loop {
                     // FIXME: complete! is not right as we can have functions split across multiple
                     //        lines and such (which is when e.g. PS2 comes in)
-                    let res = complete!(line.as_bytes(), call_m!(parser.complete_command));
-                    match res {
-                        Ok(m) => {
-                            println!("status: {}", m.1.execute(setup, &mut env));
+                    {
+                        let res = complete!(line.as_bytes(), call_m!(parser.complete_command));
+                        match res {
+                            Ok(m) => {
+                                println!("status: {}", m.1.execute(setup, &mut env));
+                                break;
+                            }
+                            // FIXME: this is super wasteful (we build up part of the tree and then
+                            //        just trash it when it's not complete)
+                            Err(nom::Err::Incomplete(_))
+                            | Err(nom::Err::Error(nom::Context::Code(_, nom::ErrorKind::Complete)))
+                            | Err(nom::Err::Failure(nom::Context::Code(_, nom::ErrorKind::Complete))) => { }
+                            Err(f) => {
+                                println!("{}", f);
+                                break;
+                            }
                         }
-                        Err(f) => {
-                            println!("{}", f);
+                    }
+
+                    // we use this loop trick here again to escape the borrow checker (the code
+                    // should probably be split into functions as it's all very similar)
+                    // the input is incomplete, so read more
+                    loop {
+                        let new_data = {
+                            let ps2 = env.get_var("PS2");
+                            rl.readline(&ps2.map(|s| s.to_string_lossy()).unwrap_or(Cow::from("")))
+                        };
+                        match new_data {
+                            Ok(data) => {
+                                line.push_str(&data);
+                                line.push('\n');
+
+                                let res = complete!(line.as_bytes(), call_m!(parser.complete_command));
+                                match res {
+                                    Ok(m) => {
+                                        println!("status: {}", m.1.execute(setup, &mut env));
+                                        break 'outer;
+                                    }
+                                    Err(nom::Err::Incomplete(_))
+                                    | Err(nom::Err::Error(nom::Context::Code(_, nom::ErrorKind::Complete)))
+                                    | Err(nom::Err::Failure(nom::Context::Code(_, nom::ErrorKind::Complete))) => { }
+                                    Err(f) => {
+                                        println!("{}", f);
+                                        break 'outer;
+                                    }
+                                }
+                            }
+                            _ => unimplemented!()
                         }
                     }
                 }
