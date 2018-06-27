@@ -70,6 +70,14 @@ impl<S: UtilSetup> Environment<S> {
         self.vars.get(name).or_else(|| self.export_vars.get(name).and_then(|var| var.as_ref()))
     }
 
+    pub fn remove_var<Q: ?Sized>(&mut self, name: &Q) -> Option<OsString>
+    where
+        Q: AsRef<OsStr>,
+    {
+        let name = name.as_ref();
+        self.vars.remove(name).or_else(|| self.export_vars.remove(name).and_then(|var| var))
+    }
+
     pub fn set_func<Q: ?Sized>(&mut self, name: &Q, new_val: Rc<FunctionBody>) -> Option<Rc<FunctionBody>>
     where
         OsString: Borrow<Q>,
@@ -87,6 +95,13 @@ impl<S: UtilSetup> Environment<S> {
         Q: Hash + Eq,
     {
         self.funcs.get(name).map(|func| func.clone())
+    }
+
+    pub fn remove_func<Q: ?Sized>(&mut self, name: &Q) -> Option<Rc<FunctionBody>>
+    where
+        Q: AsRef<OsStr>,
+    {
+        self.funcs.remove(name.as_ref())
     }
 
     pub fn add_builtins<I: IntoIterator<Item = (OsString, Builtin<S>)>>(&mut self, builtins: I) {
