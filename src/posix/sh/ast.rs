@@ -14,7 +14,7 @@ use std::process::{Child, Stdio};
 use std::rc::Rc;
 
 use super::NAME;
-use super::command::{CommandEnv, ExecData, ExecEnv, InProcessCommand};
+use super::command::{CommandEnv, CommandIo, CommandWrapper, ExecData, ExecEnv, InProcessCommand};
 use super::env::Environment;
 use ::UtilSetup;
 
@@ -720,8 +720,7 @@ impl SimpleCommand {
                 } else if let Some(func) = env.get_func(&cmdname) {
                     self.run_command(setup, env, ExecEnv::new(&*func))
                 } else {
-                    let mut cmd = RealCommand::new(cmdname);
-                    cmd.env_clear();
+                    let cmd = CommandWrapper::new(RealCommand::new(cmdname));
                     self.run_command(setup, env, cmd)
                 }
             };
@@ -731,6 +730,7 @@ impl SimpleCommand {
                     Either::Right(ref assign) => {
                         assign.execute(setup, env);
                     }
+                    // TODO: figure out what to do with redirects (just ignore them?)
                     _ => unimplemented!()
                 }
             }
@@ -745,15 +745,17 @@ impl SimpleCommand {
         E: CommandEnv<S>,
     {
         cmd.envs(env.export_iter().map(|(k, v)| (Cow::Borrowed(k), Cow::Borrowed(v))));
-        // TODO: redirects and pre/post actions (other than args)
+
         if let Some(ref actions) = self.pre_actions {
             for act in actions.iter() {
                 match act {
+                    Either::Left(ref redirect) => {
+                        redirect.setup(&mut cmd);
+                    }
                     Either::Right(ref assign) => {
                         let (k, v) = assign.eval(setup, env);
                         cmd.env(Cow::Borrowed(k), Cow::Owned(v));
                     }
-                    _ => unimplemented!()
                 }
             }
         }
@@ -761,8 +763,7 @@ impl SimpleCommand {
             for act in actions.iter() {
                 match act {
                     Either::Left(ref redirect) => {
-                        // FIXME: only works after spawning process i guess (SOLUTION STORE REDIRECTS IN OBJECT THAT IMPLEMENTS CommandEnv AND WAIT TO ACTUALLY REDIRECT UNTIL AFTER THE CHILD IS STARTED)
-                        //redirect.setup(&mut cmd);
+                        redirect.setup(&mut cmd);
                     }
                     Either::Right(ref word) => {
                         match word.eval_glob_fs(setup, env) {
@@ -774,24 +775,6 @@ impl SimpleCommand {
             }
         }
 
-        // TODO: this probably shouldn't wait but not sure what to do exactly
-        // FIXME: don't unwrap
-        //let mut child = cmd.spawn().unwrap();
-        if let Some(ref actions) = self.post_actions {
-            // FIXME: don't unwrap
-            for act in actions.iter() {
-                match act {
-                    Either::Left(ref redirect) => {
-                        // FIXME: only works after spawning process i guess
-                        //redirect.handle_child(&mut child);
-                    }
-                    _ => {}
-                    //Either::Right(ref word) => cmd.arg(word)
-                }
-            }
-        }
-
-        //return child.wait().unwrap().code().unwrap();
         cmd.status(setup, env).unwrap()
     }
 }
@@ -806,27 +789,19 @@ pub enum IoRedirect {
 }
 
 impl IoRedirect {
-    pub fn setup(&self, cmd: &mut ::std::process::Command) {
+    // FIXME: this should be able to error
+    pub fn setup<S, E>(&self, cmd: &mut E)
+    where
+        S: UtilSetup,
+        E: CommandEnv<S>,
+    {
         use self::IoRedirect::*;
 
         // TODO: both file and check for fds
         match self {
             Heredoc(_, ref doc) => {
-                cmd.stdin(Stdio::piped());
-            }
-            _ => {}
-        }
-    }
-
-    // FIXME: this can prob error
-    pub fn handle_child(&self, child: &mut Child) {
-        use self::IoRedirect::*;
-
-        // TODO: if we need to handle something other than heredocs do so
-        match self {
-            Heredoc(_, ref doc) => {
                 // FIXME: don't unwrap
-                child.stdin.as_mut().unwrap().write_all(&doc.borrow().data).unwrap();
+                cmd.stdin(CommandIo::Piped(&doc.borrow().data)).unwrap();
             }
             _ => {}
         }

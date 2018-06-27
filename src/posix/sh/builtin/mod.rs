@@ -143,7 +143,7 @@ where
                     continue;
                 }
                 Some(b'\\') => {
-                    // need to make sure this character isn't escaped
+                    // need to make sure this byte isn't escaped
                     buffer.iter().rev().skip(1).take_while(|&&byte| byte == b'\\').count() % 2 == 1
                 }
                 _ => true,
