@@ -4,7 +4,7 @@ use std::borrow::Cow;
 use std::ffi::{OsStr, OsString};
 use std::fmt;
 use std::io::{BufRead, Write};
-use std::os::unix::ffi::OsStrExt;
+use std::os::unix::ffi::{OsStrExt, OsStringExt};
 
 use ::UtilRead;
 use super::{UtilSetup, Result};
@@ -142,7 +142,10 @@ where
                     buffer.pop();
                     continue;
                 }
-                Some(b'\\') => false,
+                Some(b'\\') => {
+                    // need to make sure this character isn't escaped
+                    buffer.iter().rev().skip(1).take_while(|&&byte| byte == b'\\').count() % 2 == 1
+                }
                 _ => true,
             };
             return res;
@@ -174,7 +177,27 @@ where
         })
     };
     for (var, value) in vars.zip(field_iter) {
-        env.set_var(Cow::Borrowed(var), OsStr::from_bytes(value).to_owned());
+        let value = if ignore_backslash {
+            value.to_owned()
+        } else {
+            let mut result = Vec::with_capacity(value.len());
+            let mut in_escape = false;
+            for &byte in value {
+                if in_escape {
+                    result.push(byte);
+                    in_escape = false;
+                } else {
+                    if byte == b'\\' {
+                        in_escape = true;
+                    } else {
+                        result.push(byte);
+                    }
+                }
+            }
+            // it should be impossible for there to be an extra escape
+            result
+        };
+        env.set_var(Cow::Borrowed(var), OsString::from_vec(value));
     }
 
     Ok(0)
