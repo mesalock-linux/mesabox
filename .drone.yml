@@ -2,6 +2,8 @@ pipeline:
   build:
     image: ${RUST_VERSION}
     secrets: [ coveralls_token ]
+    environment:
+      - RUST_COV_VERSION="rustlang/rust:nightly"
     commands:
       - rustup show
       - cargo build
@@ -9,16 +11,8 @@ pipeline:
       - |
         if [ "${RUST_VERSION}" = "${RUST_COV_VERSION}" ]; then
           apt-get update
-          apt-get install -y --no-install-recommends cmake libelf-dev libdw-dev libbfd-dev libiberty-dev
-          wget https://github.com/SimonKagstrom/kcov/archive/v35.tar.gz
-          tar -xzf v35.tar.gz
-          cd kcov-35
-          mkdir build
-          cd build
-          cmake ..
-          make
-          make install
-          cd ../.. && sh -c ./run-kcov.sh
+          apt-get install -y --no-install-recommends lcov llvm
+          ./util/run-cov.sh
         fi
 
 matrix:
@@ -26,5 +20,3 @@ matrix:
     - rust:1.26
     - rust:latest
     - rustlang/rust:nightly
-  RUST_COV_VERSION:
-    - rust:1.26
