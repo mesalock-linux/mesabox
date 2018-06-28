@@ -11,8 +11,10 @@ pipeline:
       - |
         if [ "${RUST_VERSION}" = "${RUST_COV_VERSION}" ]; then
           apt-get update
-          apt-get install -y --no-install-recommends lcov llvm
+          apt-get install -y --no-install-recommends lcov llvm ruby
+          gem install coveralls-lcov
           ./util/run-cov.sh
+          coveralls-lcov -t ${COVERALLS_TOKEN} final.info
         fi
 
 matrix:
