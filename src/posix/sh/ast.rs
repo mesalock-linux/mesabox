@@ -6,17 +6,18 @@ use walkdir::WalkDir;
 use std::borrow::Cow;
 use std::cell::RefCell;
 use std::ffi::{OsString, OsStr};
+use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::iter::FromIterator;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::io::RawFd;
 use std::process::{Child, Stdio};
 use std::rc::Rc;
+use std::result::Result as StdResult;
 
-use super::NAME;
+use super::{NAME, UtilSetup, Result};
 use super::command::{CommandEnv, CommandIo, CommandWrapper, ExecData, ExecEnv, InProcessCommand};
 use super::env::Environment;
-use ::UtilSetup;
 
 pub type ExitCode = libc::c_int;
 
@@ -153,7 +154,7 @@ impl Word {
         }
     }
 
-    fn create_glob(&self, text: &OsStr) -> Result<Glob, globset::Error> {
+    fn create_glob(&self, text: &OsStr) -> StdResult<Glob, globset::Error> {
         // sadly, we need to convert any non-utf8 values to hex escapes to compile the regex, which
         // wastes some time
         let glob_str = self.escape_glob(&text);
@@ -753,7 +754,7 @@ impl SimpleCommand {
             for act in actions.iter() {
                 match act {
                     Either::Left(ref redirect) => {
-                        redirect.setup(&mut cmd);
+                        redirect.setup(setup, env, &mut cmd);
                     }
                     Either::Right(ref assign) => {
                         let (k, v) = assign.eval(setup, env);
@@ -766,7 +767,7 @@ impl SimpleCommand {
             for act in actions.iter() {
                 match act {
                     Either::Left(ref redirect) => {
-                        redirect.setup(&mut cmd);
+                        redirect.setup(setup, env, &mut cmd);
                     }
                     Either::Right(ref word) => {
                         match word.eval_glob_fs(setup, env) {
@@ -793,14 +794,19 @@ pub enum IoRedirect {
 
 impl IoRedirect {
     // FIXME: this should be able to error
-    pub fn setup<E>(&self, cmd: &mut E)
+    pub fn setup<S, E>(&self, setup: &mut S, env: &mut Environment, cmd: &mut E)
     where
+        S: UtilSetup,
         E: CommandEnv,
     {
         use self::IoRedirect::*;
 
-        // TODO: both file and check for fds
+        // TODO: check for fds
         match self {
+            File(_, ref file) => {
+                // FIXME: don't unwrap
+                file.setup(setup, env, cmd).unwrap();
+            }
             Heredoc(_, ref doc) => {
                 // FIXME: don't unwrap
                 cmd.stdin(CommandIo::Piped(&doc.borrow().data)).unwrap();
@@ -822,6 +828,42 @@ impl IoRedirectFile {
             kind: kind,
             filename: filename,
         }
+    }
+
+    pub fn setup<S, E>(&self, setup: &mut S, env: &mut Environment, cmd: &mut E) -> Result<()>
+    where
+        S: UtilSetup,
+        E: CommandEnv,
+    {
+        use self::IoRedirectKind::*;
+
+        let name = self.filename.eval(setup, env);
+
+        match self.kind {
+            Input => {
+                let file = File::open(name)?;
+                cmd.stdin(CommandIo::File(file))?;
+            }
+            Output => {
+                let file = File::create(name)?;
+                cmd.stdout(CommandIo::File(file))?;
+            }
+            ReadWrite => {
+                let file = OpenOptions::new().create(true).read(true).write(true).open(name)?;
+                let second = file.try_clone()?;
+
+                cmd.stdin(CommandIo::File(file))?;
+                cmd.stdout(CommandIo::File(second))?;
+            }
+            Append => {
+                let file = OpenOptions::new().create(true).append(true).open(name)?;
+                cmd.stdout(CommandIo::File(file))?;
+            }
+            // TODO: clobber, dup input, dup output
+            _ => unimplemented!()
+        }
+
+        Ok(())
     }
 }
 
