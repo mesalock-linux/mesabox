@@ -2,19 +2,17 @@ pipeline:
   build:
     image: ${RUST_VERSION}
     secrets: [ coveralls_token ]
-    environment:
-      - RUST_COV_VERSION="rustlang/rust:nightly"
     commands:
       - rustup show
       - cargo build
       - cargo test
       - |
-        if [ "${RUST_VERSION}" = "${RUST_COV_VERSION}" ]; then
+        if [ "${RUST_VERSION}" = "rustlang/rust:nightly" ]; then
           apt-get update
           apt-get install -y --no-install-recommends lcov llvm ruby
           gem install coveralls-lcov
           ./util/run-cov.sh
-          coveralls-lcov -t ${COVERALLS_TOKEN} final.info
+          coveralls-lcov -t $COVERALLS_TOKEN final.info
         fi
 
 matrix:
