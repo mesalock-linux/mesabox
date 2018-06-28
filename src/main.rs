@@ -15,11 +15,11 @@ use std::process;
 
 // this is just a thin wrapper around the library
 fn main() {
-    let stdout = io::stdout();
-    let stdin = io::stdin();
-    let stderr = io::stderr();
+    let mut stdout = io::stdout();
+    let mut stdin = io::stdin();
+    let mut stderr = io::stderr();
 
-    let mut setup = UtilData::new(stdin, stdout, stderr, env::vars_os(), None);
+    let mut setup = UtilData::new(&mut stdin, &mut stdout, &mut stderr, env::vars_os(), None);
 
     if let Err(f) = mesabox::execute(&mut setup, &mut env::args_os()) {
         if let Some(ref err) = f.err {
@@ -32,8 +32,8 @@ fn main() {
             }
 
             if !skip {
-                let _ = writeln!(setup.stderr.get_mut(), "{}", f);
-                let _ = setup.stderr.get_mut().flush();
+                let _ = writeln!(setup.stderr, "{}", f);
+                let _ = setup.stderr.flush();
             }
         }
         process::exit(f.exitcode);

@@ -138,9 +138,9 @@ where
                 Self::list_contents_helper(&mut *self.setup.output(), &mut self.options.values, archive)
             }
             _ => {
-                let mut input = self.setup.input();
-                let archive = tar::Archive::new(&mut *input);
-                Self::list_contents_helper(&mut *self.setup.output(), &mut self.options.values, archive)
+                let (input, output, _) = self.setup.stdio();
+                let archive = tar::Archive::new(input);
+                Self::list_contents_helper(output, &mut self.options.values, archive)
             }
         }
     }

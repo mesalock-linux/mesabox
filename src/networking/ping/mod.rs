@@ -296,7 +296,7 @@ where
 
     let should_stop = AtomicBool::new(false);
     {
-        let mut stdout_ref = setup.output();
+        let stdout_ref = setup.output();
         crossbeam::scope(|scope| {
             let should_stop_ref = &should_stop;
             let stdout_ref = &mut *stdout_ref;
@@ -450,7 +450,7 @@ where
     set.add(Signal::SIGINT);
     set.thread_set_mask()?;
 
-    let mut stdout = setup.output();
+    let stdout = setup.output();
     let mut stdout = stdout.lock_writer()?;
 
     writeln!(stdout, "\n--- {} ping statistics ---", hostname)?;

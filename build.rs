@@ -89,7 +89,7 @@ fn main() {
 where
     S: UtilSetup,
 {{
-    let mut stdout = setup.output();
+    let stdout = setup.output();
     let mut stdout = stdout.lock_writer()?;"
     ).unwrap();
     for util in &utils {

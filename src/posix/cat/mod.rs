@@ -480,7 +480,7 @@ where
     let interactive = is_tty(setup.input().raw_fd());
     // XXX: should current_dir() just return Option<Rc<Path>> or something similar to avoid the cloning?
     let curdir = setup.current_dir().map(|p| p.to_path_buf());
-    let (mut input, mut output, mut error) = setup.stdio();
+    let (input, output, error) = setup.stdio();
     let stdin = input.lock_reader()?;
     let stdout = output.lock_writer()?;
     let stderr = error.lock_writer()?;

@@ -327,7 +327,7 @@ where
         });
     }
 
-    let (mut stdin, mut stdout, mut stderr) = setup.stdio();
+    let (stdin, stdout, stderr) = setup.stdio();
     let mut stdin = stdin.lock_reader()?;
     let mut stdout = stdout.lock_writer()?;
     let mut stderr = stderr.lock_writer()?;

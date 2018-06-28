@@ -73,32 +73,32 @@ mod util;
 // contains all the "mod"s which allow us to use the utils
 include!(concat!(env!("OUT_DIR"), "/utils.rs"));
 
-pub struct UtilData<I, O, E, T>
+pub struct UtilData<'b, 'c, 'd, I, O, E, T>
 where
-    I: for<'a> UtilRead<'a>,
-    O: for<'a> UtilWrite<'a>,
-    E: for<'a> UtilWrite<'a>,
+    I: for<'a> UtilRead<'a> + 'b,
+    O: for<'a> UtilWrite<'a> + 'c,
+    E: for<'a> UtilWrite<'a> + 'd,
     T: Iterator<Item = (OsString, OsString)>,
 {
-    pub stdin: RefCell<I>,
-    pub stdout: RefCell<O>,
-    pub stderr: RefCell<E>,
+    pub stdin: &'b mut I,
+    pub stdout: &'c mut O,
+    pub stderr: &'d mut E,
     pub env: T,
     pub current_dir: Option<PathBuf>,
 }
 
-impl<I, O, E, T> UtilData<I, O, E, T>
+impl<'b, 'c, 'd, I, O, E, T> UtilData<'b, 'c, 'd, I, O, E, T>
 where
     I: for<'a> UtilRead<'a>,
     O: for<'a> UtilWrite<'a>,
     E: for<'a> UtilWrite<'a>,
     T: Iterator<Item = (OsString, OsString)>,
 {
-    pub fn new(stdin: I, stdout: O, stderr: E, env: T, current_dir: Option<PathBuf>) -> Self {
+    pub fn new(stdin: &'b mut I, stdout: &'c mut O, stderr: &'d mut E, env: T, current_dir: Option<PathBuf>) -> Self {
         Self {
-            stdin: RefCell::new(stdin),
-            stdout: RefCell::new(stdout),
-            stderr: RefCell::new(stderr),
+            stdin: stdin,
+            stdout: stdout,
+            stderr: stderr,
             env: env,
             current_dir: current_dir,
         }
@@ -111,16 +111,16 @@ pub trait UtilSetup {
     type Error: for<'a> UtilWrite<'a>;
     type Env: Iterator<Item = (OsString, OsString)>;
 
-    fn input(&self) -> RefMut<Self::Input>;
-    fn output(&self) -> RefMut<Self::Output>;
-    fn error(&self) -> RefMut<Self::Error>;
+    fn input<'a, 'b: 'a>(&'b mut self) -> &'a mut Self::Input;
+    fn output<'a, 'b: 'a>(&'b mut self) -> &'a mut Self::Output;
+    fn error<'a, 'b: 'a>(&'b mut self) -> &'a mut Self::Error;
 
-    fn stdio(
-        &self,
+    fn stdio<'a, 'b: 'a>(
+        &'b mut self,
     ) -> (
-        RefMut<Self::Input>,
-        RefMut<Self::Output>,
-        RefMut<Self::Error>,
+        &'a mut Self::Input,
+        &'a mut Self::Output,
+        &'a mut Self::Error,
     );
 
     fn env(&mut self) -> &mut Self::Env;
@@ -128,7 +128,7 @@ pub trait UtilSetup {
     fn current_dir(&self) -> Option<&Path>;
 }
 
-impl<I, O, E, T> UtilSetup for UtilData<I, O, E, T>
+impl<'b, 'c, 'd, I, O, E, T> UtilSetup for UtilData<'b, 'c, 'd, I, O, E, T>
 where
     I: for<'a> UtilRead<'a>,
     O: for<'a> UtilWrite<'a>,
@@ -140,26 +140,26 @@ where
     type Error = E;
     type Env = T;
 
-    fn input(&self) -> RefMut<Self::Input> {
-        self.stdin.borrow_mut()
+    fn input<'a, 'e: 'a>(&'e mut self) -> &'a mut Self::Input {
+        self.stdin
     }
 
-    fn output(&self) -> RefMut<Self::Output> {
-        self.stdout.borrow_mut()
+    fn output<'a, 'e: 'a>(&'e mut self) -> &'a mut Self::Output {
+        self.stdout
     }
 
-    fn error(&self) -> RefMut<Self::Error> {
-        self.stderr.borrow_mut()
+    fn error<'a, 'e: 'a>(&'e mut self) -> &'a mut Self::Error {
+        self.stderr
     }
 
-    fn stdio(
-        &self,
+    fn stdio<'a, 'e: 'a>(
+        &'e mut self,
     ) -> (
-        RefMut<Self::Input>,
-        RefMut<Self::Output>,
-        RefMut<Self::Error>,
+        &'a mut Self::Input,
+        &'a mut Self::Output,
+        &'a mut Self::Error,
     ) {
-        (self.input(), self.output(), self.error())
+        (self.stdin, self.stdout, self.stderr)
     }
 
     fn env(&mut self) -> &mut Self::Env {

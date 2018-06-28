@@ -12,22 +12,56 @@ use super::ast::ExitCode;
 use super::command::{ExecData, InProcessCommand};
 use super::env::Environment;
 
-#[derive(Clone)]
-pub struct Builtin<S: UtilSetup> {
-    handler: fn(setup: &mut S, env: &mut Environment<S>, data: ExecData) -> Result<ExitCode>
+// XXX: in the future, this should probably be located somewhere else
+#[derive(Clone, Debug)]
+pub enum ShellOption {
+    Default,
 }
 
-impl<S: UtilSetup> Builtin<S> {
-    pub fn new(handler: fn(setup: &mut S, env: &mut Environment<S>, data: ExecData) -> Result<ExitCode>) -> Self {
+#[derive(Clone, Debug)]
+pub struct BuiltinSet {
+    options: Vec<ShellOption>
+}
+
+impl BuiltinSet {
+    pub fn new(options: Vec<ShellOption>) -> Self {
         Self {
-            handler: handler,
+            options: options,
         }
+    }
+
+    // XXX: in the future this should check the list of options to figure out what to do
+    pub fn find(&self, name: &OsStr) -> Option<Builtin> {
+        let name = name.to_string_lossy();
+        Some(match &*name {
+            "exit" => Builtin::Exit(ExitBuiltin),
+            "export" => Builtin::Export(ExportBuiltin),
+            "read" => Builtin::Read(ReadBuiltin),
+            "unset" => Builtin::Unset(UnsetBuiltin),
+            _ => return None
+        })
     }
 }
 
-impl<S: UtilSetup> InProcessCommand<S> for Builtin<S> {
-    fn execute(&self, setup: &mut S, env: &mut Environment<S>, data: ExecData) -> ExitCode {
-        match (self.handler)(setup, env, data) {
+pub enum Builtin {
+    Exit(ExitBuiltin),
+    Export(ExportBuiltin),
+    Read(ReadBuiltin),
+    Unset(UnsetBuiltin),
+}
+
+impl InProcessCommand for Builtin {
+    fn execute<S: UtilSetup>(&self, setup: &mut S, env: &mut Environment, data: ExecData) -> ExitCode {
+        use self::Builtin::*;
+
+        let res = match self {
+            Exit(u) => u.run(setup, env, data),
+            Export(u) => u.run(setup, env, data),
+            Read(u) => u.run(setup, env, data),
+            Unset(u) => u.run(setup, env, data),
+        };
+
+        match res {
             Ok(m) => m,
             Err(f) => {
                 // XXX: do we really want to ignore write errors?
@@ -38,167 +72,163 @@ impl<S: UtilSetup> InProcessCommand<S> for Builtin<S> {
     }
 }
 
-// FIXME: would be nice if this display the builtin's name
-impl<S: UtilSetup> fmt::Debug for Builtin<S> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Builtin<S: UtilSetup> {{ handler: fn(setup: &mut S, env: &mut Environment<S>, args: &[&[Word]]) -> ExitCode }}")
+trait BuiltinSetup {
+    fn run<S: UtilSetup>(&self, setup: &mut S, env: &mut Environment, data: ExecData) -> Result<ExitCode>;
+}
+
+pub struct ExitBuiltin;
+
+impl BuiltinSetup for ExitBuiltin {
+    fn run<S: UtilSetup>(&self, setup: &mut S, env: &mut Environment, data: ExecData) -> Result<ExitCode> {
+        // TODO: figure out how to exit properly
+        unimplemented!()
     }
 }
 
-// XXX: perhaps the Environment should be passed as an argument so we can add builtins without the
-//      intermediate Vec?
-pub fn default_builtins<S>() -> Vec<(OsString, Builtin<S>)>
-where
-    S: UtilSetup,
-{
-    vec![
-        (OsString::from("exit"), Builtin::new(exit_handler)),
-        (OsString::from("export"), Builtin::new(export_handler)),
-        (OsString::from("read"), Builtin::new(read_handler)),
-        (OsString::from("unset"), Builtin::new(unset_handler)),
-    ]
-}
+pub struct ExportBuiltin;
 
-fn exit_handler<S>(_setup: &mut S, _env: &mut Environment<S>, _data: ExecData) -> Result<ExitCode>
-where
-    S: UtilSetup,
-{
-    // TODO: figure out how to exit properly
-    unimplemented!()
-}
+impl BuiltinSetup for ExportBuiltin {
+    // TODO: needs to support -p option
+    fn run<S>(&self, _setup: &mut S, env: &mut Environment, data: ExecData) -> Result<ExitCode>
+    where
+        S: UtilSetup,
+    {
+        // TODO: need to split args like VarAssign (we are just assuming names are given atm)
+        for arg in data.args {
+            env.export_var(Cow::Owned(arg));
+        }
 
-// TODO: needs to support -p option
-fn export_handler<S>(_setup: &mut S, env: &mut Environment<S>, data: ExecData) -> Result<ExitCode>
-where
-    S: UtilSetup,
-{
-    // TODO: need to split args like VarAssign (we are just assuming names are given atm)
-    for arg in data.args {
-        env.export_var(Cow::Owned(arg));
+        Ok(0)
     }
-
-    Ok(0)
 }
 
-fn unset_handler<S>(_setup: &mut S, env: &mut Environment<S>, data: ExecData) -> Result<ExitCode>
-where
-    S: UtilSetup,
-{
-    // TODO: suppress --help/--version (non-POSIX, although they could perhaps serve as an extension)
-    let matches = App::new("unset")
-        .setting(AppSettings::NoBinaryName)
-        .arg(Arg::with_name("function")
-            .short("f")
-            .overrides_with("variable"))
-        .arg(Arg::with_name("variable")
-            .short("v"))
-        .arg(Arg::with_name("NAMES")
-            .index(1)
-            .multiple(true))
-        .get_matches_from_safe(data.args)?;
+pub struct UnsetBuiltin;
 
-    let func = matches.is_present("function");
+impl BuiltinSetup for UnsetBuiltin {
+    fn run<S>(&self, _setup: &mut S, env: &mut Environment, data: ExecData) -> Result<ExitCode>
+    where
+        S: UtilSetup,
+    {
+        // TODO: suppress --help/--version (non-POSIX, although they could perhaps serve as an extension)
+        let matches = App::new("unset")
+            .setting(AppSettings::NoBinaryName)
+            .arg(Arg::with_name("function")
+                .short("f")
+                .overrides_with("variable"))
+            .arg(Arg::with_name("variable")
+                .short("v"))
+            .arg(Arg::with_name("NAMES")
+                .index(1)
+                .multiple(true))
+            .get_matches_from_safe(data.args)?;
 
-    // TODO: if variable/whatever is readonly, this function should return >0 and NOT remove that
-    //       variable
-    if let Some(values) = matches.values_of_os("NAMES") {
-        for name in values {
-            if func {
-                env.remove_func(name);
-            } else {
-                env.remove_var(name);
+        let func = matches.is_present("function");
+
+        // TODO: if variable/whatever is readonly, this function should return >0 and NOT remove that
+        //       variable
+        if let Some(values) = matches.values_of_os("NAMES") {
+            for name in values {
+                if func {
+                    env.remove_func(name);
+                } else {
+                    env.remove_var(name);
+                }
             }
         }
-    }
 
-    Ok(0)
+        Ok(0)
+    }
 }
 
-fn read_handler<S>(setup: &mut S, env: &mut Environment<S>, data: ExecData) -> Result<ExitCode>
-where
-    S: UtilSetup,
-{
-    let matches = App::new("read")
-        .setting(AppSettings::NoBinaryName)
-        // if present we treat backslash as a normal character rather than the start of an escape
-        // sequence
-        .arg(Arg::with_name("backslash")
-            .short("r"))
-        .arg(Arg::with_name("VARS")
-            .index(1)
-            .multiple(true)
-            .required(true))
-        .get_matches_from_safe(data.args)?;
+pub struct ReadBuiltin;
 
-    let mut input = setup.input();
-    let mut input = input.lock_reader()?;
+impl BuiltinSetup for ReadBuiltin {
+    fn run<S>(&self, setup: &mut S, env: &mut Environment, data: ExecData) -> Result<ExitCode>
+    where
+        S: UtilSetup,
+    {
+        let matches = App::new("read")
+            .setting(AppSettings::NoBinaryName)
+            // if present we treat backslash as a normal character rather than the start of an escape
+            // sequence
+            .arg(Arg::with_name("backslash")
+                .short("r"))
+            .arg(Arg::with_name("VARS")
+                .index(1)
+                .multiple(true)
+                .required(true))
+            .get_matches_from_safe(data.args)?;
 
-    let ignore_backslash = matches.is_present("backslash");
+        let input = setup.input();
+        let mut input = input.lock_reader()?;
 
-    let check_backslash = |buffer: &mut Vec<u8>| {
+        let ignore_backslash = matches.is_present("backslash");
+
+        let check_backslash = |buffer: &mut Vec<u8>| {
+            loop {
+                let res = match buffer.iter().last() {
+                    Some(b'\n') => {
+                        buffer.pop();
+                        continue;
+                    }
+                    Some(b'\\') => {
+                        // need to make sure this byte isn't escaped
+                        buffer.iter().rev().skip(1).take_while(|&&byte| byte == b'\\').count() % 2 == 1
+                    }
+                    _ => true,
+                };
+                return res;
+            }
+        };
+
+        let mut buffer = vec![];
         loop {
-            let res = match buffer.iter().last() {
-                Some(b'\n') => {
-                    buffer.pop();
-                    continue;
-                }
-                Some(b'\\') => {
-                    // need to make sure this byte isn't escaped
-                    buffer.iter().rev().skip(1).take_while(|&&byte| byte == b'\\').count() % 2 == 1
-                }
-                _ => true,
-            };
-            return res;
+            // TODO: check for EOF
+            input.read_until(b'\n', &mut buffer)?;
+            let not_backslash = check_backslash(&mut buffer);
+            // TODO: handle heredoc portion?
+            if ignore_backslash || not_backslash {
+                break;
+            }
+            // we need to remove the backslash
+            buffer.pop();
         }
-    };
 
-    let mut buffer = vec![];
-    loop {
-        // TODO: check for EOF
-        input.read_until(b'\n', &mut buffer)?;
-        let not_backslash = check_backslash(&mut buffer);
-        // TODO: handle heredoc portion?
-        if ignore_backslash || not_backslash {
-            break;
-        }
-        // we need to remove the backslash
-        buffer.pop();
-    }
+        let vars = matches.values_of_os("VARS").unwrap();
+        let var_count = vars.clone().count();
 
-    let vars = matches.values_of_os("VARS").unwrap();
-    let var_count = vars.clone().count();
-
-    let field_iter = {
-        // XXX: maybe this should be extracted into a separate function (i feel like this will be used
-        //      to split fields normally too)
-        let ifs = env.get_var("IFS").map(|v| v.clone()).unwrap_or_else(|| OsString::from(" \t\n"));
-        buffer.splitn(var_count, move |byte| {
-            ifs.as_bytes().contains(byte)
-        })
-    };
-    for (var, value) in vars.zip(field_iter) {
-        let value = if ignore_backslash {
-            value.to_owned()
-        } else {
-            let mut result = Vec::with_capacity(value.len());
-            let mut in_escape = false;
-            for &byte in value {
-                if in_escape {
-                    result.push(byte);
-                    in_escape = false;
-                } else {
-                    if byte == b'\\' {
-                        in_escape = true;
-                    } else {
+        let field_iter = {
+            // XXX: maybe this should be extracted into a separate function (i feel like this will be used
+            //      to split fields normally too)
+            let ifs = env.get_var("IFS").map(|v| v.clone()).unwrap_or_else(|| OsString::from(" \t\n"));
+            buffer.splitn(var_count, move |byte| {
+                ifs.as_bytes().contains(byte)
+            })
+        };
+        for (var, value) in vars.zip(field_iter) {
+            let value = if ignore_backslash {
+                value.to_owned()
+            } else {
+                let mut result = Vec::with_capacity(value.len());
+                let mut in_escape = false;
+                for &byte in value {
+                    if in_escape {
                         result.push(byte);
+                        in_escape = false;
+                    } else {
+                        if byte == b'\\' {
+                            in_escape = true;
+                        } else {
+                            result.push(byte);
+                        }
                     }
                 }
-            }
-            // it should be impossible for there to be an extra escape
-            result
-        };
-        env.set_var(Cow::Borrowed(var), OsString::from_vec(value));
-    }
+                // it should be impossible for there to be an extra escape
+                result
+            };
+            env.set_var(Cow::Borrowed(var), OsString::from_vec(value));
+        }
 
-    Ok(0)
+        Ok(0)
+    }
 }

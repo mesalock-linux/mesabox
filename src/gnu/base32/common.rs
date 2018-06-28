@@ -96,17 +96,19 @@ where
         format: format,
     };
 
-    let mut output = setup.output();
-    let output = output.lock_writer()?;
     match matches.value_of_os("FILE") {
         Some(filename) if filename != OsStr::new("-") => {
             let path = util::actual_path(&setup.current_dir(), filename);
             let file = File::open(path)?;
+
+            let mut output = setup.output();
+            let output = output.lock_writer()?;
             handle_data(output, BufReader::new(file), options)
         }
         _ => {
-            let mut input = setup.input();
+            let (mut input, mut output, _) = setup.stdio();
             let input = input.lock_reader()?;
+            let output = output.lock_writer()?;
             handle_data(output, input, options)
         }
     }

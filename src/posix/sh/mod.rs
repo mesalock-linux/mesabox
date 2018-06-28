@@ -149,7 +149,7 @@ where
     Ok(())
 }
 
-fn setup_default_env<S>(setup: &mut S, env: &mut Environment<S>) -> Result<()>
+fn setup_default_env<S>(setup: &mut S, env: &mut Environment) -> Result<()>
 where
     S: UtilSetup,
 {
@@ -169,8 +169,6 @@ where
     // FIXME: what to do about PWD and stuff?  just go based on env or set explicitly?
 
     // although HOME and PATH and stuff are used, we shouldn't set them explicitly
-
-    env.add_builtins(builtin::default_builtins());
 
     Ok(())
 }

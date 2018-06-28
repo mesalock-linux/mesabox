@@ -120,12 +120,13 @@ where
         previous_printed: false,
     };
 
-    let mut output = setup.output();
+    let current_dir = setup.current_dir().map(|p| p.to_owned());
+    let (input, output, error) = setup.stdio();
+
     let mut output = output.lock_writer()?;
     if matches.is_present("FILES") {
         let mut result = Ok(());
-        let mut err_stream = setup.error();
-        let mut err_stream = err_stream.lock_writer()?;
+        let mut err_stream = error.lock_writer()?;
 
         let file_count = matches.occurrences_of("FILES");
 
@@ -137,9 +138,9 @@ where
             };
             let res = if file == OsStr::new("-") {
                 let filename = filename.map(|_| OsStr::new("standard input"));
-                handle_stdin(&mut output, &mut *setup.input(), filename, &mut options)
+                handle_stdin(&mut output, input, filename, &mut options)
             } else {
-                let path = util::actual_path(&setup.current_dir(), file);
+                let path = util::actual_path(&current_dir, file);
                 handle_file(&mut output, &path, filename, &mut options)
             };
 
@@ -157,7 +158,7 @@ where
         } else {
             None
         };
-        handle_stdin(output, &mut *setup.input(), filename, &mut options)
+        handle_stdin(output, input, filename, &mut options)
     }
 }
 

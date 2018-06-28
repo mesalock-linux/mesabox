@@ -37,7 +37,7 @@ cat = []
 chmod = ["regex", "walkdir", "uucore"]
 head = []
 init = ["fnv", "nix"]
-sh = ["either", "fnv", "nom", "globset", "rustyline"]
+sh = ["either", "fnv", "nix", "nom", "globset", "rustyline"]
 sleep = ["uucore"]
 posix = [
     "cat",

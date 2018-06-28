@@ -603,7 +603,7 @@ impl UCommand {
         self.has_run = true;
         log_info("run", &self.comm_string);
 
-        let stdin = self.stdin.clone().unwrap_or_default();
+        let mut stdin = self.stdin.clone().unwrap_or_default();
         let current_dir = Some(self.current_dir.clone());
         let env = self.env.clone().into_iter();
         let args = self.args.clone().into_iter();
@@ -617,10 +617,11 @@ impl UCommand {
             thread::spawn(move || {
                 let stdin = stdin;
                 let mut args = args;
+                let mut stdin = &stdin[..];
                 let mut stdout = stdout_clone.lock().unwrap();
                 let mut stderr = stderr_clone.lock().unwrap();
                 let mut setup =
-                    UtilData::new(&stdin[..], &mut *stdout, &mut *stderr, env, current_dir);
+                    UtilData::new(&mut stdin, &mut *stdout, &mut *stderr, env, current_dir);
                 mesabox::execute(&mut setup, &mut args)
             }),
             stdout,

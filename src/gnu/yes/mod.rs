@@ -102,7 +102,7 @@ pub fn run<S>(setup: &mut S, bytes: &[u8]) -> Result<()>
 where
     S: UtilSetup,
 {
-    let mut stdout = setup.output();
+    let stdout = setup.output();
     let mut stdout = stdout.lock_writer()?;
     loop {
         stdout.write_all(bytes)?;

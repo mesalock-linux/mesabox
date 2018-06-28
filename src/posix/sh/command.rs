@@ -5,26 +5,24 @@ use std::collections::HashMap;
 use std::ffi::{OsStr, OsString};
 use std::fs::File;
 use std::io::Write;
+use std::iter;
 use std::marker::PhantomData;
 use std::os::unix::io::{FromRawFd, RawFd};
 use std::os::unix::process::ExitStatusExt;
 use std::process::{Command, Stdio};
 
+use ::UtilData;
 use super::{UtilSetup, Result};
 use super::ast::ExitCode;
 use super::env::Environment;
 
 /// A command executed within the current shell process (e.g. a function or builtin)
-pub trait InProcessCommand<S: UtilSetup> {
-    fn execute(&self, setup: &mut S, env: &mut Environment<S>, data: ExecData) -> ExitCode;
+pub trait InProcessCommand {
+    fn execute<S: UtilSetup>(&self, setup: &mut S, env: &mut Environment, data: ExecData) -> ExitCode;
 }
 
-impl<'a, T, S> InProcessCommand<S> for &'a T
-where
-    T: InProcessCommand<S>,
-    S: UtilSetup,
-{
-    fn execute(&self, setup: &mut S, env: &mut Environment<S>, data: ExecData) -> ExitCode {
+impl<'a, T: InProcessCommand> InProcessCommand for &'a T {
+    fn execute<S: UtilSetup>(&self, setup: &mut S, env: &mut Environment, data: ExecData) -> ExitCode {
         (**self).execute(setup, env, data)
     }
 }
@@ -34,22 +32,19 @@ pub struct ExecData {
     pub env: HashMap<OsString, OsString>,
 }
 
-pub struct ExecEnv<C: InProcessCommand<S>, S: UtilSetup> {
+pub struct ExecEnv<C: InProcessCommand> {
     cmd: C,
     args: Vec<OsString>,
     /// Temporary (i.e. per command) environment variables
     env: HashMap<OsString, OsString>,
-
-    _phantom: PhantomData<S>,
 }
 
-impl<C: InProcessCommand<S>, S: UtilSetup> ExecEnv<C, S> {
+impl<C: InProcessCommand> ExecEnv<C> {
     pub fn new(cmd: C) -> Self {
         Self {
             cmd: cmd,
             args: vec![],
             env: HashMap::default(),
-            _phantom: PhantomData,
         }
     }
 }
@@ -101,12 +96,12 @@ impl CommandWrapper {
 }
 
 // TODO: need to add a spawn() equivalent for backgrounded processes
-pub trait CommandEnv<S: UtilSetup> {
+pub trait CommandEnv {
     fn env(&mut self, key: Cow<OsStr>, val: Cow<OsStr>) -> &mut Self;
 
     fn arg(&mut self, arg: Cow<OsStr>) -> &mut Self;
 
-    fn status(self, setup: &mut S, env: &mut Environment<S>) -> Result<ExitCode>
+    fn status<S>(self, setup: &mut S, env: &mut Environment) -> Result<ExitCode>
     where
         S: UtilSetup;
 
@@ -135,7 +130,7 @@ pub trait CommandEnv<S: UtilSetup> {
     }
 }
 
-impl<S: UtilSetup> CommandEnv<S> for CommandWrapper {
+impl CommandEnv for CommandWrapper {
     fn env(&mut self, key: Cow<OsStr>, val: Cow<OsStr>) -> &mut Self {
         self.cmd.env(key, val);
         self
@@ -171,7 +166,7 @@ impl<S: UtilSetup> CommandEnv<S> for CommandWrapper {
         Ok(self)
     }
 
-    fn status(mut self, _setup: &mut S, _env: &mut Environment<S>) -> Result<ExitCode>
+    fn status<S>(mut self, _setup: &mut S, _env: &mut Environment) -> Result<ExitCode>
     where
         S: UtilSetup,
     {
@@ -189,11 +184,7 @@ impl<S: UtilSetup> CommandEnv<S> for CommandWrapper {
     }
 }
 
-impl<C, S> CommandEnv<S> for ExecEnv<C, S>
-where
-    C: InProcessCommand<S>,
-    S: UtilSetup,
-{
+impl<C: InProcessCommand> CommandEnv for ExecEnv<C> {
     fn env(&mut self, key: Cow<OsStr>, val: Cow<OsStr>) -> &mut Self {
         self.env.insert(key.into_owned(), val.into_owned());
         self
@@ -204,10 +195,8 @@ where
         self
     }
 
-    // TODO: to get stdin/stdout/stderr working, we may need to execute the command (in status)
-    //       with a new UtilSetup or something (this needs to be thought through).  doing so would
-    //       let the functions work correctly too, but Environment will need to be fixed to not
-    //       rely on a specific type of UtilSetup (maybe use dynamic dispatch?)
+    // TODO: to get stdin/stdout/stderr working, we need to execute the command (in status)
+    //       with a new UtilSetup or something.  this avoids dynamic dispatch
     fn stdin<'a>(&mut self, input: CommandIo<'a>) -> Result<&mut Self> {
         Ok(self)
     }
@@ -220,10 +209,14 @@ where
         Ok(self)
     }
 
-    fn status(self, setup: &mut S, env: &mut Environment<S>) -> Result<ExitCode>
+    fn status<S>(self, setup: &mut S, env: &mut Environment) -> Result<ExitCode>
     where
         S: UtilSetup,
     {
-        Ok(self.cmd.execute(setup, env, ExecData { args: self.args, env: self.env }))
+        let current_dir = setup.current_dir().map(|p| p.to_owned());
+        let (input, output, error) = setup.stdio();
+
+        let mut sub_setup = UtilData::new(input, output, error, iter::empty(), current_dir);
+        Ok(self.cmd.execute(&mut sub_setup, env, ExecData { args: self.args, env: self.env }))
     }
 }

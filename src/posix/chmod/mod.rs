@@ -40,7 +40,7 @@ use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io::{self, Write};
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::result::Result as StdResult;
 use walkdir::WalkDir;
 use uucore::mode;
@@ -140,8 +140,8 @@ where
         None => None,
     };
 
-    let mut stdout = setup.output();
-    let mut stderr = setup.error();
+    let current_dir = setup.current_dir().map(|p| p.to_owned());
+    let (_, stdout, stderr) = setup.stdio();
     let mut chmoder = Chmoder {
         verbosity: verbosity,
         preserve_root: preserve_root,
@@ -150,7 +150,7 @@ where
         cmode: matches.value_of("MODE"),
         stdout: stdout.lock_writer()?,
         stderr: stderr.lock_writer()?,
-        current_dir: setup.current_dir(),
+        current_dir: current_dir,
     };
 
     let exitcode = chmoder.chmod(matches.values_of_os("FILES").unwrap())?;
@@ -199,7 +199,7 @@ where
     cmode: Option<&'a str>,
     stdout: O,
     stderr: E,
-    current_dir: Option<&'a Path>,
+    current_dir: Option<PathBuf>,
 }
 
 impl<'a, O, E> Chmoder<'a, O, E>

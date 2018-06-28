@@ -10,26 +10,26 @@ use std::rc::Rc;
 
 use super::UtilSetup;
 use super::ast::FunctionBody;
-use super::builtin::Builtin;
+use super::builtin::{Builtin, BuiltinSet};
 
 #[derive(Clone, Debug)]
-pub struct Environment<S: UtilSetup> {
+pub struct Environment {
     vars: HashMap<OsString, OsString>,
     export_vars: HashMap<OsString, Option<OsString>>,
     funcs: HashMap<OsString, Rc<FunctionBody>>,
 
-    // NOTE: the key could be String, but that would require conversion from user input
-    builtins: FnvHashMap<OsString, Rc<Builtin<S>>>,
+    // BuiltinSet is designed so that by enabling options the set of builtins can be changed
+    builtins: BuiltinSet,
 }
 
-impl<S: UtilSetup> Environment<S> {
+impl Environment {
     pub fn new() -> Self {
         Self {
             vars: HashMap::new(),
             export_vars: HashMap::new(),
             funcs: HashMap::new(),
 
-            builtins: FnvHashMap::default(),
+            builtins: BuiltinSet::new(vec![]),
         }
     }
 
@@ -104,17 +104,11 @@ impl<S: UtilSetup> Environment<S> {
         self.funcs.remove(name.as_ref())
     }
 
-    pub fn add_builtins<I: IntoIterator<Item = (OsString, Builtin<S>)>>(&mut self, builtins: I) {
-        for (key, val) in builtins.into_iter() {
-            self.builtins.insert(key, Rc::new(val));
-        }
-    }
-
-    pub fn get_builtin<Q: ?Sized>(&self, name: &Q) -> Option<Rc<Builtin<S>>>
+    pub fn get_builtin<Q: ?Sized>(&self, name: &Q) -> Option<Builtin>
     where
         Q: AsRef<OsStr>,
     {
-        self.builtins.get(name.as_ref()).map(|b| b.clone())
+        self.builtins.find(name.as_ref())
     }
 
     pub fn iter(&self) -> EnvIter<impl Iterator<Item = (&OsStr, &OsStr)>> {
@@ -136,20 +130,20 @@ impl<S: UtilSetup> Environment<S> {
     }
 }
 
-impl<S: UtilSetup> FromIterator<(OsString, OsString)> for Environment<S> {
+impl FromIterator<(OsString, OsString)> for Environment {
     fn from_iter<I: IntoIterator<Item = (OsString, OsString)>>(iter: I) -> Self {
         iter.into_iter().into()
     }
 }
 
-impl<S: UtilSetup, T: Iterator<Item = (OsString, OsString)>> From<T> for Environment<S> {
+impl<T: Iterator<Item = (OsString, OsString)>> From<T> for Environment {
     fn from(iter: T) -> Self {
         Self {
             vars: iter.collect(),
             export_vars: HashMap::new(),
             funcs: HashMap::new(),
 
-            builtins: FnvHashMap::default(),
+            builtins: BuiltinSet::new(vec![]),
         }
     }
 }
