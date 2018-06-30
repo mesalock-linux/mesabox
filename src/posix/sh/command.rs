@@ -3,18 +3,14 @@ use nix::unistd;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::ffi::{OsStr, OsString};
-use std::fs::File;
-use std::io::Write;
-use std::iter;
-use std::marker::PhantomData;
-use std::os::unix::io::{FromRawFd, RawFd};
-use std::os::unix::process::ExitStatusExt;
+use std::io::{self, Write};
+use std::os::unix::io::{AsRawFd, RawFd};
+use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::process::{Command, Stdio};
 
-use ::UtilData;
 use super::{UtilSetup, Result};
 use super::ast::ExitCode;
-use super::env::Environment;
+use super::env::{EnvFd, Environment};
 
 /// A command executed within the current shell process (e.g. a function or builtin)
 pub trait InProcessCommand {
@@ -49,37 +45,7 @@ impl<C: InProcessCommand> ExecEnv<C> {
     }
 }
 
-pub enum CommandIo<'a> {
-    Null,
-    Inherit,
-    Piped(&'a [u8]),
-    File(File),
-    Fd(RawFd),
-    // TODO: child stdin/stdout/stderr
-}
-
-impl<'a> CommandIo<'a> {
-    pub fn into_stdio(self) -> Result<Stdio> {
-        use self::CommandIo::*;
-
-        Ok(match self {
-            Null => Stdio::null(),
-            Inherit => Stdio::inherit(),
-            Piped(_) => Stdio::piped(),
-            File(file) => file.into(),
-            Fd(fd) => {
-                // XXX: make sure this is right with the stdlib and such
-                let new_fd = unistd::dup(fd)?;
-                unsafe { Stdio::from_raw_fd(new_fd) }
-            }
-        })
-    }
-}
-
 pub struct CommandWrapper {
-    input: Option<Vec<u8>>,
-    output: Option<Vec<u8>>,
-    error: Option<Vec<u8>>,
     cmd: Command,
 }
 
@@ -87,9 +53,6 @@ impl CommandWrapper {
     pub fn new(mut cmd: Command) -> Self {
         cmd.env_clear();
         Self {
-            input: None,
-            output: None,
-            error: None,
             cmd: cmd,
         }
     }
@@ -105,9 +68,25 @@ pub trait CommandEnv {
     where
         S: UtilSetup;
 
-    fn stdin<'a>(&mut self, input: CommandIo<'a>) -> Result<&mut Self>;
-    fn stdout<'a>(&mut self, output: CommandIo<'a>) -> Result<&mut Self>;
-    fn stderr<'a>(&mut self, error: CommandIo<'a>) -> Result<&mut Self>;
+    // NOTE: keeping this here for the time being until everything here is supported
+    //       (the only thing that we don't do atm is return "bad file descriptor," we just explode
+    //       on error)
+    /*fn fd_alias(&mut self, fd: RawFd, copied: RawFd) -> Result<&mut Self> {
+        let cmd_io = match self.get_fd(copied) {
+            Some(value) => match value {
+                EnvFd::File(file) => {
+                    let copy = file.try_clone()?;
+                    EnvFd::File(copy)
+                }
+                EnvFd::Fd(rawfd) => EnvFd::Fd(rawfd.clone()),
+                EnvFd::Piped(data) => EnvFd::Piped(data.clone()),
+                EnvFd::Null => EnvFd::Null,
+                EnvFd::Inherit => EnvFd::Inherit,
+            },
+            None => return util::string_to_err(Err(format!("bad file descriptor '{}'", copied))),
+        };
+        self.fd(fd, cmd_io)
+    }*/
 
     fn envs<'a, I>(&mut self, vars: I) -> &mut Self
     where
@@ -141,39 +120,48 @@ impl CommandEnv for CommandWrapper {
         self
     }
 
-    fn stdin<'a>(&mut self, input: CommandIo<'a>) -> Result<&mut Self> {
-        if let CommandIo::Piped(input) = input {
-            match self.input {
-                Some(ref mut buffer) => {
-                    buffer.extend(input.iter());
-                }
-                ref mut val @ None => {
-                    *val = Some(input.to_owned());
-                }
-            }
-        }
-        self.cmd.stdin(input.into_stdio()?);
-        Ok(self)
-    }
-
-    fn stdout<'a>(&mut self, output: CommandIo<'a>) -> Result<&mut Self> {
-        self.cmd.stdout(output.into_stdio()?);
-        Ok(self)
-    }
-
-    fn stderr<'a>(&mut self, error: CommandIo<'a>) -> Result<&mut Self> {
-        self.cmd.stderr(error.into_stdio()?);
-        Ok(self)
-    }
-
-    fn status<S>(mut self, _setup: &mut S, _env: &mut Environment) -> Result<ExitCode>
+    fn status<S>(mut self, setup: &mut S, env: &mut Environment) -> Result<ExitCode>
     where
         S: UtilSetup,
     {
+        let mut buffer = Vec::with_capacity(0);
+
+        // FIXME: buffer setup is clearly not right
+        // FIXME: cleanup
+        // FIXME: what if setup has Vec<u8> instead of Fd?
+        let mut fd_iter = env.current_fds();
+        {
+            let mut convert_stdio = |cmd_io: &mut EnvFd| {
+                if let EnvFd::Piped(ref data) = cmd_io {
+                    buffer.extend(data.iter());
+                    Ok(Stdio::piped())
+                } else {
+                    cmd_io.try_clone()?.into_stdio()
+                }
+            };
+
+            self.cmd.stdin(convert_stdio(fd_iter.next().unwrap())?);
+            self.cmd.stdout(convert_stdio(fd_iter.next().unwrap())?);
+            self.cmd.stderr(convert_stdio(fd_iter.next().unwrap())?);
+        }
+        let fds: Vec<_> = fd_iter.enumerate().filter_map(|(i, val)| {
+            match val {
+                EnvFd::Fd(fd) => Some((i + 3, fd.fd)),
+                EnvFd::File(file) => Some((i + 3, file.as_raw_fd())),
+                EnvFd::Null => None,
+                _ => unimplemented!(),
+            }
+        }).collect();
+        self.cmd.before_exec(move || {
+            for &(i, old_fd) in fds.iter() {
+                unistd::dup2(old_fd, i as RawFd).map_err(|_| io::Error::last_os_error())?;
+            }
+            Ok(())
+        });
         let mut child = self.cmd.spawn()?;
 
-        if let Some(input) = self.input {
-            child.stdin.as_mut().unwrap().write_all(&input)?;
+        if !buffer.is_empty() {
+            child.stdin.as_mut().unwrap().write_all(&buffer)?;
         }
         // TODO: output/error
         let stat = child.wait()?;
@@ -195,28 +183,12 @@ impl<C: InProcessCommand> CommandEnv for ExecEnv<C> {
         self
     }
 
-    // TODO: to get stdin/stdout/stderr working, we need to execute the command (in status)
-    //       with a new UtilSetup or something.  this avoids dynamic dispatch
-    fn stdin<'a>(&mut self, input: CommandIo<'a>) -> Result<&mut Self> {
-        Ok(self)
-    }
-
-    fn stdout<'a>(&mut self, output: CommandIo<'a>) -> Result<&mut Self> {
-        Ok(self)
-    }
-
-    fn stderr<'a>(&mut self, error: CommandIo<'a>) -> Result<&mut Self> {
-        Ok(self)
-    }
-
     fn status<S>(self, setup: &mut S, env: &mut Environment) -> Result<ExitCode>
     where
         S: UtilSetup,
     {
-        let current_dir = setup.current_dir().map(|p| p.to_owned());
-        let (input, output, error) = setup.stdio();
-
-        let mut sub_setup = UtilData::new(input, output, error, iter::empty(), current_dir);
-        Ok(self.cmd.execute(&mut sub_setup, env, ExecData { args: self.args, env: self.env }))
+        // XXX: maybe we should treat env vars the same way as fds?  it would make things simpler,
+        //      but not sure of the effect on execution speed
+        Ok(self.cmd.execute(setup, env, ExecData { args: self.args, env: self.env }))
     }
 }

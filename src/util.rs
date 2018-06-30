@@ -10,7 +10,9 @@ use super::{MesaError, Result};
 
 use failure;
 use libc;
+use nix::{self, fcntl, unistd};
 use std::error::Error as StdError;
+use std::io::{self, Read, Write};
 use std::os::unix::io::RawFd;
 use std::path::{Path, PathBuf};
 use std::result::Result as StdResult;
@@ -19,6 +21,65 @@ use std::str::FromStr;
 // defined out here rather than in parse_num_with_suffix() because we need the array for testing
 const SUFFIXES: [char; 8] = ['K', 'M', 'G', 'T', 'P', 'E', 'Z', 'Y'];
 const OBSOLETE_SUFFIXES: [char; 2] = ['k', 'm'];
+
+// take note that this does NOT close the fd on drop
+#[derive(Clone, Debug)]
+pub struct RawFdWrapper {
+    pub fd: RawFd,
+    pub readable: bool,
+    pub writable: bool,
+}
+// TODO: add way to determine if fd is readable and/or writable
+
+impl RawFdWrapper {
+    pub fn new(fd: RawFd, readable: bool, writable: bool) -> Self {
+        Self {
+            fd: fd,
+            readable: readable,
+            writable: writable,
+        }
+    }
+
+    // implement here until TryFrom trait is stable
+    pub fn try_from(fd: RawFd) -> nix::Result<Self> {
+        use nix::fcntl::OFlag;
+
+        let res = fcntl::fcntl(fd, fcntl::F_GETFL)?;
+        let mode = OFlag::from_bits(res & OFlag::O_ACCMODE.bits()).unwrap();
+
+        Ok(RawFdWrapper::new(
+            fd,
+            mode == OFlag::O_RDONLY || mode == OFlag::O_RDWR,
+            mode == OFlag::O_WRONLY || mode == OFlag::O_RDWR,
+        ))
+    }
+
+    pub fn dup_above(&self, min: RawFd) -> nix::Result<RawFd> {
+        fcntl::fcntl(self.fd, fcntl::F_DUPFD(min))
+    }
+
+    #[cfg(feature = "sh")]
+    pub fn dup_sh(&self) -> nix::Result<RawFd> {
+        self.dup_above(::sh::option::FD_COUNT as RawFd + 1)
+    }
+}
+
+impl Read for RawFdWrapper {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        unistd::read(self.fd, buf).map_err(|_| io::Error::last_os_error())
+    }
+}
+
+impl Write for RawFdWrapper {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        unistd::write(self.fd, buf).map_err(|_| io::Error::last_os_error())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        // XXX: may want to try fsync() or something and ignore failures due to invalid fd type
+        Ok(())
+    }
+}
 
 pub(crate) fn set_exitcode<T, E: StdError + Send + Sync + 'static>(
     error: StdResult<T, E>,

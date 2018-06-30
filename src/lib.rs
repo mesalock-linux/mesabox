@@ -12,6 +12,7 @@ extern crate failure;
 #[macro_use]
 extern crate failure_derive;
 extern crate libc;
+extern crate nix;
 
 #[cfg(feature = "byteorder")]
 extern crate byteorder;
@@ -25,8 +26,6 @@ extern crate fnv;
 extern crate globset;
 #[cfg(feature = "mio")]
 extern crate mio;
-#[cfg(feature = "nix")]
-extern crate nix;
 #[cfg(feature = "pnet")]
 extern crate pnet;
 #[cfg(feature = "regex")]
@@ -49,7 +48,6 @@ extern crate rustyline;
 
 use clap::{App, SubCommand};
 use libc::EXIT_FAILURE;
-use std::cell::{RefCell, RefMut};
 use std::ffi::{OsStr, OsString};
 use std::io::{BufRead, Read, Write};
 use std::iter;

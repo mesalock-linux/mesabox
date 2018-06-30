@@ -1,22 +1,18 @@
 use clap::{App, Arg, AppSettings};
+use nix::unistd;
 
 use std::borrow::Cow;
 use std::ffi::{OsStr, OsString};
-use std::fmt;
-use std::io::{BufRead, Write};
+use std::io::{self, BufRead, Write};
+use std::iter;
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 
-use ::UtilRead;
+use ::{UtilData, UtilRead, UtilWrite};
 use super::{UtilSetup, Result};
 use super::ast::ExitCode;
 use super::command::{ExecData, InProcessCommand};
-use super::env::Environment;
-
-// XXX: in the future, this should probably be located somewhere else
-#[derive(Clone, Debug)]
-pub enum ShellOption {
-    Default,
-}
+use super::env::{EnvFd, Environment};
+use super::option::ShellOption;
 
 #[derive(Clone, Debug)]
 pub struct BuiltinSet {
@@ -34,6 +30,7 @@ impl BuiltinSet {
     pub fn find(&self, name: &OsStr) -> Option<Builtin> {
         let name = name.to_string_lossy();
         Some(match &*name {
+            "exec" => Builtin::Exec(ExecBuiltin),
             "exit" => Builtin::Exit(ExitBuiltin),
             "export" => Builtin::Export(ExportBuiltin),
             "read" => Builtin::Read(ReadBuiltin),
@@ -44,21 +41,80 @@ impl BuiltinSet {
 }
 
 pub enum Builtin {
+    Exec(ExecBuiltin),
     Exit(ExitBuiltin),
     Export(ExportBuiltin),
     Read(ReadBuiltin),
     Unset(UnsetBuiltin),
 }
 
-impl InProcessCommand for Builtin {
-    fn execute<S: UtilSetup>(&self, setup: &mut S, env: &mut Environment, data: ExecData) -> ExitCode {
+impl Builtin {
+    fn execute_stdin<I>(&self, env: &mut Environment, data: ExecData, input: &mut I) -> Result<ExitCode>
+    where
+        I: for<'a> UtilRead<'a>,
+    {
+        use self::EnvFd::*;
+
+        match env.get_fd(1).current_val().try_clone()? {
+            File(mut file) => self.execute_stdout(env, data, input, &mut file),
+            Fd(mut fd) => self.execute_stdout(env, data, input, &mut fd),
+            // FIXME: this won't work correctly
+            Piped(mut piped) => self.execute_stdout(env, data, input, &mut piped),
+            Null => self.execute_stdout(env, data, input, &mut io::sink()),
+            _ => unimplemented!(),
+        }
+    }
+
+    fn execute_stdout<I, O>(&self, env: &mut Environment, data: ExecData, input: &mut I, output: &mut O) -> Result<ExitCode>
+    where
+        I: for<'a> UtilRead<'a>,
+        O: for<'a> UtilWrite<'a>,
+    {
+        use self::EnvFd::*;
+
+        match env.get_fd(2).current_val().try_clone()? {
+            File(mut file) => self.execute_stderr(env, data, input, output, &mut file),
+            Fd(mut fd) => self.execute_stderr(env, data, input, output, &mut fd),
+            // FIXME: this won't work correctly
+            Piped(mut piped) => self.execute_stderr(env, data, input, output, &mut piped),
+            Null => self.execute_stderr(env, data, input, output, &mut io::sink()),
+            _ => unimplemented!(),
+        }
+    }
+
+    fn execute_stderr<I, O, E>(&self, env: &mut Environment, data: ExecData, input: &mut I, output: &mut O, error: &mut E) -> Result<ExitCode>
+    where
+        I: for<'a> UtilRead<'a>,
+        O: for<'a> UtilWrite<'a>,
+        E: for<'a> UtilWrite<'a>,
+    {
         use self::Builtin::*;
 
-        let res = match self {
+        // TODO: we let the current_dir be empty because that should be set in Environment most likely
+        let mut util_setup = UtilData::new(input, output, error, iter::empty(), None);
+        let setup = &mut util_setup;
+
+        match self {
+            Exec(u) => u.run(setup, env, data),
             Exit(u) => u.run(setup, env, data),
             Export(u) => u.run(setup, env, data),
             Read(u) => u.run(setup, env, data),
             Unset(u) => u.run(setup, env, data),
+        }
+    }
+}
+
+impl InProcessCommand for Builtin {
+    fn execute<S: UtilSetup>(&self, setup: &mut S, env: &mut Environment, data: ExecData) -> ExitCode {
+        use self::EnvFd::*;
+
+        // FIXME: DONT UNWRAP
+        let res = match env.get_fd(0).current_val().try_clone().unwrap() {
+            File(mut file) => self.execute_stdin(env, data, &mut file),
+            Fd(mut fd) => self.execute_stdin(env, data, &mut fd),
+            Piped(piped) => self.execute_stdin(env, data, &mut &piped[..]),
+            Null => self.execute_stdin(env, data, &mut io::empty()),
+            _ => unimplemented!(),
         };
 
         match res {
@@ -76,10 +132,62 @@ trait BuiltinSetup {
     fn run<S: UtilSetup>(&self, setup: &mut S, env: &mut Environment, data: ExecData) -> Result<ExitCode>;
 }
 
+pub struct ExecBuiltin;
+
+// XXX: given that this replaces the current process, if we are being used as a library the calling
+//      process will be replaced.  this could be an issue when e.g. running our tests
+// TODO: because this needs to affect the "current shell execution environment," we need to somehow
+//       return the fds to the parent environment
+impl BuiltinSetup for ExecBuiltin {
+    fn run<S>(&self, setup: &mut S, env: &mut Environment, data: ExecData) -> Result<ExitCode>
+    where
+        S: UtilSetup,
+    {
+        use std::process::{Command, Stdio};
+        use std::os::unix::io::FromRawFd;
+        use std::os::unix::process::CommandExt;
+
+        let mut args = data.args.into_iter();
+        if let Some(name) = args.next() {
+            // replace the current process with that started by the given command
+            let mut cmd = Command::new(name);
+            cmd.args(args)
+                .env_clear()
+                .envs(env.export_iter())
+                .envs(data.env.iter());
+
+            // TODO: figure out what to do if one of the IO interfaces doesn't have a file
+            //       descriptor (such as as Vec<u8>).  afaict this is only really an issue with
+            //       heredocs and when we are called as a library from a process that most likely
+            //       does not actually want to be replaced
+            // NOTE: we need to duplicate the fds as from_raw_fd() takes ownership
+            // TODO: this needs to duplicate all the fds (3-9 because stdin/stdout/stderr are done
+            //       already below) like in command.rs
+            if let Some(fd) = setup.input().raw_fd() {
+                let fd = unistd::dup(fd)?;
+                cmd.stdin(unsafe { Stdio::from_raw_fd(fd) });
+            }
+            if let Some(fd) = setup.output().raw_fd() {
+                let fd = unistd::dup(fd)?;
+                cmd.stdout(unsafe { Stdio::from_raw_fd(fd) });
+            }
+            if let Some(fd) = setup.error().raw_fd() {
+                let fd = unistd::dup(fd)?;
+                cmd.stderr(unsafe { Stdio::from_raw_fd(fd) });
+            }
+
+            // if this actually returns an error the process failed to start
+            Err(cmd.exec().into())
+        } else {
+            Ok(0)
+        }
+    }
+}
+
 pub struct ExitBuiltin;
 
 impl BuiltinSetup for ExitBuiltin {
-    fn run<S: UtilSetup>(&self, setup: &mut S, env: &mut Environment, data: ExecData) -> Result<ExitCode> {
+    fn run<S: UtilSetup>(&self, _setup: &mut S, _env: &mut Environment, _data: ExecData) -> Result<ExitCode> {
         // TODO: figure out how to exit properly
         unimplemented!()
     }

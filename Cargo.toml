@@ -17,7 +17,7 @@ gnu = [
     "yes"
 ]
 
-getty = ["nix"]
+getty = []
 loginutils = [
     "getty"
 ]
@@ -28,7 +28,7 @@ lsb = [
     "tar_util"
 ]
 
-ping = ["nix", "chrono", "crossbeam", "pnet", "byteorder", "trust-dns-resolver", "mio", "socket2"]
+ping = ["chrono", "crossbeam", "pnet", "byteorder", "trust-dns-resolver", "mio", "socket2"]
 networking = [
     "ping"
 ]
@@ -36,8 +36,8 @@ networking = [
 cat = []
 chmod = ["regex", "walkdir", "uucore"]
 head = []
-init = ["fnv", "nix"]
-sh = ["either", "fnv", "nix", "nom", "globset", "rustyline"]
+init = ["fnv"]
+sh = ["either", "nom", "globset", "rustyline"]
 sleep = ["uucore"]
 posix = [
     "cat",
@@ -55,12 +55,12 @@ clap = "2.31.2"
 failure = "0.1.1"
 failure_derive = "0.1.1"
 libc = "0.2.40"
+nix = "0.10.0"
 
 platform-info = { git = "https://github.com/uutils/platform-info", optional = true }
 uucore = { git = "https://github.com/uutils/coreutils", features = ["encoding", "fs", "mode", "parse_time"], optional = true }
 tar = { version = "0.4.15", optional = true }
 globset = { version = "0.4.0", optional = true }
-nix = { version = "0.10.0", optional = true }
 chrono = { version = "0.4.2", optional = true }
 crossbeam = { version = "0.3.2", optional = true }
 pnet = { version = "0.21.0", optional = true }

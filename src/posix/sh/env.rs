@@ -1,22 +1,137 @@
-use fnv::FnvHashMap;
-
 use std::borrow::{Borrow, Cow};
 use std::collections::HashMap;
 use std::ffi::{OsString, OsStr};
+use std::fs::File;
 use std::hash::Hash;
+use std::process::Stdio;
+use std::os::unix::io::{AsRawFd, FromRawFd};
 use std::iter::{FromIterator, FusedIterator};
 use std::mem;
 use std::rc::Rc;
+use std::slice;
 
-use super::UtilSetup;
+use super::Result;
 use super::ast::FunctionBody;
 use super::builtin::{Builtin, BuiltinSet};
+use super::option::FD_COUNT;
+use util::RawFdWrapper;
 
-#[derive(Clone, Debug)]
+// XXX: not exactly happy that we need to clone the data for Piped, but due to issues with
+//      lifetimes in SimpleCommand::run_command() and IoRedirect::setup() the only alternative
+//      seem to be dropping into unsafe code
+// XXX: if output is a Vec<u8>, maybe just wait to gather all output until end?  In this situation
+//      everything would need to be treated as a foreground process with no pipes, but maybe this
+//      would be fine?  only other way i can think of might be shared memory (probably posix shared
+//      memory?) because we can get a file descriptor from that
+#[derive(Debug)]
+pub enum EnvFd {
+    Null,
+    Inherit,
+    Piped(Vec<u8>),
+    File(File),
+    Fd(RawFdWrapper),
+    // TODO: child stdin/stdout/stderr
+}
+
+impl EnvFd {
+    pub fn into_stdio(self) -> Result<Stdio> {
+        use self::EnvFd::*;
+
+        Ok(match self {
+            Null => Stdio::null(),
+            Inherit => Stdio::inherit(),
+            Piped(_) => Stdio::piped(),
+            File(file) => file.into(),
+            Fd(fd) => {
+                // XXX: make sure this is right with the stdlib and such
+                let new_fd = fd.dup_sh()?;
+                unsafe { Stdio::from_raw_fd(new_fd) }
+            }
+        })
+    }
+
+    pub fn try_clone(&self) -> Result<Self> {
+        Ok(match self {
+            EnvFd::Fd(fd) => EnvFd::Fd(fd.clone()),
+            EnvFd::File(file) => {
+                // XXX: maybe just convert into Fd?
+                let new_fd = RawFdWrapper::new(file.as_raw_fd(), false, false).dup_sh()?;
+                let new_file = unsafe { File::from_raw_fd(new_fd) };
+                EnvFd::File(new_file)
+            }
+            EnvFd::Piped(data) => EnvFd::Piped(data.clone()),
+            EnvFd::Inherit => EnvFd::Inherit,
+            EnvFd::Null => EnvFd::Null,
+        })
+    }
+}
+
+impl Default for EnvFd {
+    fn default() -> Self {
+        EnvFd::Null
+    }
+}
+
+#[derive(Debug)]
+pub enum Locality<T> {
+    Local(T, usize, Option<Box<Locality<T>>>),
+    Global(T),
+}
+
+impl<T> Locality<T> {
+    pub fn enter_scope(&mut self) {
+        if let Locality::Local(_, ref mut count, _) = self {
+            *count += 1;
+        }
+    }
+
+    pub fn exit_scope(&mut self) {
+        use self::Locality::*;
+
+        let prev = match self {
+            Local(_, 0, ref mut prev) => mem::replace(prev, None),
+            Local(_, ref mut count, _) => {
+                *count -= 1;
+                return
+            }
+            Global(_) => return,
+        };
+
+        // NOTE: this should be fine as exit_scope() should not be called in the base scope
+        mem::replace(self, *prev.unwrap());
+    }
+
+    pub fn current_val(&self) -> &T {
+        use self::Locality::*;
+
+        match self {
+            Local(val, _, _) => val,
+            Global(val) => val,
+        }
+    }
+
+    pub fn current_val_mut(&mut self) -> &mut T {
+        use self::Locality::*;
+
+        match self {
+            Local(val, _, _) => val,
+            Global(val) => val,
+        }
+    }
+}
+
+impl<T: Default> Default for Locality<T> {
+    fn default() -> Self {
+        Locality::Global(T::default())
+    }
+}
+
+#[derive(Debug)]
 pub struct Environment {
     vars: HashMap<OsString, OsString>,
     export_vars: HashMap<OsString, Option<OsString>>,
     funcs: HashMap<OsString, Rc<FunctionBody>>,
+    fds: [Locality<EnvFd>; FD_COUNT],
 
     // BuiltinSet is designed so that by enabling options the set of builtins can be changed
     builtins: BuiltinSet,
@@ -28,6 +143,8 @@ impl Environment {
             vars: HashMap::new(),
             export_vars: HashMap::new(),
             funcs: HashMap::new(),
+
+            fds: Default::default(),
 
             builtins: BuiltinSet::new(vec![]),
         }
@@ -76,6 +193,50 @@ impl Environment {
     {
         let name = name.as_ref();
         self.vars.remove(name).or_else(|| self.export_vars.remove(name).and_then(|var| var))
+    }
+
+    fn set_fd(&mut self, fd: usize, value: Locality<EnvFd>) -> Locality<EnvFd> {
+        mem::replace(&mut self.fds[fd], value)
+    }
+
+    pub fn set_global_fd(&mut self, fd: usize, value: EnvFd) -> Locality<EnvFd> {
+        self.set_fd(fd, Locality::Global(value))
+    }
+
+    pub fn set_local_fd(&mut self, fd: usize, value: EnvFd) -> Locality<EnvFd> {
+        let current = mem::replace(&mut self.fds[fd], Locality::default());
+
+        if let Locality::Local(_, 0, prev) = current {
+            self.fds[fd] = Locality::Local(value, 0, prev);
+            Default::default()
+        } else {
+            let new_val = Locality::Local(value, 0, Some(Box::new(current)));
+            self.set_fd(fd, new_val)
+        }
+    }
+
+    pub fn get_fd(&self, fd: usize) -> &Locality<EnvFd> {
+        &self.fds[fd]
+    }
+
+    pub fn fds(&self) -> &[Locality<EnvFd>; FD_COUNT] {
+        &self.fds
+    }
+
+    pub fn current_fds(&mut self) -> CurrentFdIter {
+        CurrentFdIter { fd_iter: self.fds.iter_mut() }
+    }
+
+    pub fn enter_scope(&mut self) {
+        for fd in &mut self.fds {
+            fd.enter_scope();
+        }
+    }
+
+    pub fn exit_scope(&mut self) {
+        for fd in &mut self.fds {
+            fd.exit_scope();
+        }
     }
 
     pub fn set_func<Q: ?Sized>(&mut self, name: &Q, new_val: Rc<FunctionBody>) -> Option<Rc<FunctionBody>>
@@ -143,8 +304,26 @@ impl<T: Iterator<Item = (OsString, OsString)>> From<T> for Environment {
             export_vars: HashMap::new(),
             funcs: HashMap::new(),
 
+            fds: Default::default(),
+
             builtins: BuiltinSet::new(vec![]),
         }
+    }
+}
+
+pub struct CurrentFdIter<'a> {
+    fd_iter: slice::IterMut<'a, Locality<EnvFd>>,
+}
+
+impl<'a> Iterator for CurrentFdIter<'a> {
+    type Item = &'a mut EnvFd;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.fd_iter.next().map(|value| value.current_val_mut())
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.fd_iter.size_hint()
     }
 }
 

@@ -1,6 +1,5 @@
 use either::Either;
-use nom::{alpha1, alphanumeric1, space0, newline};
-use globset::{GlobBuilder, Glob};
+use nom::{self, alpha1, alphanumeric1, space0, newline};
 
 use std::cell::RefCell;
 use std::ffi::OsString;
@@ -525,7 +524,7 @@ named_args!(cmd_name<'a>(parser: &mut Parser)<&'a [u8], CommandName>,
         //        dash gives a syntax error without quotes and a command not found with quotes
         if let Word::Text(ref text) = word {
             match text.as_os_str().as_bytes() {
-                b"done" | b"for" | b"if" | b"elif" | b"else" | b"fi" | b"while" | b"until" | b"case" | b"esac" | b"in" | b"then" => return None,
+                b"do" | b"done" | b"for" | b"if" | b"elif" | b"else" | b"fi" | b"while" | b"until" | b"case" | b"esac" | b"in" | b"then" => return None,
                 _ => {}
             }
         }
@@ -798,18 +797,15 @@ named!(filename<&[u8], Word>,
     do_parse!(w: word >> (w))
 );
 
+// NOTE: we only accept fds 0-9 as that is the minimum required (and seems to be the number
+//       supported several shells).  if this ever changes, FD_COUNT in option.rs must be changed as
+//       well
 named!(io_number<&[u8], RawFd>,
-    // XXX: not sure if right
-    /*many1(digit()).then(|num_iter: Vec<_>| {
-        let res = String::from_utf8(num_iter).map_err(|_| ()).and_then(|s| RawFd::from_str(&s).map_err(|_| ()));
-        if let Ok(num) = res {
-            value(num).left()
-        } else {
-            /* FIXME: unexpected(num_iter) */
-            unexpected("IO number").map(|_| 0).message("not a valid file descriptor").right()
-        }
-    })*/
-    value!(1)
+    map!(verify!(map!(take!(1), |res: &[u8]| res[0]), |byte| {
+        nom::is_digit(byte)
+    }), |byte| {
+        (byte as char).to_digit(10).unwrap() as RawFd
+    })
 );
 
 named!(ignore,

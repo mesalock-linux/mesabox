@@ -4,7 +4,7 @@ use globset::{self, GlobBuilder, GlobSetBuilder, Glob};
 use walkdir::WalkDir;
 
 use std::borrow::Cow;
-use std::cell::RefCell;
+use std::cell::{RefCell, Ref};
 use std::ffi::{OsString, OsStr};
 use std::fs::{File, OpenOptions};
 use std::io::Write;
@@ -16,8 +16,9 @@ use std::rc::Rc;
 use std::result::Result as StdResult;
 
 use super::{NAME, UtilSetup, Result};
-use super::command::{CommandEnv, CommandIo, CommandWrapper, ExecData, ExecEnv, InProcessCommand};
-use super::env::Environment;
+use super::command::{CommandEnv, CommandWrapper, ExecData, ExecEnv, InProcessCommand};
+use super::env::{EnvFd, Environment};
+use util;
 
 pub type ExitCode = libc::c_int;
 
@@ -679,11 +680,22 @@ impl FunctionBody {
 }
 
 impl InProcessCommand for FunctionBody {
-    fn execute<S>(&self, setup: &mut S, env: &mut Environment, data: ExecData) -> ExitCode
+    fn execute<S>(&self, setup: &mut S, env: &mut Environment, _data: ExecData) -> ExitCode
     where
         S: UtilSetup,
     {
+        // TODO: set positional parameters using data.args
         // TODO: redirects
+        //       the below should redirect whatever is written to whatever stdout is at the time of
+        //       the function call to /dev/null (if a command inside the function redirects its
+        //       stdout it goes wherever the command tells the output to go though):
+        //
+        //       test() {
+        //           echo hi
+        //       } >/dev/null
+        //
+        //       UNLIKE FUNCTIONS, SUBSHELLS WILL NEED A CLONED COPY OF THE ENVIRONMENT (which gets
+        //       thrown away when the subshell finishes)
         self.command.execute(setup, env)
     }
 }
@@ -715,7 +727,7 @@ impl SimpleCommand {
 
             return {
                 // NOTE: needed to make functions return Rcs rather than borrowed
-                //       pointers for this to function (it is possible that an execution of a
+                //       pointers for this to work (it is possible that an execution of a
                 //       function could remove something that is being executed, which
                 //       would then cause that function to be freed (if the borrow checker
                 //       didn't catch it, that is))
@@ -730,12 +742,9 @@ impl SimpleCommand {
             };
         } else if let Some(ref actions) = self.pre_actions {
             for act in actions.iter() {
-                match act {
-                    Either::Right(ref assign) => {
-                        assign.execute(setup, env);
-                    }
-                    // TODO: figure out what to do with redirects (just ignore them?)
-                    _ => unimplemented!()
+                // XXX: i believe we are just supposed to ignore redirects here, but not certain
+                if let Either::Right(ref assign) = act {
+                    assign.execute(setup, env);
                 }
             }
         }
@@ -748,6 +757,8 @@ impl SimpleCommand {
         S: UtilSetup,
         E: CommandEnv,
     {
+        env.enter_scope();
+
         cmd.envs(env.export_iter().map(|(k, v)| (Cow::Borrowed(k), Cow::Borrowed(v))));
 
         if let Some(ref actions) = self.pre_actions {
@@ -779,7 +790,11 @@ impl SimpleCommand {
             }
         }
 
-        cmd.status(setup, env).unwrap()
+        let res = cmd.status(setup, env).unwrap();
+
+        env.exit_scope();
+
+        res
     }
 }
 
@@ -801,17 +816,19 @@ impl IoRedirect {
     {
         use self::IoRedirect::*;
 
-        // TODO: check for fds
         match self {
-            File(_, ref file) => {
+            File(fd, ref file) => {
                 // FIXME: don't unwrap
-                file.setup(setup, env, cmd).unwrap();
+                file.setup(setup, env, cmd, *fd).unwrap();
             }
-            Heredoc(_, ref doc) => {
-                // FIXME: don't unwrap
-                cmd.stdin(CommandIo::Piped(&doc.borrow().data)).unwrap();
+            Heredoc(fd, ref doc) => {
+                let fd = fd.unwrap_or(0);
+
+                let heredoc = doc.borrow();
+                let data = heredoc.data.clone();
+
+                env.set_local_fd(fd as _, EnvFd::Piped(data));
             }
-            _ => {}
         }
     }
 }
@@ -830,7 +847,7 @@ impl IoRedirectFile {
         }
     }
 
-    pub fn setup<S, E>(&self, setup: &mut S, env: &mut Environment, cmd: &mut E) -> Result<()>
+    pub fn setup<S, E>(&self, setup: &mut S, env: &mut Environment, cmd: &mut E, fd: Option<RawFd>) -> Result<()>
     where
         S: UtilSetup,
         E: CommandEnv,
@@ -842,26 +859,71 @@ impl IoRedirectFile {
         match self.kind {
             Input => {
                 let file = File::open(name)?;
-                cmd.stdin(CommandIo::File(file))?;
+                env.set_local_fd(fd.unwrap_or(0) as _, EnvFd::File(file))
             }
             Output => {
+                // TODO: fail if noclobber option is set (by set -C), so if that option is present
+                //       use OpenOptions with create_new() instead of File::create()
                 let file = File::create(name)?;
-                cmd.stdout(CommandIo::File(file))?;
+                env.set_local_fd(fd.unwrap_or(1) as _, EnvFd::File(file))
+            }
+            Clobber => {
+                let file = File::create(name)?;
+                env.set_local_fd(fd.unwrap_or(1) as _, EnvFd::File(file))
             }
             ReadWrite => {
                 let file = OpenOptions::new().create(true).read(true).write(true).open(name)?;
-                let second = file.try_clone()?;
 
-                cmd.stdin(CommandIo::File(file))?;
-                cmd.stdout(CommandIo::File(second))?;
+                env.set_local_fd(fd.unwrap_or(0) as _, EnvFd::File(file))
             }
             Append => {
                 let file = OpenOptions::new().create(true).append(true).open(name)?;
-                cmd.stdout(CommandIo::File(file))?;
+                env.set_local_fd(fd.unwrap_or(1) as _, EnvFd::File(file))
             }
-            // TODO: clobber, dup input, dup output
-            _ => unimplemented!()
-        }
+            DupInput if name.len() == 1 => {
+                match name.to_string_lossy().chars().next().unwrap() {
+                    '-' => {
+                        // TODO: close file descriptor specified by fd (or 0 by default)
+                        //env.get_fd()
+                        unimplemented!()
+                    }
+                    ch @ '0'...'9' => {
+                        // TODO: duplicate descriptor specified by name as that specified by fd (using dup2)
+                        let digit = ch.to_digit(10).unwrap();
+                        //cmd.fd_alias(fd.unwrap_or(0), digit as RawFd)
+                        let fd = fd.unwrap_or(0) as _;
+                        let value = env.get_fd(digit as _).current_val().try_clone()?;
+                        env.set_local_fd(fd, value)
+                    }
+                    _ => {
+                        util::string_to_err(Err("bad fd number".to_string()))?
+                    }
+                }
+            }
+            DupOutput if name.len() == 1 => {
+                match name.to_string_lossy().chars().next().unwrap() {
+                    '-' => {
+                        // TODO: close file descriptor specified by fd (or 1 by default)
+                        unimplemented!()
+                    }
+                    ch @ '0'...'9' => {
+                        // TODO: duplicate descriptor specified by name as that specified by fd (using dup2)
+                        let digit = ch.to_digit(10).unwrap();
+                        //cmd.fd_alias(fd.unwrap_or(1), digit as RawFd)
+                        let fd = fd.unwrap_or(1) as _;
+                        let value = env.get_fd(digit as _).current_val().try_clone()?;
+                        env.set_local_fd(fd, value)
+                    }
+                    _ => {
+                        util::string_to_err(Err("bad fd number".to_string()))?
+                    }
+                }
+            }
+            _ => {
+                // TODO: return error message stating invalid direction
+                unimplemented!()
+            }
+        };
 
         Ok(())
     }

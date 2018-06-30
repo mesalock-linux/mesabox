@@ -5,15 +5,17 @@ use rustyline::error::ReadlineError;
 use std::borrow::Cow;
 use std::ffi::{OsStr, OsString};
 
-use super::{UtilSetup, ArgsIter, Result};
+use super::{UtilRead, UtilWrite, UtilSetup, ArgsIter, Result};
+use util::RawFdWrapper;
 
-use self::env::Environment;
+use self::env::{EnvFd, Environment};
 use self::parser::Parser;
 
 mod ast;
 mod builtin;
 mod command;
 mod env;
+pub mod option;
 mod parser;
 
 pub const NAME: &str = "sh";
@@ -169,6 +171,11 @@ where
     // FIXME: what to do about PWD and stuff?  just go based on env or set explicitly?
 
     // although HOME and PATH and stuff are used, we shouldn't set them explicitly
+
+    // FIXME: what to do if can't create fd? (such as in testing framework)
+    env.set_global_fd(0, EnvFd::Fd(RawFdWrapper::try_from(setup.input().raw_fd().unwrap())?));
+    env.set_global_fd(1, EnvFd::Fd(RawFdWrapper::try_from(setup.output().raw_fd().unwrap())?));
+    env.set_global_fd(2, EnvFd::Fd(RawFdWrapper::try_from(setup.error().raw_fd().unwrap())?));
 
     Ok(())
 }
