@@ -10,6 +10,7 @@ use util::RawFdWrapper;
 
 use self::env::{EnvFd, Environment};
 use self::parser::Parser;
+use self::lexer::Lexer;
 
 mod ast;
 mod builtin;
@@ -17,6 +18,7 @@ mod command;
 mod env;
 pub mod option;
 mod parser;
+mod lexer;
 
 pub const NAME: &str = "sh";
 pub const DESCRIPTION: &str = "Minimal POSIX shell";
@@ -34,19 +36,27 @@ where
     let mut data = Vec::new();
     input.read_to_end(&mut data).unwrap();
 
+    let mut lexer = Lexer::new();
     let mut parser = Parser::new();
-    let res = complete!(data.as_slice(), call_m!(parser.complete_command));
-    match res {
-        Ok(m) => {
-            println!("{:#?}", m);
-            let mut env = setup.env().into();
-            setup_default_env(setup, &mut env)?;
 
-            //println!("{:#?}", m);
-            //println!();
-            println!("status: {}", m.1.execute(setup, &mut env));
+    let tokens = complete!(&data[..], call_m!(lexer.tokenize));
+    match tokens {
+        Ok(tokens) => {
+            println!("{:#?}", tokens);
+            match parser.parse(&tokens.1) {//complete!(&tokens.1, call_m!(parser.parse)) {
+                Ok(m) => {
+                    println!("{:#?}", m);
+                    let mut env = setup.env().into();
+                    setup_default_env(setup, &mut env)?;
+
+                    //println!("{:#?}", m);
+                    //println!();
+                    println!("status: {}", m.1.execute(setup, &mut env));
+                }
+                Err(f) => eprintln!("{}", f),
+            }
         }
-        Err(f) => println!("{}", f)
+        Err(f) => eprintln!("{}", f),
     }
 
     Ok(())
@@ -67,6 +77,7 @@ where
     let mut env = setup.env().into();
     setup_default_env(setup, &mut env)?;
 
+    let mut lexer = Lexer::new();
     let mut parser = Parser::new();
 
     loop {
@@ -82,7 +93,11 @@ where
                     // FIXME: complete! is not right as we can have functions split across multiple
                     //        lines and such (which is when e.g. PS2 comes in)
                     {
-                        let res = complete!(line.as_bytes(), call_m!(parser.complete_command));
+                        let tokens = complete!(line.as_bytes(), call_m!(lexer.tokenize));
+                        eprintln!("{:#?}", tokens);
+                        let tokens = tokens.unwrap().1;
+                        let res = parser.parse(&tokens);//complete!(&tokens, call_m!(parser.parse));
+                        println!("{:#?}", res);
                         match res {
                             Ok(m) => {
                                 println!("status: {}", m.1.execute(setup, &mut env));
@@ -113,7 +128,11 @@ where
                                 line.push_str(&data);
                                 line.push('\n');
 
-                                let res = complete!(line.as_bytes(), call_m!(parser.complete_command));
+                                let tokens = complete!(line.as_bytes(), call_m!(lexer.tokenize));
+                                eprintln!("{:#?}", tokens);
+                                let tokens = tokens.unwrap().1;
+                                let res = parser.parse(&tokens);
+                                //let res = complete!(&tokens, call_m!(parser.parse));
                                 match res {
                                     Ok(m) => {
                                         println!("status: {}", m.1.execute(setup, &mut env));

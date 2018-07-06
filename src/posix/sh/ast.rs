@@ -1,17 +1,15 @@
 use either::Either;
 use libc;
 use globset::{self, GlobBuilder, GlobSetBuilder, Glob};
-use walkdir::WalkDir;
 
 use std::borrow::Cow;
-use std::cell::{RefCell, Ref};
+use std::cell::RefCell;
 use std::ffi::{OsString, OsStr};
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::iter::FromIterator;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::io::RawFd;
-use std::process::{Child, Stdio};
 use std::rc::Rc;
 use std::result::Result as StdResult;
 
@@ -79,11 +77,17 @@ pub type CommandName = Word;
 //    4. quote removal
 #[derive(Debug)]
 pub enum Word {
-    Text(OsString),
-    Complex(Vec<WordPart>),
+    Parameter(ParamExpr),
+    CommandSubst(CommandSubst),
+    SingleQuote(OsString),
+    DoubleQuote(DoubleQuote),
+    Simple(OsString),
+    Complex(Vec<Word>),
 }
 
 impl Word {
+    // FIXME: like stated above, we need to retain the quote until the very end (maybe instead of
+    //        returning OsString, return some enum { SingleQuote, DoubleQuote, Text }?)
     pub fn eval<S>(&self, setup: &mut S, env: &mut Environment) -> OsString
     where
         S: UtilSetup,
@@ -91,7 +95,11 @@ impl Word {
         use self::Word::*;
 
         match self {
-            Text(ref s) => s.clone(),
+            Parameter(ref param) => param.eval(setup, env),
+            CommandSubst(ref subst) => subst.eval(setup, env),
+            SingleQuote(ref quote) => quote.clone(),
+            DoubleQuote(ref quote) => quote.eval(setup, env),
+            Simple(ref text) => text.clone(),
             Complex(ref parts) => {
                 parts.iter().fold(OsString::new(), |mut acc, item| {
                     acc.push(&item.eval(setup, env));
@@ -183,35 +191,6 @@ impl Word {
                     acc
                 }))
             }
-        }
-    }
-}
-
-#[derive(Debug)]
-pub enum WordPart {
-    Text(OsString),
-    Param(ParamExpr),
-    CommandSubst,       // TODO
-}
-
-impl WordPart {
-    pub fn eval<S>(&self, setup: &mut S, env: &mut Environment) -> OsString
-    where
-        S: UtilSetup,
-    {
-        use self::WordPart::*;
-
-        match self {
-            Text(ref s) => s.clone(),
-            Param(ref param) => param.eval(setup, env),
-            _ => unimplemented!()
-        }
-    }
-
-    pub fn is_text(&self) -> bool {
-        match self {
-            WordPart::Text(_) => true,
-            _ => false
         }
     }
 }
@@ -929,7 +908,7 @@ impl IoRedirectFile {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum IoRedirectKind {
     Input,
     DupInput,
@@ -940,7 +919,7 @@ pub enum IoRedirectKind {
     Clobber
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct HereDoc {
     pub data: Vec<u8>,
 }
@@ -962,11 +941,11 @@ impl Default for HereDoc {
 // TODO: figure out how to get this to work (pass the child up the call chain?)
 #[derive(Debug)]
 pub struct CommandSubst {
-    command: Command,
+    command: Box<Command>,
 }
 
 impl CommandSubst {
-    pub fn new(cmd: Command) -> Self {
+    pub fn new(cmd: Box<Command>) -> Self {
         Self {
             command: cmd,
         }
@@ -982,10 +961,16 @@ impl CommandSubst {
 
 #[derive(Debug)]
 pub struct DoubleQuote {
-    items: Vec<Quotable>
+    items: Vec<Word>
 }
 
 impl DoubleQuote {
+    pub fn new(items: Vec<Word>) -> Self {
+        Self {
+            items: items,
+        }
+    }
+
     pub fn eval<S>(&self, setup: &mut S, env: &mut Environment) -> OsString
     where
         S: UtilSetup,
@@ -997,30 +982,7 @@ impl DoubleQuote {
     }
 }
 
-#[derive(Debug)]
-pub enum Quotable {
-    CommandSubst(CommandSubst),
-    ArithExpr,      // TODO: actually add support for this
-    ParamExpand,    // TODO: add support
-    Text(OsString),
-}
-
-impl Quotable {
-    pub fn eval<S>(&self, setup: &mut S, env: &mut Environment) -> OsString
-    where
-        S: UtilSetup,
-    {
-        use self::Quotable::*;
-
-        match self {
-            CommandSubst(ref sub) => sub.eval(setup, env),
-            Text(ref s) => s.clone(),
-            _ => unimplemented!()
-        }
-    }
-}
-
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Param {
     Var(OsString),
     Star,
@@ -1057,28 +1019,30 @@ impl Param {
 #[derive(Debug)]
 pub struct ParamExpr {
     param: Param,
+    // box everything within ParamExprKind rather than boxing ParamExprKind itself to avoid an
+    // allocation in the case of Error/ErrorNull with no argument or Value/Length
     kind: ParamExprKind,
 }
 
 #[derive(Debug)]
 pub enum ParamExprKind {
-    Assign(Word),
-    AssignNull(Word),
+    Assign(Box<Word>),
+    AssignNull(Box<Word>),
 
-    Use(Word),
-    UseNull(Word),
+    Use(Box<Word>),
+    UseNull(Box<Word>),
 
-    Error(Option<Word>),
-    ErrorNull(Option<Word>),
+    Error(Option<Box<Word>>),
+    ErrorNull(Option<Box<Word>>),
 
-    Alternate(Word),
-    AlternateNull(Word),
+    Alternate(Box<Word>),
+    AlternateNull(Box<Word>),
 
-    SmallPrefix(Word),
-    LargePrefix(Word),
+    SmallPrefix(Box<Word>),
+    LargePrefix(Box<Word>),
 
-    SmallSuffix(Word),
-    LargeSuffix(Word),
+    SmallSuffix(Box<Word>),
+    LargeSuffix(Box<Word>),
 
     Value,
     Length,

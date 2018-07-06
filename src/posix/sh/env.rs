@@ -128,7 +128,11 @@ impl<T: Default> Default for Locality<T> {
 
 #[derive(Debug)]
 pub struct Environment {
+    // FIXME: variables (at least "vars," not sure how to deal with "export_vars") should use
+    //        Locality (or perhaps the structure should be changed to use subenvs/parent envs?)
     vars: HashMap<OsString, OsString>,
+    // NOTE: export_vars needs cannot just be OsString as there is a difference between unset and
+    //       "" that needs to be reported when using `export -p`
     export_vars: HashMap<OsString, Option<OsString>>,
     funcs: HashMap<OsString, Rc<FunctionBody>>,
     fds: [Locality<EnvFd>; FD_COUNT],
