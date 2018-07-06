@@ -3,11 +3,18 @@ pipeline:
     image: ${RUST_VERSION}
     secrets: [ codecov_token ]
     commands:
-      - rustup show
-      - cargo build
-      - cargo test
       - |
-        if [ "${RUST_VERSION}" = "rustlang/rust:nightly" ]; then
+        if [ "${TARGET}" = "x86_64-unknown-linux-musl" ]; then
+          apt-get update
+          apt-get install -y --no-install-recommends musl-tools
+          rustup target add x86_64-unknown-linux-musl
+        fi
+      - rustup show
+      - cargo build --target ${TARGET}
+      - cargo test --target ${TARGET}
+      - |
+        if [ "${RUST_VERSION}" = "rustlang/rust:nightly" ] &&
+           [ "${TARGET}" = "x86_64-unknown-linux-gnu" ]; then
           apt-get update
           apt-get install -y --no-install-recommends lcov llvm
           ./util/run-cov.sh
@@ -21,3 +28,6 @@ matrix:
     - rust:1.26
     - rust:latest
     - rustlang/rust:nightly
+  TARGET:
+    - x86_64-unknown-linux-gnu
+    - x86_64-unknown-linux-musl
