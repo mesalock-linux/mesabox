@@ -1,6 +1,7 @@
 use either::Either;
 use libc;
-use globset::{self, GlobBuilder, GlobSetBuilder, Glob};
+use glob::{self, MatchOptions};
+use glob::Pattern as GlobPattern;
 use walkdir::WalkDir;
 
 use std::borrow::Cow;
@@ -107,14 +108,17 @@ impl Word {
     {
         let text = self.eval(setup, env);
 
+        let mut options = MatchOptions::new();
+        options.require_literal_separator = true;
+        options.require_literal_leading_dot = true;
+
         // FIXME: what to do here, error out?
-        let glob = match self.create_glob(&text) {
+        let matcher = match GlobPattern::new(&text) {
             Ok(m) => m,
             _ => return false
         };
-        let matcher = glob.compile_matcher();
 
-        if matcher.is_match(value) {
+        if matcher.matches_with(value, &options) {
             true
         } else {
             false
@@ -122,26 +126,30 @@ impl Word {
     }
 
     // NOTE: globset seems to implement filename{a,b} syntax, which is not valid for posix shell technically
-    // NOTE: * shouldn't list hidden files
+    // NOTE: the output does not seem to be quite the same as dash (especially with stuff like src/**/*)
+    // TODO: need to glob everything (including the command name, which we are not doing right now)
     pub fn eval_glob_fs<'a, S>(&self, setup: &mut S, env: &mut Environment) -> WordEval
     where
         S: UtilSetup,
     {
         let text = self.eval(setup, env);
 
-        match self.create_glob(&text).and_then(|glob| GlobSetBuilder::new().add(glob).build()) {
-            Ok(set) => {
+        let mut options = MatchOptions::new();
+        options.require_literal_separator = true;
+        options.require_literal_leading_dot = true;
+
+        match glob::glob_with(&text, &options) {
+            Ok(paths) => {
                 // FIXME: this should use the current_dir in setup (or whatever it has been changed
                 //        to during the course of the program's lifetime)
-                /*let mut res = GlobWalker::from_globset(set)/*.base_dir()*/.into_iter().fold(vec![], |mut acc, entry| {
+                let mut res = paths.fold(vec![], |mut acc, entry| {
                     // FIXME: not sure what to do on entry failure (do we bail or just report an error?)
                     if let Ok(entry) = entry {
-                        acc.push(entry.path().as_os_str().to_owned());
+                        acc.push(entry.as_os_str().to_owned());
                     }
                     acc
-                });*/
-                // TODO: need to create custom walker first
-                let res = vec![];
+                });
+
                 if res.is_empty() {
                     WordEval::Text(text)
                 } else {
@@ -151,37 +159,6 @@ impl Word {
             Err(_) => {
                 // in this case, we just assume that the "glob" is actual meant to be a literal
                 WordEval::Text(text)
-            }
-        }
-    }
-
-    fn create_glob(&self, text: &OsStr) -> StdResult<Glob, globset::Error> {
-        // sadly, we need to convert any non-utf8 values to hex escapes to compile the regex, which
-        // wastes some time
-        let glob_str = self.escape_glob(&text);
-
-        GlobBuilder::new(&glob_str).literal_separator(true).build()
-    }
-
-    // NOTE: i think we may need to escape in any case (e.g. if * is in single quotes like abc'*', we need
-    //       to match literally abc* not abcdef (for example)).  we'll have to escape the */?/whatever is
-    //       used in patterns if they are in single quotes
-    fn escape_glob<'a>(&self, text: &'a OsStr) -> Cow<'a, str> {
-        // this is optimized for utf8 (try to convert and then go back through the string and
-        // escape incorrect values on failure), as i imagine most given strings will be valid utf8
-        match text.to_str() {
-            Some(s) => Cow::from(s),
-            None => {
-                // the text is invalid utf8, so convert manually by escaping
-                Cow::from(text.as_bytes().iter().fold(String::new(), |mut acc, &byte| {
-                    let ch: char = byte.into();
-                    if ch.is_ascii() {
-                        acc.push(ch);
-                    } else {
-                        acc.extend(ch.escape_default());
-                    }
-                    acc
-                }))
             }
         }
     }

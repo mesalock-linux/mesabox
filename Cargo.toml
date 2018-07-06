@@ -37,7 +37,7 @@ cat = []
 chmod = ["regex", "walkdir", "uucore"]
 head = []
 init = ["fnv"]
-sh = ["either", "nom", "globset", "rustyline"]
+sh = ["either", "nom", "glob", "rustyline"]
 sleep = ["uucore"]
 posix = [
     "cat",
@@ -61,6 +61,7 @@ platform-info = { git = "https://github.com/uutils/platform-info", optional = tr
 uucore = { git = "https://github.com/uutils/coreutils", features = ["encoding", "fs", "mode", "parse_time"], optional = true }
 tar = { version = "0.4.15", optional = true }
 globset = { version = "0.4.0", optional = true }
+glob = { git = "https://github.com/mesalock-linux/glob", optional = true }
 chrono = { version = "0.4.2", optional = true }
 crossbeam = { version = "0.3.2", optional = true }
 pnet = { version = "0.21.0", optional = true }
