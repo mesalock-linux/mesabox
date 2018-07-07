@@ -85,6 +85,8 @@ pub enum Word {
 }
 
 impl Word {
+    // XXX: this should likely be something like "eval_simple" and the eval_glob_fs method should
+    //      be the standard version
     pub fn eval<S>(&self, setup: &mut S, env: &mut Environment) -> OsString
     where
         S: UtilSetup,
@@ -108,6 +110,8 @@ impl Word {
     {
         let text = self.eval(setup, env);
 
+        // XXX: realized these likely are not needed as this method is used by Pattern (for case
+        //      statements)
         let mut options = MatchOptions::new();
         options.require_literal_separator = true;
         options.require_literal_leading_dot = true;
@@ -125,6 +129,49 @@ impl Word {
         }
     }
 
+    fn eval_tilde<S>(&self, setup: &mut S, env: &mut Environment) -> OsString
+    where
+        S: UtilSetup,
+    {
+        use self::Word::*;
+
+        let expand = |s: &OsStr, env: &mut Environment| {
+            if s.as_bytes().starts_with(b"~/") {
+                match env.get_var("HOME") {
+                    Some(dir) if dir.len() > 0 => {
+                        let mut result = dir.clone();
+                        result.push("/");
+                        result.push(OsStr::from_bytes(&s.as_bytes()[2..]));
+                        result
+                    }
+                    _ => s.to_owned()
+                }
+            } else {
+                s.to_owned()
+            }
+        };
+
+        match self {
+            Text(ref s) => expand(s, env),
+            Complex(ref parts) => {
+                let mut iter = parts.iter();
+
+                if let Some(part) = iter.next() {
+                    let start_val = match part {
+                        WordPart::Text(ref s) => expand(s, env),
+                        part => part.eval(setup, env),
+                    };
+                    iter.fold(start_val, |mut acc, item| {
+                        acc.push(&item.eval(setup, env));
+                        acc
+                    })
+                } else {
+                    OsString::new()
+                }
+            }
+        }
+    }
+
     // NOTE: globset seems to implement filename{a,b} syntax, which is not valid for posix shell technically
     // NOTE: the output does not seem to be quite the same as dash (especially with stuff like src/**/*)
     // TODO: need to glob everything (including the command name, which we are not doing right now)
@@ -132,7 +179,7 @@ impl Word {
     where
         S: UtilSetup,
     {
-        let text = self.eval(setup, env);
+        let text = self.eval_tilde(setup, env);
 
         let mut options = MatchOptions::new();
         options.require_literal_separator = true;
@@ -700,7 +747,12 @@ impl SimpleCommand {
         use std::process::Command as RealCommand;
 
         if let Some(ref name) = self.name {
-            let cmdname = name.eval(setup, env);
+            // FIXME: any extra things that were globbed should be passed as arguments (need way to
+            //        extend post_actions)
+            let cmdname = match name.eval_glob_fs(setup, env) {
+                WordEval::Text(text) => text,
+                WordEval::Globbed(files) => files.into_iter().next().unwrap(),
+            };
 
             return {
                 // NOTE: needed to make functions return Rcs rather than borrowed
