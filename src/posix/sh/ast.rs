@@ -286,10 +286,16 @@ impl AndOr {
     where
         S: UtilSetup,
     {
+        let execute = |setup: &mut S, env: &mut Environment| {
+            let res = self.pipeline.execute(setup, env);
+            env.special_vars().set_last_exitcode(res);
+            res
+        };
+
         match (self.separator, prev_res) {
-            (SepKind::First, _) | (SepKind::And, 0) => self.pipeline.execute(setup, env),
-            (SepKind::Or, res) if res != 0 => self.pipeline.execute(setup, env),
-            (_, prev_res) => prev_res
+            (SepKind::First, _) | (SepKind::And, 0) => execute(setup, env),
+            (SepKind::Or, res) if res != 0 => execute(setup, env),
+            (_, prev_res) => prev_res,
         }
     }
 }
@@ -341,11 +347,15 @@ impl Pipeline {
             code = cmd.execute(setup, env);
         }
 
-        if self.bang {
+        let res = if self.bang {
             (code == 0) as ExitCode
         } else {
             code
-        }
+        };
+
+        env.special_vars().set_last_exitcode(res);
+
+        res
     }
 }
 
@@ -874,7 +884,7 @@ impl IoRedirect {
 
         match self {
             File(fd, ref file) => {
-                file.setup(setup, env, cmd, *fd)?;
+                file.setup(setup, env, *fd)?;
             }
             Heredoc(fd, ref doc) => {
                 let fd = fd.unwrap_or(0);
@@ -904,10 +914,9 @@ impl IoRedirectFile {
         }
     }
 
-    pub fn setup<S, E>(&self, setup: &mut S, env: &mut Environment, cmd: &mut E, fd: Option<RawFd>) -> CmdResult<()>
+    pub fn setup<S>(&self, setup: &mut S, env: &mut Environment, fd: Option<RawFd>) -> CmdResult<()>
     where
         S: UtilSetup,
-        E: CommandEnv,
     {
         use std::io;
         use self::IoRedirectKind::*;
@@ -1096,14 +1105,15 @@ pub enum Param {
 }
 
 impl Param {
-    pub fn eval<'a: 'b, 'b, S>(&self, setup: &mut S, env: &'a mut Environment) -> Option<&'b OsString>
+    pub fn eval<'a: 'b, 'b, S>(&self, setup: &mut S, env: &'a mut Environment) -> Option<Cow<'b, OsStr>>
     where
         S: UtilSetup,
     {
         use self::Param::*;
 
         match self {
-            Var(ref s) => env.get_var(s),
+            Var(ref s) => env.get_var(s).map(|v| Cow::Borrowed(v.as_os_str())),
+            Question => Some(Cow::Owned(OsString::from(format!("{}", env.special_vars().get_last_exitcode())))),
             // TODO
             _ => unimplemented!()
         }
@@ -1174,11 +1184,11 @@ impl ParamExpr {
             pval_valid = pval.is_some();
             not_null = pval.as_ref().map(|v| v.len() > 0).unwrap_or(false);
             return match self.kind {
-                Assign(_) | Use(_) | Error(_) if not_null => pval.unwrap().clone(),
-                AssignNull(_) | UseNull(_) | ErrorNull(_) if pval_valid => pval.unwrap().clone(),
+                Assign(_) | Use(_) | Error(_) if not_null => pval.unwrap().into_owned(),
+                AssignNull(_) | UseNull(_) | ErrorNull(_) if pval_valid => pval.unwrap().into_owned(),
 
                 Length => pval.map(|v| OsString::from(v.len().to_string())).unwrap_or_else(|| OsString::from("0")),
-                Value => pval.map(|v| v.clone()).unwrap_or_default(),
+                Value => pval.map(|v| v.into_owned()).unwrap_or_default(),
 
                 _ => break,
             };

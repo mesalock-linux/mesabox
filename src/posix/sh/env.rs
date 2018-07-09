@@ -11,7 +11,7 @@ use std::rc::Rc;
 use std::slice;
 
 use super::error::CommandError;
-use super::ast::FunctionBody;
+use super::ast::{ExitCode, FunctionBody};
 use super::builtin::{Builtin, BuiltinSet};
 use super::option::FD_COUNT;
 use util::RawFdWrapper;
@@ -128,7 +128,29 @@ impl<T: Default> Default for Locality<T> {
 }
 
 #[derive(Debug)]
+pub struct SpecialVars {
+    last_exitcode: ExitCode,
+}
+
+impl SpecialVars {
+    pub fn new() -> Self {
+        Self {
+            last_exitcode: 0,
+        }
+    }
+
+    pub fn set_last_exitcode(&mut self, code: ExitCode) {
+        self.last_exitcode = code;
+    }
+
+    pub fn get_last_exitcode(&self) -> ExitCode {
+        self.last_exitcode
+    }
+}
+
+#[derive(Debug)]
 pub struct Environment {
+    special_vars: SpecialVars,
     vars: HashMap<OsString, OsString>,
     export_vars: HashMap<OsString, Option<OsString>>,
     funcs: HashMap<OsString, Rc<FunctionBody>>,
@@ -141,6 +163,7 @@ pub struct Environment {
 impl Environment {
     pub fn new() -> Self {
         Self {
+            special_vars: SpecialVars::new(),
             vars: HashMap::new(),
             export_vars: HashMap::new(),
             funcs: HashMap::new(),
@@ -149,6 +172,10 @@ impl Environment {
 
             builtins: BuiltinSet::new(vec![]),
         }
+    }
+
+    pub fn special_vars(&mut self) -> &mut SpecialVars {
+        &mut self.special_vars
     }
 
     // NOTE: using Cow with OsStr is annoying as From<OsStr> is not implemented apparently
@@ -301,6 +328,7 @@ impl FromIterator<(OsString, OsString)> for Environment {
 impl<T: Iterator<Item = (OsString, OsString)>> From<T> for Environment {
     fn from(iter: T) -> Self {
         Self {
+            special_vars: SpecialVars::new(),
             vars: iter.collect(),
             export_vars: HashMap::new(),
             funcs: HashMap::new(),
