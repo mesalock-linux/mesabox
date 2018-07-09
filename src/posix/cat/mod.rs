@@ -76,7 +76,7 @@ enum CatError {
     #[fail(display = "{}", _0)]
     Output(#[cause] io::Error),
 
-    /// Uknown Filetype  classification
+    /// Unknown filetype classification
     #[fail(display = "{}: unknown filetype", _0)]
     UnknownFiletype(String),
 

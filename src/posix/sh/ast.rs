@@ -2,23 +2,21 @@ use either::Either;
 use libc;
 use glob::{self, MatchOptions};
 use glob::Pattern as GlobPattern;
-use walkdir::WalkDir;
 
 use std::borrow::Cow;
-use std::cell::{RefCell, Ref};
+use std::cell::RefCell;
 use std::ffi::{OsString, OsStr};
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::iter::FromIterator;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::io::RawFd;
-use std::process::{Child, Stdio};
 use std::rc::Rc;
-use std::result::Result as StdResult;
 
-use super::{NAME, UtilSetup, Result};
+use super::{NAME, UtilSetup};
 use super::command::{CommandEnv, CommandWrapper, ExecData, ExecEnv, InProcessCommand};
 use super::env::{EnvFd, Environment};
+use super::error::{Result, CmdResult, CommandError, ShellError};
 use util;
 
 pub type ExitCode = libc::c_int;
@@ -179,6 +177,8 @@ impl Word {
     where
         S: UtilSetup,
     {
+        use std::path::{Component, Path};
+
         let text = self.eval_tilde(setup, env);
 
         let mut options = MatchOptions::new();
@@ -189,10 +189,30 @@ impl Word {
             Ok(paths) => {
                 // FIXME: this should use the current_dir in setup (or whatever it has been changed
                 //        to during the course of the program's lifetime)
+
+                // FIXME: this is a hack around an issue in glob where it removes
+                //        Component::CurDir from globbed paths.  this fix only works if the given
+                //        path is like ./filepath.  if the path is like path/./otherstuff the inner
+                //        ./ will be removed
+                let prefix = {
+                    let mut components = Path::new(&text).components();
+
+                    if let Some(Component::CurDir) = components.next() {
+                        if components.next().is_some() {
+                            "./"
+                        } else {
+                            ""
+                        }
+                    } else {
+                        ""
+                    }
+                };
                 let mut res = paths.fold(vec![], |mut acc, entry| {
                     // FIXME: not sure what to do on entry failure (do we bail or just report an error?)
                     if let Ok(entry) = entry {
-                        acc.push(entry.as_os_str().to_owned());
+                        let mut item = OsString::from(prefix);
+                        item.push(entry.as_os_str());
+                        acc.push(item);
                     }
                     acc
                 });
@@ -357,7 +377,15 @@ impl Command {
         S: UtilSetup,
     {
         // FIXME: what this should actually do is setup a command with stdin/stdout/stderr redirected to whatever is specified in redirect_list and return it
-        self.inner.execute(setup, env)
+        match self.inner.execute(setup, env) {
+            Ok(code) => code,
+            Err(f) => {
+                // FIXME: needs to print out line number
+                // XXX: should we ignore any I/O errors?
+                let _ = display_msg!(setup.error(), "{}", f);
+                127
+            }
+        }
     }
 }
 
@@ -373,7 +401,7 @@ pub enum CommandInner {
 }
 
 impl CommandInner {
-    pub fn execute<S>(&self, setup: &mut S, env: &mut Environment) -> ExitCode
+    pub fn execute<S>(&self, setup: &mut S, env: &mut Environment) -> Result<ExitCode>
     where
         S: UtilSetup,
     {
@@ -381,12 +409,12 @@ impl CommandInner {
 
         // FIXME: needs to set up redirects somehow
         match self {
-            If(ref clause) => clause.execute(setup, env),
-            While(ref clause) => clause.execute(setup, env),
-            For(ref clause) => clause.execute(setup, env),
-            Case(ref clause) => clause.execute(setup, env),
-            FunctionDef(ref def) => def.execute(setup, env),
-            AndOr(ref and_ors) => exec_list(setup, env, and_ors),
+            If(ref clause) => Ok(clause.execute(setup, env)),
+            While(ref clause) => Ok(clause.execute(setup, env)),
+            For(ref clause) => Ok(clause.execute(setup, env)),
+            Case(ref clause) => Ok(clause.execute(setup, env)),
+            FunctionDef(ref def) => Ok(def.execute(setup, env)),
+            AndOr(ref and_ors) => Ok(exec_list(setup, env, and_ors)),
             Simple(ref cmd) => cmd.execute(setup, env),
         }
     }
@@ -704,7 +732,7 @@ impl FunctionBody {
 }
 
 impl InProcessCommand for FunctionBody {
-    fn execute<S>(&self, setup: &mut S, env: &mut Environment, _data: ExecData) -> ExitCode
+    fn execute<S>(&self, setup: &mut S, env: &mut Environment, _data: ExecData) -> CmdResult<ExitCode>
     where
         S: UtilSetup,
     {
@@ -720,7 +748,7 @@ impl InProcessCommand for FunctionBody {
         //
         //       UNLIKE FUNCTIONS, SUBSHELLS WILL NEED A CLONED COPY OF THE ENVIRONMENT (which gets
         //       thrown away when the subshell finishes)
-        self.command.execute(setup, env)
+        Ok(self.command.execute(setup, env))
     }
 }
 
@@ -740,7 +768,7 @@ impl SimpleCommand {
         }
     }
 
-    pub fn execute<S>(&self, setup: &mut S, env: &mut Environment) -> ExitCode
+    pub fn execute<S>(&self, setup: &mut S, env: &mut Environment) -> Result<ExitCode>
     where
         S: UtilSetup,
     {
@@ -761,12 +789,12 @@ impl SimpleCommand {
                 //       would then cause that function to be freed (if the borrow checker
                 //       didn't catch it, that is))
                 if let Some(builtin) = env.get_builtin(&cmdname) {
-                    self.run_command(setup, env, ExecEnv::new(builtin))
+                    self.run_command(setup, env, ExecEnv::new(builtin), cmdname)
                 } else if let Some(func) = env.get_func(&cmdname) {
-                    self.run_command(setup, env, ExecEnv::new(&*func))
+                    self.run_command(setup, env, ExecEnv::new(&*func), cmdname)
                 } else {
-                    let cmd = CommandWrapper::new(RealCommand::new(cmdname));
-                    self.run_command(setup, env, cmd)
+                    let cmd = CommandWrapper::new(RealCommand::new(&cmdname));
+                    self.run_command(setup, env, cmd, cmdname)
                 }
             };
         } else if let Some(ref actions) = self.pre_actions {
@@ -778,10 +806,10 @@ impl SimpleCommand {
             }
         }
 
-        0
+        Ok(0)
     }
 
-    fn run_command<S, E>(&self, setup: &mut S, env: &mut Environment, mut cmd: E) -> ExitCode
+    fn run_command<S, E>(&self, setup: &mut S, env: &mut Environment, mut cmd: E, name: OsString) -> Result<ExitCode>
     where
         S: UtilSetup,
         E: CommandEnv,
@@ -794,7 +822,7 @@ impl SimpleCommand {
             for act in actions.iter() {
                 match act {
                     Either::Left(ref redirect) => {
-                        redirect.setup(setup, env, &mut cmd);
+                        redirect.setup(setup, env, &mut cmd).map_err(|e| ShellError::Command { cmdname: name.to_string_lossy().into_owned(), err: e })?;
                     }
                     Either::Right(ref assign) => {
                         let (k, v) = assign.eval(setup, env);
@@ -807,7 +835,7 @@ impl SimpleCommand {
             for act in actions.iter() {
                 match act {
                     Either::Left(ref redirect) => {
-                        redirect.setup(setup, env, &mut cmd);
+                        redirect.setup(setup, env, &mut cmd).map_err(|e| ShellError::Command { cmdname: name.to_string_lossy().into_owned(), err: e })?;
                     }
                     Either::Right(ref word) => {
                         match word.eval_glob_fs(setup, env) {
@@ -819,11 +847,11 @@ impl SimpleCommand {
             }
         }
 
-        let res = cmd.status(setup, env).unwrap();
+        let res = cmd.status(setup, env).map_err(|e| ShellError::Command { cmdname: name.to_string_lossy().into_owned(), err: e })?;
 
         env.exit_scope();
 
-        res
+        Ok(res)
     }
 }
 
@@ -837,8 +865,7 @@ pub enum IoRedirect {
 }
 
 impl IoRedirect {
-    // FIXME: this should be able to error
-    pub fn setup<S, E>(&self, setup: &mut S, env: &mut Environment, cmd: &mut E)
+    pub fn setup<S, E>(&self, setup: &mut S, env: &mut Environment, cmd: &mut E) -> CmdResult<()>
     where
         S: UtilSetup,
         E: CommandEnv,
@@ -847,8 +874,7 @@ impl IoRedirect {
 
         match self {
             File(fd, ref file) => {
-                // FIXME: don't unwrap
-                file.setup(setup, env, cmd, *fd).unwrap();
+                file.setup(setup, env, cmd, *fd)?;
             }
             Heredoc(fd, ref doc) => {
                 let fd = fd.unwrap_or(0);
@@ -859,6 +885,8 @@ impl IoRedirect {
                 env.set_local_fd(fd as _, EnvFd::Piped(data));
             }
         }
+
+        Ok(())
     }
 }
 
@@ -876,75 +904,85 @@ impl IoRedirectFile {
         }
     }
 
-    pub fn setup<S, E>(&self, setup: &mut S, env: &mut Environment, cmd: &mut E, fd: Option<RawFd>) -> Result<()>
+    pub fn setup<S, E>(&self, setup: &mut S, env: &mut Environment, cmd: &mut E, fd: Option<RawFd>) -> CmdResult<()>
     where
         S: UtilSetup,
         E: CommandEnv,
     {
+        use std::io;
         use self::IoRedirectKind::*;
 
         let name = self.filename.eval(setup, env);
 
+        let file_err = |fd: RawFd, filename: OsString, err: io::Error| {
+            CommandError::FdAsFile { fd: fd, filename: filename.to_string_lossy().into_owned(), err: err }
+        };
+
         match self.kind {
             Input => {
-                let file = File::open(name)?;
-                env.set_local_fd(fd.unwrap_or(0) as _, EnvFd::File(file))
+                let fd = fd.unwrap_or(0);
+                let file = File::open(&name).map_err(|e| file_err(fd, name, e))?;
+                env.set_local_fd(fd as _, EnvFd::File(file))
             }
             Output => {
                 // TODO: fail if noclobber option is set (by set -C), so if that option is present
                 //       use OpenOptions with create_new() instead of File::create()
-                let file = File::create(name)?;
-                env.set_local_fd(fd.unwrap_or(1) as _, EnvFd::File(file))
+                let fd = fd.unwrap_or(1);
+                let file = File::create(&name).map_err(|e| file_err(fd, name, e))?;
+                env.set_local_fd(fd as _, EnvFd::File(file))
             }
             Clobber => {
-                let file = File::create(name)?;
-                env.set_local_fd(fd.unwrap_or(1) as _, EnvFd::File(file))
+                let fd = fd.unwrap_or(1);
+                let file = File::create(&name).map_err(|e| file_err(fd, name, e))?;
+                env.set_local_fd(fd as _, EnvFd::File(file))
             }
             ReadWrite => {
-                let file = OpenOptions::new().create(true).read(true).write(true).open(name)?;
+                let fd = fd.unwrap_or(0);
+                let file = OpenOptions::new().create(true).read(true).write(true).open(&name).map_err(|e| file_err(fd, name, e))?;
 
-                env.set_local_fd(fd.unwrap_or(0) as _, EnvFd::File(file))
+                env.set_local_fd(fd as _, EnvFd::File(file))
             }
             Append => {
-                let file = OpenOptions::new().create(true).append(true).open(name)?;
-                env.set_local_fd(fd.unwrap_or(1) as _, EnvFd::File(file))
+                let fd = fd.unwrap_or(1);
+                let file = OpenOptions::new().create(true).append(true).open(&name).map_err(|e| file_err(fd, name, e))?;
+                env.set_local_fd(fd as _, EnvFd::File(file))
             }
             DupInput if name.len() == 1 => {
-                match name.to_string_lossy().chars().next().unwrap() {
-                    '-' => {
+                match name.as_bytes()[0] {
+                    b'-' => {
                         // TODO: close file descriptor specified by fd (or 0 by default)
                         //env.get_fd()
                         unimplemented!()
                     }
-                    ch @ '0'...'9' => {
+                    ch @ b'0'...b'9' => {
                         // TODO: duplicate descriptor specified by name as that specified by fd (using dup2)
-                        let digit = ch.to_digit(10).unwrap();
+                        let digit = (ch as char).to_digit(10).unwrap();
                         //cmd.fd_alias(fd.unwrap_or(0), digit as RawFd)
                         let fd = fd.unwrap_or(0) as _;
                         let value = env.get_fd(digit as _).current_val().try_clone()?;
                         env.set_local_fd(fd, value)
                     }
-                    _ => {
-                        util::string_to_err(Err("bad fd number".to_string()))?
+                    ch => {
+                        Err(CommandError::InvalidFd(ch))?
                     }
                 }
             }
             DupOutput if name.len() == 1 => {
-                match name.to_string_lossy().chars().next().unwrap() {
-                    '-' => {
+                match name.as_bytes()[0] {
+                    b'-' => {
                         // TODO: close file descriptor specified by fd (or 1 by default)
                         unimplemented!()
                     }
-                    ch @ '0'...'9' => {
+                    ch @ b'0'...b'9' => {
                         // TODO: duplicate descriptor specified by name as that specified by fd (using dup2)
-                        let digit = ch.to_digit(10).unwrap();
-                        //cmd.fd_alias(fd.unwrap_or(1), digit as RawFd)
+                        // unwrap here is fine as we verified that ch is valid above
+                        let digit = (ch as char).to_digit(10).unwrap();
                         let fd = fd.unwrap_or(1) as _;
                         let value = env.get_fd(digit as _).current_val().try_clone()?;
                         env.set_local_fd(fd, value)
                     }
-                    _ => {
-                        util::string_to_err(Err("bad fd number".to_string()))?
+                    ch => {
+                        Err(CommandError::InvalidFd(ch))?
                     }
                 }
             }

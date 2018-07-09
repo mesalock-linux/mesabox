@@ -6,13 +6,17 @@ use std::ffi::{OsStr, OsString};
 use std::io::{self, BufRead, Write};
 use std::iter;
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
+use std::result::Result as StdResult;
 
 use ::{UtilData, UtilRead, UtilWrite};
-use super::{UtilSetup, Result};
+use super::UtilSetup;
 use super::ast::ExitCode;
 use super::command::{ExecData, InProcessCommand};
 use super::env::{EnvFd, Environment};
+use super::error::{CmdResult, BuiltinError, CommandError};
 use super::option::ShellOption;
+
+type Result<T> = StdResult<T, BuiltinError>;
 
 #[derive(Clone, Debug)]
 pub struct BuiltinSet {
@@ -49,7 +53,7 @@ pub enum Builtin {
 }
 
 impl Builtin {
-    fn execute_stdin<I>(&self, env: &mut Environment, data: ExecData, input: &mut I) -> Result<ExitCode>
+    fn execute_stdin<I>(&self, env: &mut Environment, data: ExecData, input: &mut I) -> CmdResult<ExitCode>
     where
         I: for<'a> UtilRead<'a>,
     {
@@ -65,7 +69,7 @@ impl Builtin {
         }
     }
 
-    fn execute_stdout<I, O>(&self, env: &mut Environment, data: ExecData, input: &mut I, output: &mut O) -> Result<ExitCode>
+    fn execute_stdout<I, O>(&self, env: &mut Environment, data: ExecData, input: &mut I, output: &mut O) -> CmdResult<ExitCode>
     where
         I: for<'a> UtilRead<'a>,
         O: for<'a> UtilWrite<'a>,
@@ -82,7 +86,7 @@ impl Builtin {
         }
     }
 
-    fn execute_stderr<I, O, E>(&self, env: &mut Environment, data: ExecData, input: &mut I, output: &mut O, error: &mut E) -> Result<ExitCode>
+    fn execute_stderr<I, O, E>(&self, env: &mut Environment, data: ExecData, input: &mut I, output: &mut O, error: &mut E) -> CmdResult<ExitCode>
     where
         I: for<'a> UtilRead<'a>,
         O: for<'a> UtilWrite<'a>,
@@ -100,16 +104,15 @@ impl Builtin {
             Export(u) => u.run(setup, env, data),
             Read(u) => u.run(setup, env, data),
             Unset(u) => u.run(setup, env, data),
-        }
+        }.map_err(|e| CommandError::Builtin(e))
     }
 }
 
 impl InProcessCommand for Builtin {
-    fn execute<S: UtilSetup>(&self, setup: &mut S, env: &mut Environment, data: ExecData) -> ExitCode {
+    fn execute<S: UtilSetup>(&self, setup: &mut S, env: &mut Environment, data: ExecData) -> CmdResult<ExitCode> {
         use self::EnvFd::*;
 
-        // FIXME: DONT UNWRAP
-        let res = match env.get_fd(0).current_val().try_clone().unwrap() {
+        let res = match env.get_fd(0).current_val().try_clone()? {
             File(mut file) => self.execute_stdin(env, data, &mut file),
             Fd(mut fd) => self.execute_stdin(env, data, &mut fd),
             Piped(piped) => self.execute_stdin(env, data, &mut &piped[..]),
@@ -117,14 +120,16 @@ impl InProcessCommand for Builtin {
             _ => unimplemented!(),
         };
 
-        match res {
+        Ok(match res {
             Ok(m) => m,
             Err(f) => {
                 // XXX: do we really want to ignore write errors?
+                // FIXME: should probably not write to setup.error() unless we create a new
+                //        UtilData struct each time we call a builtin
                 let _ = writeln!(setup.error(), "{}", f);
                 1
             }
-        }
+        })
     }
 }
 

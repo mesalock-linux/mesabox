@@ -8,17 +8,19 @@ use std::os::unix::io::{AsRawFd, RawFd};
 use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::process::{Command, Stdio};
 
-use super::{UtilSetup, Result};
+use super::UtilSetup;
 use super::ast::ExitCode;
 use super::env::{EnvFd, Environment};
+use super::error::{CmdResult, CommandError};
+use util::RawFdWrapper;
 
 /// A command executed within the current shell process (e.g. a function or builtin)
 pub trait InProcessCommand {
-    fn execute<S: UtilSetup>(&self, setup: &mut S, env: &mut Environment, data: ExecData) -> ExitCode;
+    fn execute<S: UtilSetup>(&self, setup: &mut S, env: &mut Environment, data: ExecData) -> CmdResult<ExitCode>;
 }
 
 impl<'a, T: InProcessCommand> InProcessCommand for &'a T {
-    fn execute<S: UtilSetup>(&self, setup: &mut S, env: &mut Environment, data: ExecData) -> ExitCode {
+    fn execute<S: UtilSetup>(&self, setup: &mut S, env: &mut Environment, data: ExecData) -> CmdResult<ExitCode> {
         (**self).execute(setup, env, data)
     }
 }
@@ -64,29 +66,9 @@ pub trait CommandEnv {
 
     fn arg(&mut self, arg: Cow<OsStr>) -> &mut Self;
 
-    fn status<S>(self, setup: &mut S, env: &mut Environment) -> Result<ExitCode>
+    fn status<S>(self, setup: &mut S, env: &mut Environment) -> CmdResult<ExitCode>
     where
         S: UtilSetup;
-
-    // NOTE: keeping this here for the time being until everything here is supported
-    //       (the only thing that we don't do atm is return "bad file descriptor," we just explode
-    //       on error)
-    /*fn fd_alias(&mut self, fd: RawFd, copied: RawFd) -> Result<&mut Self> {
-        let cmd_io = match self.get_fd(copied) {
-            Some(value) => match value {
-                EnvFd::File(file) => {
-                    let copy = file.try_clone()?;
-                    EnvFd::File(copy)
-                }
-                EnvFd::Fd(rawfd) => EnvFd::Fd(rawfd.clone()),
-                EnvFd::Piped(data) => EnvFd::Piped(data.clone()),
-                EnvFd::Null => EnvFd::Null,
-                EnvFd::Inherit => EnvFd::Inherit,
-            },
-            None => return util::string_to_err(Err(format!("bad file descriptor '{}'", copied))),
-        };
-        self.fd(fd, cmd_io)
-    }*/
 
     fn envs<'a, I>(&mut self, vars: I) -> &mut Self
     where
@@ -120,51 +102,76 @@ impl CommandEnv for CommandWrapper {
         self
     }
 
-    fn status<S>(mut self, setup: &mut S, env: &mut Environment) -> Result<ExitCode>
+    fn status<S>(mut self, setup: &mut S, env: &mut Environment) -> CmdResult<ExitCode>
     where
         S: UtilSetup,
     {
-        let mut buffer = Vec::with_capacity(0);
+        let mut stdin_pipe = None;
+        let mut stdout_pipe = None;
+        let mut stderr_pipe = None;
+        // TODO: make a static buffer (memory allocation is not necessary as we can only have FD_COUNT - 3 FDs here)
+        let mut other_pipes = Vec::with_capacity(0);
 
-        // FIXME: buffer setup is clearly not right
         // FIXME: cleanup
         // FIXME: what if setup has Vec<u8> instead of Fd?
-        let mut fd_iter = env.current_fds();
+        let mut fd_iter = env.current_fds().enumerate();
         {
-            let mut convert_stdio = |cmd_io: &mut EnvFd| {
+            let convert_stdio = |(_, cmd_io): (_, &mut EnvFd), pipe: &mut _| {
                 if let EnvFd::Piped(ref data) = cmd_io {
-                    buffer.extend(data.iter());
+                    *pipe = Some(data.clone());
                     Ok(Stdio::piped())
                 } else {
                     cmd_io.try_clone()?.into_stdio()
                 }
             };
 
-            self.cmd.stdin(convert_stdio(fd_iter.next().unwrap())?);
-            self.cmd.stdout(convert_stdio(fd_iter.next().unwrap())?);
-            self.cmd.stderr(convert_stdio(fd_iter.next().unwrap())?);
+            self.cmd.stdin(convert_stdio(fd_iter.next().unwrap(), &mut stdin_pipe)?);
+            self.cmd.stdout(convert_stdio(fd_iter.next().unwrap(), &mut stdout_pipe)?);
+            self.cmd.stderr(convert_stdio(fd_iter.next().unwrap(), &mut stderr_pipe)?);
         }
-        let fds: Vec<_> = fd_iter.enumerate().filter_map(|(i, val)| {
-            match val {
-                EnvFd::Fd(fd) => Some((i + 3, fd.fd)),
-                EnvFd::File(file) => Some((i + 3, file.as_raw_fd())),
-                EnvFd::Null => None,
+
+        let mut fds = Vec::with_capacity(0);
+        for (i, val) in fd_iter {
+            fds.push(match val {
+                EnvFd::Fd(fd) => (i, fd.fd),
+                EnvFd::File(file) => (i, file.as_raw_fd()),
+                EnvFd::Piped(ref data) => {
+                    // we need to manually create the pipe as the stdlib only handles stdio
+                    let (read, mut write) = unistd::pipe().map_err(|e| CommandError::Pipe(e))?;
+
+                    // just write now and close the writable end of the pipe as we won't need it
+                    // later
+                    RawFdWrapper::new(write, false, true).write_all(data).map_err(|e| CommandError::PipeIo(e))?;
+                    unistd::close(write).map_err(|e| CommandError::Pipe(e))?;
+
+                    other_pipes.push(read);
+                    (i, read)
+                }
+                EnvFd::Null => continue,
                 _ => unimplemented!(),
-            }
-        }).collect();
+            });
+        }
+
         self.cmd.before_exec(move || {
             for &(i, old_fd) in fds.iter() {
                 unistd::dup2(old_fd, i as RawFd).map_err(|_| io::Error::last_os_error())?;
             }
             Ok(())
         });
-        let mut child = self.cmd.spawn()?;
+        let mut child = self.cmd.spawn().map_err(|e| CommandError::StartRealCommand(e))?;
 
-        if !buffer.is_empty() {
-            child.stdin.as_mut().unwrap().write_all(&buffer)?;
+        if let Some(data) = stdin_pipe {
+            child.stdin.as_mut().expect("Could not open stdin pipe").write_all(&data).map_err(|e| CommandError::PipeIo(e))?;
         }
-        // TODO: output/error
-        let stat = child.wait()?;
+        // TODO: stdout/stderr (and any other pipes that are piped into other commands)
+
+        let stat = child.wait().map_err(|e| CommandError::RealCommandStatus(e))?;
+
+        for pipe in other_pipes {
+            // XXX: not sure if we really want to error here (maybe just report the error?)
+            unistd::close(pipe).map_err(|e| CommandError::Pipe(e))?;
+        }
+
         // NOTE: this should be fine as the only way for code() to fail is if a signal terminated
         //       the process
         // XXX: do we need to add 128 (iirc?) to the signal?
@@ -183,12 +190,12 @@ impl<C: InProcessCommand> CommandEnv for ExecEnv<C> {
         self
     }
 
-    fn status<S>(self, setup: &mut S, env: &mut Environment) -> Result<ExitCode>
+    fn status<S>(self, setup: &mut S, env: &mut Environment) -> CmdResult<ExitCode>
     where
         S: UtilSetup,
     {
         // XXX: maybe we should treat env vars the same way as fds?  it would make things simpler,
         //      but not sure of the effect on execution speed
-        Ok(self.cmd.execute(setup, env, ExecData { args: self.args, env: self.env }))
+        self.cmd.execute(setup, env, ExecData { args: self.args, env: self.env })
     }
 }

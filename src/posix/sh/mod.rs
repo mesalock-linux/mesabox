@@ -15,6 +15,7 @@ mod ast;
 mod builtin;
 mod command;
 mod env;
+mod error;
 pub mod option;
 mod parser;
 

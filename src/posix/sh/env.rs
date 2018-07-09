@@ -10,7 +10,7 @@ use std::mem;
 use std::rc::Rc;
 use std::slice;
 
-use super::Result;
+use super::error::CommandError;
 use super::ast::FunctionBody;
 use super::builtin::{Builtin, BuiltinSet};
 use super::option::FD_COUNT;
@@ -34,7 +34,7 @@ pub enum EnvFd {
 }
 
 impl EnvFd {
-    pub fn into_stdio(self) -> Result<Stdio> {
+    pub fn into_stdio(self) -> Result<Stdio, CommandError> {
         use self::EnvFd::*;
 
         Ok(match self {
@@ -44,18 +44,19 @@ impl EnvFd {
             File(file) => file.into(),
             Fd(fd) => {
                 // XXX: make sure this is right with the stdlib and such
-                let new_fd = fd.dup_sh()?;
+                let new_fd = fd.dup_sh().map_err(|e| CommandError::DupFd { fd: fd.fd, err: e })?;
                 unsafe { Stdio::from_raw_fd(new_fd) }
             }
         })
     }
 
-    pub fn try_clone(&self) -> Result<Self> {
+    pub fn try_clone(&self) -> Result<Self, CommandError> {
         Ok(match self {
             EnvFd::Fd(fd) => EnvFd::Fd(fd.clone()),
             EnvFd::File(file) => {
                 // XXX: maybe just convert into Fd?
-                let new_fd = RawFdWrapper::new(file.as_raw_fd(), false, false).dup_sh()?;
+                let fd = file.as_raw_fd();
+                let new_fd = RawFdWrapper::new(fd, false, false).dup_sh().map_err(|e| CommandError::DupFd { fd: fd, err: e })?;
                 let new_file = unsafe { File::from_raw_fd(new_fd) };
                 EnvFd::File(new_file)
             }
