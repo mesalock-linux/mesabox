@@ -22,6 +22,27 @@ mod parser;
 pub const NAME: &str = "sh";
 pub const DESCRIPTION: &str = "Minimal POSIX shell";
 
+// XXX: redefine here as nom forces the error type to be u32
+macro_rules! complete (
+    ($i:expr, $submac:ident!( $($args:tt)* )) => (
+        {
+            use ::std::result::Result::*;
+            use $crate::nom::{Err, ErrorKind};
+
+            let i_ = $i.clone();
+            match $submac!(i_, $($args)*) {
+                Err(Err::Incomplete(_)) =>  {
+                    Err(Err::Error(error_position!($i, ErrorKind::Complete::<parser::ParserError>)))
+                },
+                rest => rest
+            }
+        }
+    );
+    ($i:expr, $f:expr) => (
+        complete!($i, call!($f));
+    );
+);
+
 pub fn execute<S, T>(setup: &mut S, args: T) -> Result<()>
 where
     S: UtilSetup,
@@ -47,7 +68,25 @@ where
             //println!();
             println!("status: {}", m.1.execute(setup, &mut env));
         }
-        Err(f) => println!("{}", f)
+        Err(nom::Err::Failure(ctx)) | Err(nom::Err::Error(ctx)) => {
+            //println!("{}", f.into_error_kind())
+            match ctx {
+                nom::Context::List(ref vec) => {
+                    for (_, err) in vec {
+                        match err {
+                            nom::ErrorKind::Custom(s) => {
+                                println!("{}", s);
+                            }
+                            other => {
+                                println!("{:#?}", other);
+                            }
+                        }
+                    }
+                }
+                _ => unimplemented!()
+            }
+        }
+        _ => unreachable!()
     }
 
     Ok(())
@@ -94,10 +133,26 @@ where
                             Err(nom::Err::Incomplete(_))
                             | Err(nom::Err::Error(nom::Context::Code(_, nom::ErrorKind::Complete)))
                             | Err(nom::Err::Failure(nom::Context::Code(_, nom::ErrorKind::Complete))) => { }
-                            Err(f) => {
-                                println!("{}", f);
-                                break;
+                            Err(nom::Err::Failure(ctx)) | Err(nom::Err::Error(ctx)) => {
+                                //println!("{}", f.into_error_kind())
+                                match ctx {
+                                    nom::Context::List(ref vec) => {
+                                        for (_, err) in vec {
+                                            match err {
+                                                nom::ErrorKind::Custom(s) => {
+                                                    println!("{}", s);
+                                                }
+                                                other => {
+                                                    println!("{:#?}", other);
+                                                }
+                                            }
+                                        }
+                                        break;
+                                    }
+                                    _ => unimplemented!()
+                                }
                             }
+                            _ => unreachable!()
                         }
                     }
 
