@@ -102,6 +102,24 @@ impl<T> Locality<T> {
         mem::replace(self, *prev.unwrap());
     }
 
+    pub fn set_val(&mut self, value: T) {
+        match self {
+            Locality::Local(ref mut cur_value, 0, _) => *cur_value = value,
+            Locality::Local(ref mut cur_value, ref mut count, ref mut prev) => {
+                let cur_value = mem::replace(cur_value, value);
+                let count = mem::replace(count, 0);
+                let prev_val = mem::replace(prev, None);
+                *prev = Some(Box::new(Locality::Local(cur_value, count, prev_val)));
+            }
+            Locality::Global(_) => {
+                let old_self = mem::replace(self, Locality::Local(value, 0, None));
+                if let Locality::Local(_, _, ref mut prev) = self {
+                    *prev = Some(Box::new(old_self));
+                }
+            }
+        }
+    }
+
     pub fn current_val(&self) -> &T {
         use self::Locality::*;
 
@@ -130,12 +148,14 @@ impl<T: Default> Default for Locality<T> {
 #[derive(Debug)]
 pub struct SpecialVars {
     last_exitcode: ExitCode,
+    args: Locality<Vec<OsString>>,
 }
 
 impl SpecialVars {
     pub fn new() -> Self {
         Self {
             last_exitcode: 0,
+            args: Locality::default(),
         }
     }
 
@@ -145,6 +165,22 @@ impl SpecialVars {
 
     pub fn get_last_exitcode(&self) -> ExitCode {
         self.last_exitcode
+    }
+
+    pub fn set_positionals(&mut self, args: Vec<OsString>) {
+        self.args.set_val(args);
+    }
+
+    pub fn get_positionals(&self) -> &[OsString] {
+        self.args.current_val()
+    }
+
+    pub fn enter_scope(&mut self) {
+        self.args.enter_scope();
+    }
+
+    pub fn exit_scope(&mut self) {
+        self.args.exit_scope();
     }
 }
 
@@ -223,24 +259,16 @@ impl Environment {
         self.vars.remove(name).or_else(|| self.export_vars.remove(name).and_then(|var| var))
     }
 
-    fn set_fd(&mut self, fd: usize, value: Locality<EnvFd>) -> Locality<EnvFd> {
-        mem::replace(&mut self.fds[fd], value)
+    fn set_fd(&mut self, fd: usize, value: Locality<EnvFd>) {
+        mem::replace(&mut self.fds[fd], value);
     }
 
-    pub fn set_global_fd(&mut self, fd: usize, value: EnvFd) -> Locality<EnvFd> {
-        self.set_fd(fd, Locality::Global(value))
+    pub fn set_global_fd(&mut self, fd: usize, value: EnvFd) {
+        self.set_fd(fd, Locality::Global(value));
     }
 
-    pub fn set_local_fd(&mut self, fd: usize, value: EnvFd) -> Locality<EnvFd> {
-        let current = mem::replace(&mut self.fds[fd], Locality::default());
-
-        if let Locality::Local(_, 0, prev) = current {
-            self.fds[fd] = Locality::Local(value, 0, prev);
-            Default::default()
-        } else {
-            let new_val = Locality::Local(value, 0, Some(Box::new(current)));
-            self.set_fd(fd, new_val)
-        }
+    pub fn set_local_fd(&mut self, fd: usize, value: EnvFd) {
+        self.fds[fd].set_val(value);
     }
 
     pub fn get_fd(&self, fd: usize) -> &Locality<EnvFd> {
@@ -259,12 +287,14 @@ impl Environment {
         for fd in &mut self.fds {
             fd.enter_scope();
         }
+        self.special_vars.enter_scope();
     }
 
     pub fn exit_scope(&mut self) {
         for fd in &mut self.fds {
             fd.exit_scope();
         }
+        self.special_vars.exit_scope();
     }
 
     pub fn set_func<Q: ?Sized>(&mut self, name: &Q, new_val: Rc<FunctionBody>) -> Option<Rc<FunctionBody>>

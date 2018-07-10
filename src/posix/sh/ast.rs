@@ -11,13 +11,13 @@ use std::io::Write;
 use std::iter::FromIterator;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::io::RawFd;
+use std::process;
 use std::rc::Rc;
 
 use super::{NAME, UtilSetup};
 use super::command::{CommandEnv, CommandWrapper, ExecData, ExecEnv, InProcessCommand};
 use super::env::{EnvFd, Environment};
 use super::error::{Result, CmdResult, CommandError, ShellError};
-use util;
 
 pub type ExitCode = libc::c_int;
 
@@ -742,11 +742,12 @@ impl FunctionBody {
 }
 
 impl InProcessCommand for FunctionBody {
-    fn execute<S>(&self, setup: &mut S, env: &mut Environment, _data: ExecData) -> CmdResult<ExitCode>
+    fn execute<S>(&self, setup: &mut S, env: &mut Environment, data: ExecData) -> CmdResult<ExitCode>
     where
         S: UtilSetup,
     {
-        // TODO: set positional parameters using data.args
+        env.special_vars().set_positionals(data.args);
+
         // TODO: redirects
         //       the below should redirect whatever is written to whatever stdout is at the time of
         //       the function call to /dev/null (if a command inside the function redirects its
@@ -832,7 +833,7 @@ impl SimpleCommand {
             for act in actions.iter() {
                 match act {
                     Either::Left(ref redirect) => {
-                        redirect.setup(setup, env, &mut cmd).map_err(|e| ShellError::Command { cmdname: name.to_string_lossy().into_owned(), err: e })?;
+                        redirect.setup(setup, env).map_err(|e| ShellError::Command { cmdname: name.to_string_lossy().into_owned(), err: e })?;
                     }
                     Either::Right(ref assign) => {
                         let (k, v) = assign.eval(setup, env);
@@ -845,7 +846,7 @@ impl SimpleCommand {
             for act in actions.iter() {
                 match act {
                     Either::Left(ref redirect) => {
-                        redirect.setup(setup, env, &mut cmd).map_err(|e| ShellError::Command { cmdname: name.to_string_lossy().into_owned(), err: e })?;
+                        redirect.setup(setup, env).map_err(|e| ShellError::Command { cmdname: name.to_string_lossy().into_owned(), err: e })?;
                     }
                     Either::Right(ref word) => {
                         match word.eval_glob_fs(setup, env) {
@@ -875,10 +876,9 @@ pub enum IoRedirect {
 }
 
 impl IoRedirect {
-    pub fn setup<S, E>(&self, setup: &mut S, env: &mut Environment, cmd: &mut E) -> CmdResult<()>
+    pub fn setup<S>(&self, setup: &mut S, env: &mut Environment) -> CmdResult<()>
     where
         S: UtilSetup,
-        E: CommandEnv,
     {
         use self::IoRedirect::*;
 
@@ -1101,7 +1101,11 @@ pub enum Param {
     Var(OsString),
     Star,
     Question,
-    At
+    At,
+    NumParams,
+    ShellPid,
+    BackgroundPid,
+    Positional(usize),
 }
 
 impl Param {
@@ -1114,7 +1118,31 @@ impl Param {
         match self {
             Var(ref s) => env.get_var(s).map(|v| Cow::Borrowed(v.as_os_str())),
             Question => Some(Cow::Owned(OsString::from(format!("{}", env.special_vars().get_last_exitcode())))),
-            // TODO
+            // TODO: expand/split according to IFS (this may need to return a word)
+            Star => {
+                // FIXME: this is wrong (shouldn't be combining into one field here)
+                let mut res = env.special_vars().get_positionals().iter().fold(OsString::new(), |mut acc, item| {
+                    acc.push(item);
+                    acc.push(" ");
+                    acc
+                });
+                Some(Cow::Owned(res))
+            }
+            At => {
+                // FIXME: same issue as above
+                let mut res = env.special_vars().get_positionals().iter().fold(OsString::new(), |mut acc, item| {
+                    acc.push(item);
+                    acc.push(" ");
+                    acc
+                });
+                Some(Cow::Owned(res))
+            }
+            NumParams => Some(Cow::Owned(OsString::from(format!("{}", env.special_vars().get_positionals().len())))),
+            ShellPid => Some(Cow::Owned(OsString::from(format!("{}", process::id())))),
+            // TODO: should print out name of shell binary
+            Positional(0) => { unimplemented!() }
+            Positional(num) => env.special_vars().get_positionals().get(*num - 1).map(|item| Cow::Borrowed(item.as_os_str())),
+            // TODO (background pid)
             _ => unimplemented!()
         }
     }
@@ -1127,6 +1155,10 @@ impl Param {
             Star => OsString::from("*"),
             Question => OsString::from("?"),
             At => OsString::from("@"),
+            NumParams => OsString::from("#"),
+            ShellPid => OsString::from("$"),
+            BackgroundPid => OsString::from("!"),
+            Positional(num) => OsString::from(format!("{}", num)),
         }
     }
 }

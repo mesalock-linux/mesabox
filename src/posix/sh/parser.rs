@@ -1,5 +1,5 @@
 use either::Either;
-use nom::{self, alpha1, alphanumeric1, space0, newline};
+use nom::{self, alpha1, alphanumeric1, digit1, space0, newline};
 
 use std::cell::RefCell;
 use std::ffi::OsString;
@@ -220,7 +220,22 @@ named!(param_name<&[u8], Param>,
         var_name => { |name| Param::Var(name) } |
         tag!("*") => { |_| Param::Star } |
         tag!("?") => { |_| Param::Question } |
-        tag!("@") => { |_| Param::At }
+        tag!("@") => { |_| Param::At } |
+        tag!("#") => { |_| Param::NumParams } |
+        tag!("$") => { |_| Param::ShellPid } |
+        tag!("!") => { |_| Param::BackgroundPid } |
+        number => { |number| Param::Positional(number) }
+    )
+);
+
+named!(number<&[u8], usize>,
+    map_opt!(
+        terminated!(digit1, ignore),
+        |res| {
+            use std::str;
+
+            str::from_utf8(res).ok().and_then(|s| s.parse().ok())
+        }
     )
 );
 
