@@ -29,9 +29,10 @@ fn create_util_map() -> HashMap<&'static str, &'static str> {
     hashmap.insert("cat", "posix");
     hashmap.insert("chmod", "posix");
     hashmap.insert("head", "posix");
-    hashmap.insert("init", "posix");
     hashmap.insert("sh", "posix");
     hashmap.insert("sleep", "posix");
+
+    hashmap.insert("init", "sysinit");
 
     hashmap
 }

@@ -36,19 +36,22 @@ networking = [
 cat = []
 chmod = ["regex", "walkdir", "uucore"]
 head = []
-init = ["fnv"]
 sh = ["either", "nom", "glob", "rustyline"]
 sleep = ["uucore"]
 posix = [
     "cat",
     "chmod",
     "head",
-    "init",
     "sh",
     "sleep"
 ]
 
-default = ["gnu", "loginutils", "lsb", "networking", "posix"]
+init = ["fnv"]
+sysinit = [
+    "init"
+]
+
+default = ["gnu", "loginutils", "lsb", "networking", "posix", "sysinit"]
 
 [dependencies]
 clap = "2.31.2"
