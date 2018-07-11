@@ -1,7 +1,7 @@
 MesaBox
 =======
 
-[![Build Status](https://ci.mesalock-linux.org/api/badges/mesalock-linux/mesabox/status.svg?branch=master)](https://ci.mesalock-linux.org/mesalock-linux/mesabox)
+[![Build Status](https://api.travis-ci.org/mesalock-linux/mesabox.svg?branch=master)](https://travis-ci.org/mesalock-linux/mesabox)
 [![License](https://img.shields.io/badge/license-BSD-blue.svg)](LICENSE)
 [![Coverage Status](https://codecov.io/gh/mesalock-linux/mesabox/branch/master/graphs/badge.svg)](https://codecov.io/gh/mesalock-linux/mesabox/branch/master)
 [![](https://tokei.rs/b1/github/mesalock-linux/mesabox)](https://github.com/mesalock-linux/mesabox).
