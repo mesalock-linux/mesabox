@@ -98,6 +98,22 @@ where
     }
     writeln!(output, "Ok(())\n}}").unwrap();
 
+    for util in &utils {
+        writeln!(
+            output,
+            "pub fn {}<T, U, V>(args: T) -> Result<()>
+where
+    T: IntoIterator<IntoIter = V, Item = U>,
+    U: Into<OsString> + Clone,
+    V: ArgsIter<ArgItem = U>,
+{{
+    let mut args = iter::once(OsString::from({0:?})).chain(args.into_iter().map(|s| s.into()));
+    EasyUtil::new().execute(&mut args, {0}::execute)
+}}",
+            util
+        ).unwrap();
+    }
+
     let app_path = Path::new(&outdir).join("generate_app.rs");
     let app_file = File::create(app_path).expect("could not open generate_app.rs for writing");
     let mut app_output = BufWriter::new(app_file);

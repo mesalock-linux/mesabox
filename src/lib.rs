@@ -20,6 +20,8 @@ extern crate byteorder;
 extern crate chrono;
 #[cfg(feature = "crossbeam")]
 extern crate crossbeam;
+#[cfg(feature = "either")]
+extern crate either;
 #[cfg(feature = "fnv")]
 extern crate fnv;
 #[cfg(feature = "globset")]
@@ -38,20 +40,19 @@ extern crate trust_dns_resolver;
 extern crate uucore;
 #[cfg(feature = "walkdir")]
 extern crate walkdir;
-#[cfg(feature = "either")]
-extern crate either;
 #[cfg(feature = "nom")]
 #[macro_use]
 extern crate nom;
-#[cfg(feature = "rustyline")]
-extern crate rustyline;
 #[cfg(feature = "glob")]
 extern crate glob;
+#[cfg(feature = "rustyline")]
+extern crate rustyline;
 
 use clap::{App, SubCommand};
 use libc::EXIT_FAILURE;
+use std::env::{self, VarsOs};
 use std::ffi::{OsStr, OsString};
-use std::io::{BufRead, Read, Write};
+use std::io::{self, BufRead, Read, Stderr, Stdin, Stdout, Write};
 use std::iter;
 use std::os::unix::io::RawFd;
 use std::path::{Path, PathBuf};
@@ -94,7 +95,13 @@ where
     E: for<'a> UtilWrite<'a>,
     T: Iterator<Item = (OsString, OsString)>,
 {
-    pub fn new(stdin: &'b mut I, stdout: &'c mut O, stderr: &'d mut E, env: T, current_dir: Option<PathBuf>) -> Self {
+    pub fn new(
+        stdin: &'b mut I,
+        stdout: &'c mut O,
+        stderr: &'d mut E,
+        env: T,
+        current_dir: Option<PathBuf>,
+    ) -> Self {
         Self {
             stdin: stdin,
             stdout: stdout,
@@ -213,6 +220,42 @@ where
 // arguments (adding all the arguments would slow down startup time)
 fn generate_app() -> App<'static, 'static> {
     include!(concat!(env!("OUT_DIR"), "/generate_app.rs"))
+}
+
+// used by functions generated in build.rs for each utility (the functions allow a user to call
+// utilities like cat(&mut ["file", "anotherfile"].iter()), although this could probably be
+// simplified)
+struct EasyUtil {
+    stdin: Stdin,
+    stdout: Stdout,
+    stderr: Stderr,
+}
+
+impl EasyUtil {
+    pub fn new() -> Self {
+        Self {
+            stdin: io::stdin(),
+            stdout: io::stdout(),
+            stderr: io::stderr(),
+        }
+    }
+
+    pub fn execute<'a, T, U, V, F>(&'a mut self, args: T, func: F) -> Result<()>
+    where
+        T: IntoIterator<IntoIter = V, Item = U>,
+        U: Into<OsString> + Clone,
+        V: ArgsIter<ArgItem = U>,
+        F: Fn(&mut UtilData<'a, 'a, 'a, Stdin, Stdout, Stderr, VarsOs>, V) -> Result<()>,
+    {
+        let mut data = UtilData::new(
+            &mut self.stdin,
+            &mut self.stdout,
+            &mut self.stderr,
+            env::vars_os(),
+            None,
+        );
+        func(&mut data, args.into_iter())
+    }
 }
 
 pub fn execute<S, T, U, V>(setup: &mut S, args: T) -> Result<()>
