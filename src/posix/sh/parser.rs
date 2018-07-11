@@ -2,7 +2,7 @@ use either::Either;
 use nom::{self, alpha1, alphanumeric1, digit1, space0, space1, newline};
 
 use std::cell::RefCell;
-use std::ffi::OsString;
+use std::ffi::{OsString, OsStr};
 use std::fmt;
 use std::os::unix::ffi::{OsStringExt, OsStrExt};
 use std::os::unix::io::RawFd;
@@ -124,6 +124,10 @@ pub enum ParserError {
     BraceGroup,
     SubShell,
     FunctionDef,
+    ParamExpand,
+    CommandSubst,
+    DoubleQuote,
+    SingleQuote,
     Token(&'static str),
     Keyword(&'static str),
 
@@ -144,6 +148,10 @@ impl fmt::Display for ParserError {
             BraceGroup => "in brace group ({{ ... }})",
             SubShell => "in subshell",
             FunctionDef => "in function definition",
+            ParamExpand => "in parameter expansion",
+            CommandSubst => "in command substitution",
+            DoubleQuote => "in double quote",
+            SingleQuote => "in single quote",
             Token(tok) => return write!(f, "expected token {}", tok),
             Keyword(keyword) => return write!(f, "expected keyword {}", keyword),
 
@@ -257,29 +265,28 @@ fn var_assign<'a>(input: &'a [u8], parser: &mut Parser) -> IResult<'a, VarAssign
     do_parse!(input,
         name: var_name >>
         clean_tag!("=") >>
-        expr: opt!(word) >>
+        expr: opt!(call!(word, parser)) >>
         cond!(expr.is_none(), ignore) >>
         (VarAssign { varname: name, value: expr })
     )
 }
 
-named!(parameter<&[u8], ParamExpr, ParserError>,
-    do_parse!(
+fn parameter<'a>(input: &'a [u8], parser: &mut Parser) -> IResult<'a, ParamExpr> {
+    do_parse!(input,
         clean_tag!("$") >>
         res: alt!(
-            delimited!(
+            preceded!(
                 clean_tag!("{"),
-                param_expr,
-                clean_tag!("}")
+                return_error!(ErrorKind::Custom(ParserError::ParamExpand), terminated!(call!(param_expr, parser), clean_tag!("}")))
             ) |
             map!(param_name, |name| ParamExpr::new(name, ParamExprKind::Value))
         ) >>
         (res)
     )
-);
+}
 
-named!(param_expr<&[u8], ParamExpr, ParserError>,
-    alt!(
+fn param_expr<'a>(input: &'a [u8], parser: &mut Parser) -> IResult<'a, ParamExpr> {
+    alt!(input,
         do_parse!(
             clean_tag!("#") >>
             name: map!(opt!(param_name), |name| {
@@ -291,18 +298,18 @@ named!(param_expr<&[u8], ParamExpr, ParserError>,
         ) |
         do_parse!(
             name: param_name >>
-            res: call!(param_subst, name) >>
+            res: call!(param_subst, parser, name) >>
             (res)
         ) |
         map!(param_name, |name| ParamExpr::new(name, ParamExprKind::Value))
     )
-);
+}
 
-fn param_subst(input: &[u8], name: Param) -> IResult<ParamExpr> {
+fn param_subst<'a>(input: &'a [u8], parser: &mut Parser, name: Param) -> IResult<'a, ParamExpr> {
     map!(input, alt!(
         preceded!(
             clean_tag!(":"),
-            map!(param_subst_value, |kind| {
+            map!(call!(param_subst_value, parser), |kind| {
                 match kind {
                     ParamExprKind::AssignNull(value) => ParamExprKind::Assign(value),
                     ParamExprKind::UseNull(value) => ParamExprKind::Use(value),
@@ -314,7 +321,7 @@ fn param_subst(input: &[u8], name: Param) -> IResult<ParamExpr> {
         ) |
         preceded!(
             clean_tag!("%"),
-            map!(param_subst_suffix, |kind| {
+            map!(call!(param_subst_suffix, parser), |kind| {
                 if let ParamExprKind::SmallSuffix(value) = kind {
                     ParamExprKind::LargeSuffix(value)
                 } else {
@@ -324,7 +331,7 @@ fn param_subst(input: &[u8], name: Param) -> IResult<ParamExpr> {
         ) |
         preceded!(
             clean_tag!("#"),
-            map!(param_subst_prefix, |kind| {
+            map!(call!(param_subst_prefix, parser), |kind| {
                 if let ParamExprKind::SmallPrefix(value) = kind {
                     ParamExprKind::LargePrefix(value)
                 } else {
@@ -332,9 +339,9 @@ fn param_subst(input: &[u8], name: Param) -> IResult<ParamExpr> {
                 }
             })
         ) |
-        param_subst_value |
-        param_subst_suffix |
-        param_subst_prefix
+        call!(param_subst_value, parser) |
+        call!(param_subst_suffix, parser) |
+        call!(param_subst_prefix, parser)
     ), |kind| {
         ParamExpr::new(name, kind)
     })
@@ -342,40 +349,40 @@ fn param_subst(input: &[u8], name: Param) -> IResult<ParamExpr> {
 
 // FIXME: word may be incorrect as dash accepts ${var:=hello there} (i.e. two words)
 //        maybe just take text until the brace and interpret after reading?
-named!(param_subst_value<&[u8], ParamExprKind, ParserError>,
-    alt!(
+fn param_subst_value<'a>(input: &'a [u8], parser: &mut Parser) -> IResult<'a, ParamExprKind> {
+    alt!(input,
         preceded!(
             clean_tag!("-"),
-            map!(word, |val| ParamExprKind::UseNull(val))
+            map!(call!(param_value, parser), |val| ParamExprKind::UseNull(val))
         ) |
         preceded!(
             clean_tag!("="),
-            map!(word, |val| ParamExprKind::AssignNull(val))
+            map!(call!(param_value, parser), |val| ParamExprKind::AssignNull(val))
         ) |
         preceded!(
             clean_tag!("?"),
-            map!(opt!(word), |val| ParamExprKind::ErrorNull(val))
+            map!(opt!(call!(param_value, parser)), |val| ParamExprKind::ErrorNull(val))
         ) |
         preceded!(
             clean_tag!("+"),
-            map!(word, |val| ParamExprKind::Alternate(val))
+            map!(call!(param_value, parser), |val| ParamExprKind::Alternate(val))
         )
     )
-);
+}
 
-named!(param_subst_prefix<&[u8], ParamExprKind, ParserError>,
-    preceded!(
+fn param_subst_prefix<'a>(input: &'a [u8], parser: &mut Parser) -> IResult<'a, ParamExprKind> {
+    preceded!(input,
         clean_tag!("#"),
-        map!(word, |val| ParamExprKind::SmallPrefix(val))
+        map!(call!(param_value, parser), |val| ParamExprKind::SmallPrefix(val))
     )
-);
+}
 
-named!(param_subst_suffix<&[u8], ParamExprKind, ParserError>,
-    preceded!(
+fn param_subst_suffix<'a>(input: &'a [u8], parser: &mut Parser) -> IResult<'a, ParamExprKind> {
+    preceded!(input,
         clean_tag!("%"),
-        map!(word, |val| ParamExprKind::SmallSuffix(val))
+        map!(call!(param_value, parser), |val| ParamExprKind::SmallSuffix(val))
     )
-);
+}
 
 // FIXME: the names for *, ?, and @ suck
 named!(param_name<&[u8], Param, ParserError>,
@@ -390,6 +397,10 @@ named!(param_name<&[u8], Param, ParserError>,
         number => { |number| Param::Positional(number) }
     )
 );
+
+fn param_value<'a>(input: &'a [u8], parser: &mut Parser) -> IResult<'a, Box<Word>> {
+    map!(input, call!(word, parser), |val| Box::new(val))
+}
 
 named!(number<&[u8], usize, ParserError>,
     map_opt!(
@@ -436,7 +447,7 @@ fn compound_command<'a>(input: &'a [u8], parser: &mut Parser) -> IResult<'a, Com
     alt!(input,
         preceded!(
             tag_keyword!("{"),
-            return_error!(ErrorKind::Custom(ParserError::BraceGroup), call!(brace_group_inner, parser))
+            return_error!(ErrorKind::Custom(ParserError::BraceGroup), call!(brace_group, parser))
         ) |
         preceded!(
             tag_token!("("),
@@ -513,7 +524,7 @@ fn for_clause<'a>(input: &'a [u8], parser: &mut Parser) -> IResult<'a, ForClause
         words: opt!(
             do_parse!(
                 tag_keyword!("in") >>
-                words: many0!(word) >>
+                words: many0!(call!(word, parser)) >>
                 call!(sequential_sep, parser) >>
                 (words)
             )
@@ -542,7 +553,7 @@ named!(name<&[u8], Name, ParserError>,
 
 fn case_clause<'a>(input: &'a [u8], parser: &mut Parser) -> IResult<'a, CaseClause> {
     do_parse!(input,
-        word: word >>
+        word: call!(word, parser) >>
         call!(linebreak, parser) >>
         tag_keyword!("in") >>
         ignore >>
@@ -581,7 +592,7 @@ fn pattern<'a>(input: &'a [u8], parser: &mut Parser) -> IResult<'a, Pattern> {
     do_parse!(input,
         not!(tag_keyword!("esac")) >>
         res: map!(
-            separated_nonempty_list_complete!(tag_token!("|"), word),
+            separated_nonempty_list_complete!(tag_token!("|"), call!(word, parser)),
             |values| Pattern::new(values)
         ) >>
         (res)
@@ -649,13 +660,6 @@ named!(fname<&[u8], Name, ParserError>,
 );
 
 fn brace_group<'a>(input: &'a [u8], parser: &mut Parser) -> IResult<'a, Command> {
-    preceded!(input,
-        tag_keyword!("{"),
-        call!(brace_group_inner, parser)
-    )
-}
-
-fn brace_group_inner<'a>(input: &'a [u8], parser: &mut Parser) -> IResult<'a, Command> {
     terminated!(input,
         call!(compound_list, parser),
         tag_keyword!("}")
@@ -690,11 +694,11 @@ fn simple_command<'a>(input: &'a [u8], parser: &mut Parser) -> IResult<'a, Simpl
 
 fn cmd_name<'a>(input: &'a [u8], parser: &mut Parser) -> IResult<'a, CommandName> {
     // TODO: apply rule 7a
-    map_opt!(input, word, |word: Word| {
+    map_opt!(input, call!(word, parser), |word: Word| {
         // TODO: this prob needs to check all keywords (ensure that e.g. in and then are actually not allowed)
         // FIXME: not sure if this should behave differently if the command is surrounded with single quotes
         //        dash gives a syntax error without quotes and a command not found with quotes
-        if let Word::Text(ref text) = word {
+        if let Word::Simple(ref text) = word {
             match text.as_os_str().as_bytes() {
                 b"do" | b"done" | b"for" | b"if" | b"elif" | b"else" | b"fi" | b"while" | b"until" | b"case" | b"esac" | b"in" | b"then" => return None,
                 _ => {}
@@ -706,7 +710,7 @@ fn cmd_name<'a>(input: &'a [u8], parser: &mut Parser) -> IResult<'a, CommandName
 
 fn cmd_word<'a>(input: &'a [u8], parser: &mut Parser) -> IResult<'a, CommandName> {
     // TODO: apply rule 7b
-    word(input)
+    word(input, parser)
 }
 
 fn cmd_prefix<'a>(input: &'a [u8], parser: &mut Parser) -> IResult<'a, Vec<PreAction>> {
@@ -722,7 +726,7 @@ fn cmd_suffix<'a>(input: &'a [u8], parser: &mut Parser) -> IResult<'a, Vec<PostA
     many1!(input,
         alt!(
             call!(io_redirect, parser) => { |redir| Either::Left(redir) } |
-            word => { |word| Either::Right(word) }
+            call!(word, parser) => { |word| Either::Right(word) }
         )
     )
 }
@@ -735,7 +739,7 @@ fn io_redirect<'a>(input: &'a [u8], parser: &mut Parser) -> IResult<'a, IoRedire
     alt!(input,
         do_parse!(
             num: opt!(io_number) >>
-            file: io_file >>
+            file: call!(io_file, parser) >>
             (IoRedirect::File(num, file))
         ) |
         do_parse!(
@@ -813,9 +817,8 @@ fn command_subst_dollar<'a>(input: &'a [u8], parser: &mut Parser) -> IResult<'a,
         fix_error!(ParserError, tag!("$(")) >>
         fix_error!(ParserError, not!(tag!("("))) >>        // avoid ambiguity between subshell and arithmetic expression
         ignore >>
-        cmd: call!(command, parser) >>
-        tag_token!(")") >>
-        (CommandSubst::new(cmd))
+        cmd: return_error!(ErrorKind::Custom(ParserError::CommandSubst), terminated!(call!(command, parser), tag_token!(")"))) >>
+        (CommandSubst::new(Box::new(cmd)))
     )
 }
 
@@ -840,12 +843,12 @@ named_args!(arith_expr<'a>(parser: &mut Parser)<&'a [u8], ArithExpr>,
     )
 );
 */
-named!(single_quote<&[u8], WordPart, ParserError>,
+named!(single_quote<&[u8], Word, ParserError>,
     delimited!(
         clean_tag!("'"),
         map!(
             fix_error!(ParserError, take_until!("'")),
-            |res| WordPart::Text(OsString::from_vec(res.to_owned()))
+            |res| Word::SingleQuote(OsString::from_vec(res.to_owned()))
         ),
         clean_tag!("'")
     )
@@ -865,6 +868,49 @@ named!(single_quote<&[u8], WordPart, ParserError>,
         tag!("\"")
     )
 );*/
+
+fn double_quote<'a>(input: &'a [u8], parser: &mut Parser) -> IResult<'a, DoubleQuote> {
+    do_parse!(input,
+        clean_tag!("\"") >>
+        res: return_error!(
+            ErrorKind::Custom(ParserError::DoubleQuote),
+            terminated!(
+                many0!(
+                    alt!(
+                        map!(call!(parameter, parser), |res| Word::Parameter(res)) |
+                        // XXX: i think there will be special rules for the backtick version when
+                        //      in quotes
+                        map!(call!(command_subst, parser), |res| Word::CommandSubst(res)) |
+                        text_or_escape_seq => { |text| Word::SingleQuote(text) }
+                        // TODO: arith expr
+                    )
+                ),
+                clean_tag!("\"")
+            )
+        ) >>
+        (DoubleQuote::new(res))
+    )
+}
+
+named!(text_or_escape_seq<&[u8], OsString, ParserError>,
+    fold_many1!(
+        fix_error!(ParserError, alt!(
+            preceded!(
+                tag!(r"\"),
+                alt!(
+                    recognize!(one_of!("$`\"\\")) |
+                    map!(newline, |_| &b""[..])
+                )
+            ) |
+            is_not!("\"$`\\")
+        )),
+        OsString::new(),
+        |mut acc: OsString, text| {
+            acc.push(OsStr::from_bytes(text));
+            acc
+        }
+    )
+);
 
 fn linebreak<'a>(input: &'a [u8], parser: &mut Parser) -> IResult<'a, Option<&'a [u8]>> {
     opt!(input, call!(newline_list, parser))
@@ -891,35 +937,30 @@ fn sequential_sep<'a>(input: &'a [u8], parser: &mut Parser) -> IResult<'a, &'a [
 
 // XXX: list of things that use word and accept patterns: wordlist (used by for), case_item/case_item_ns, cmd_name, cmd_word, cmd_suffix, cmd_prefix (the right side)
 //      things that do not accept patterns (afaict): case WORD in, name (used by e.g. for, fname), here_end, filename
-//      Pattern/Glob and Text should probably be separate parts of WordPart enum because of this (or we could just store in Text and then always run a glob for things that accept globs)
-//      we are going with the second option as it's easier to parse
-named!(word<&[u8], Word, ParserError>,
+fn word<'a>(input: &'a [u8], parser: &mut Parser) -> IResult<'a, Word> {
     // TODO: this might need to be able to parse quoted strings/words following different rules
-
-    // TODO: there should be many possible "val"s, so we need to collect them all and throw them into a word
-    //       note that if there is just one value and it is text it should be stored as such rather than a complex
-    //       word made of word parts (also, should check if all word parts are just text (e.g. single quote + word + single quote),
-    //       if so just combine them and store as text)
-    do_parse!(
+    do_parse!(input,
         val: fold_many1!(
             alt!(
                 single_quote |
-                map!(parameter, |param| WordPart::Param(param)) |
+                map!(call!(double_quote, parser), |quote| Word::DoubleQuote(quote)) |
+                map!(call!(parameter, parser), |param| Word::Parameter(param)) |
+                map!(call!(command_subst, parser), |subst| Word::CommandSubst(subst)) |
                 // XXX: there may be more that need to be checked for
                 // FIXME: need to handle escapes for e.g. $ and (
                 // FIXME: this should not ignore "}" (this is why i likely need to tokenize first)
-                map!(verify!(fix_error!(ParserError, is_not!(" \t\r\n'\"$();&}<>|")), |arr: &[u8]| arr.len() > 0), |res| WordPart::Text(OsString::from_vec(res.to_owned())))
+                map!(verify!(fix_error!(ParserError, is_not!(" \t\r\n'\"$();&}<>|")), |arr: &[u8]| arr.len() > 0), |res| Word::Simple(OsString::from_vec(res.to_owned())))
             ),
             vec![],
             |mut acc: Vec<_>, item| {
                 // this placates the borrow checker
                 loop {
-                    if let WordPart::Text(text) = item {
-                        if let Some(WordPart::Text(ref mut prev_text)) = acc.last_mut() {
+                    if let Word::Simple(text) = item {
+                        if let Some(Word::Simple(ref mut prev_text)) = acc.last_mut() {
                             prev_text.push(&text);
                             break;
                         }
-                        acc.push(WordPart::Text(text));
+                        acc.push(Word::Simple(text));
                     } else {
                         acc.push(item);
                     }
@@ -930,21 +971,17 @@ named!(word<&[u8], Word, ParserError>,
         ) >>
         ignore >>
         ({
-            if val.len() == 1 && val.first().unwrap().is_text() {
-                if let Some(WordPart::Text(text)) = val.into_iter().next() {
-                    Word::Text(text)
-                } else {
-                    unreachable!()
-                }
+            if val.len() == 1 {
+                val.into_iter().next().unwrap()
             } else {
                 Word::Complex(val)
             }
         })
     )
-);
+}
 
-named!(io_file<&[u8], IoRedirectFile, ParserError>,
-    do_parse!(
+fn io_file<'a>(input: &'a [u8], parser: &mut Parser) -> IResult<'a, IoRedirectFile> {
+    do_parse!(input,
         kind: alt!(
             tag_token!("<&") => { |_| IoRedirectKind::DupInput } |
             tag_token!("<>") => { |_| IoRedirectKind::ReadWrite } |
@@ -954,15 +991,15 @@ named!(io_file<&[u8], IoRedirectFile, ParserError>,
             tag_token!(">|") => { |_| IoRedirectKind::Clobber } |
             tag_token!(">") => { |_| IoRedirectKind::Output }
         ) >>
-        name: filename >>
+        name: call!(filename, parser) >>
         (IoRedirectFile::new(kind, name))
     )
-);
+}
 
-named!(filename<&[u8], Word, ParserError>,
+fn filename<'a>(input: &'a [u8], parser: &mut Parser) -> IResult<'a, Word> {
     // TODO: apply rule 2
-    call!(word)
-);
+    word(input, parser)
+}
 
 // NOTE: we only accept fds 0-9 as that is the minimum required (and seems to be the number
 //       supported several shells).  if this ever changes, FD_COUNT in option.rs must be changed as

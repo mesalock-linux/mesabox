@@ -78,13 +78,19 @@ pub type CommandName = Word;
 //    4. quote removal
 #[derive(Debug)]
 pub enum Word {
-    Text(OsString),
-    Complex(Vec<WordPart>),
+    Parameter(ParamExpr),
+    CommandSubst(CommandSubst),
+    SingleQuote(OsString),
+    DoubleQuote(DoubleQuote),
+    Simple(OsString),
+    Complex(Vec<Word>),
 }
 
 impl Word {
     // XXX: this should likely be something like "eval_simple" and the eval_glob_fs method should
     //      be the standard version
+    // FIXME: like stated above, we need to retain the quote until the very end (maybe instead of
+    //        returning OsString, return some enum { SingleQuote, DoubleQuote, Text }?)
     pub fn eval<S>(&self, setup: &mut S, env: &mut Environment) -> OsString
     where
         S: UtilSetup,
@@ -92,7 +98,11 @@ impl Word {
         use self::Word::*;
 
         match self {
-            Text(ref s) => s.clone(),
+            Parameter(ref param) => param.eval(setup, env),
+            CommandSubst(ref subst) => subst.eval(setup, env),
+            SingleQuote(ref quote) => quote.clone(),
+            DoubleQuote(ref quote) => quote.eval(setup, env),
+            Simple(ref s) => s.clone(),
             Complex(ref parts) => {
                 parts.iter().fold(OsString::new(), |mut acc, item| {
                     acc.push(&item.eval(setup, env));
@@ -150,13 +160,13 @@ impl Word {
         };
 
         match self {
-            Text(ref s) => expand(s, env),
+            Simple(ref s) => expand(s, env),
             Complex(ref parts) => {
                 let mut iter = parts.iter();
 
                 if let Some(part) = iter.next() {
                     let start_val = match part {
-                        WordPart::Text(ref s) => expand(s, env),
+                        Word::Simple(ref s) => expand(s, env),
                         part => part.eval(setup, env),
                     };
                     iter.fold(start_val, |mut acc, item| {
@@ -167,6 +177,7 @@ impl Word {
                     OsString::new()
                 }
             }
+            other => other.eval(setup, env),
         }
     }
 
@@ -227,35 +238,6 @@ impl Word {
                 // in this case, we just assume that the "glob" is actual meant to be a literal
                 WordEval::Text(text)
             }
-        }
-    }
-}
-
-#[derive(Debug)]
-pub enum WordPart {
-    Text(OsString),
-    Param(ParamExpr),
-    CommandSubst,       // TODO
-}
-
-impl WordPart {
-    pub fn eval<S>(&self, setup: &mut S, env: &mut Environment) -> OsString
-    where
-        S: UtilSetup,
-    {
-        use self::WordPart::*;
-
-        match self {
-            Text(ref s) => s.clone(),
-            Param(ref param) => param.eval(setup, env),
-            _ => unimplemented!()
-        }
-    }
-
-    pub fn is_text(&self) -> bool {
-        match self {
-            WordPart::Text(_) => true,
-            _ => false
         }
     }
 }
@@ -1038,11 +1020,11 @@ impl Default for HereDoc {
 // TODO: figure out how to get this to work (pass the child up the call chain?)
 #[derive(Debug)]
 pub struct CommandSubst {
-    command: Command,
+    command: Box<Command>,
 }
 
 impl CommandSubst {
-    pub fn new(cmd: Command) -> Self {
+    pub fn new(cmd: Box<Command>) -> Self {
         Self {
             command: cmd,
         }
@@ -1052,16 +1034,27 @@ impl CommandSubst {
     where
         S: UtilSetup,
     {
+        // TODO: needs to enter a subshell, so i guess enter_scope()?  if so, variables need
+        //       Locality as well.  maybe clone environment?
+        // TODO: this needs to use the same spawning mechanism used by piping, so a correct
+        //       implementation depends on correct piping
+        let _ = self.command.execute(setup, env);       // just do this for now to make sure stuff works
         unimplemented!()
     }
 }
 
 #[derive(Debug)]
 pub struct DoubleQuote {
-    items: Vec<Quotable>
+    items: Vec<Word>,
 }
 
 impl DoubleQuote {
+    pub fn new(items: Vec<Word>) -> Self {
+        Self {
+            items: items,
+        }
+    }
+
     pub fn eval<S>(&self, setup: &mut S, env: &mut Environment) -> OsString
     where
         S: UtilSetup,
@@ -1070,29 +1063,6 @@ impl DoubleQuote {
             acc.push(&item.eval(setup, env));
             acc
         })
-    }
-}
-
-#[derive(Debug)]
-pub enum Quotable {
-    CommandSubst(CommandSubst),
-    ArithExpr,      // TODO: actually add support for this
-    ParamExpand,    // TODO: add support
-    Text(OsString),
-}
-
-impl Quotable {
-    pub fn eval<S>(&self, setup: &mut S, env: &mut Environment) -> OsString
-    where
-        S: UtilSetup,
-    {
-        use self::Quotable::*;
-
-        match self {
-            CommandSubst(ref sub) => sub.eval(setup, env),
-            Text(ref s) => s.clone(),
-            _ => unimplemented!()
-        }
     }
 }
 
@@ -1166,28 +1136,30 @@ impl Param {
 #[derive(Debug)]
 pub struct ParamExpr {
     param: Param,
+    // box everything within ParamExprKind rather than boxing ParamExprKind itself to avoid an
+    // allocation in the case of Error/ErrorNull with no argument or Value/Length
     kind: ParamExprKind,
 }
 
 #[derive(Debug)]
 pub enum ParamExprKind {
-    Assign(Word),
-    AssignNull(Word),
+    Assign(Box<Word>),
+    AssignNull(Box<Word>),
 
-    Use(Word),
-    UseNull(Word),
+    Use(Box<Word>),
+    UseNull(Box<Word>),
 
-    Error(Option<Word>),
-    ErrorNull(Option<Word>),
+    Error(Option<Box<Word>>),
+    ErrorNull(Option<Box<Word>>),
 
-    Alternate(Word),
-    AlternateNull(Word),
+    Alternate(Box<Word>),
+    AlternateNull(Box<Word>),
 
-    SmallPrefix(Word),
-    LargePrefix(Word),
+    SmallPrefix(Box<Word>),
+    LargePrefix(Box<Word>),
 
-    SmallSuffix(Word),
-    LargeSuffix(Word),
+    SmallSuffix(Box<Word>),
+    LargeSuffix(Box<Word>),
 
     Value,
     Length,
