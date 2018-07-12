@@ -90,6 +90,14 @@ macro_rules! util_name {
 }
 
 #[macro_export]
+macro_rules! new_cli {
+    () => {
+        assert_cli::Assert::main_binary()
+            .with_args(&[util_name!()])
+    };
+}
+
+#[macro_export]
 macro_rules! new_ucmd {
     () => {
         TestScenario::new(util_name!()).ucmd()

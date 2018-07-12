@@ -11,8 +11,7 @@ use assert_cli;
 #[test]
 #[cfg(target_arch = "x86_64")]
 fn test_x86_64() {
-    assert_cli::Assert::main_binary()
-        .with_args(&["arch"])
+    new_cli!()
         .succeeds()
         .and()
         .stdout().is("x86_64\n")
@@ -22,8 +21,7 @@ fn test_x86_64() {
 #[test]
 #[cfg(target_arch = "arm")]
 fn test_arm() {
-    assert_cli::Assert::main_binary()
-        .with_args(&["arch"])
+    new_cli!()
         .succeeds()
         .and()
         .stdout().is("arm\n")
@@ -33,8 +31,7 @@ fn test_arm() {
 #[test]
 #[cfg(target_arch = "aarch64")]
 fn test_aarch64() {
-    assert_cli::Assert::main_binary()
-        .with_args(&["arch"])
+    new_cli!()
         .succeeds()
         .and()
         .stdout().is("aarch64\n")

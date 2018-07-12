@@ -37,8 +37,7 @@ use assert_cli;
 #[test]
 fn test_encode() {
     let input = "Hello, World!";
-    assert_cli::Assert::main_binary()
-        .with_args(&["base32"])
+    new_cli!()
         .stdin(input)
         .succeeds()
         .and()
@@ -51,8 +50,8 @@ fn test_encode() {
 fn test_decode() {
     for decode_param in vec!["-d", "--decode"] {
         let input = "JBSWY3DPFQQFO33SNRSCC===\n";
-        assert_cli::Assert::main_binary()
-            .with_args(&["base32", decode_param])
+        new_cli!()
+            .with_args(&[decode_param])
             .stdin(input)
             .succeeds()
             .and()
@@ -65,8 +64,8 @@ fn test_decode() {
 #[test]
 fn test_garbage() {
     let input = "aGVsbG8sIHdvcmxkIQ==\0";
-    assert_cli::Assert::main_binary()
-        .with_args(&["base32", "-d"])
+    new_cli!()
+        .with_args(&["-d"])
         .stdin(input)
         .fails()
         .and()
@@ -79,8 +78,8 @@ fn test_garbage() {
 fn test_ignore_garbage() {
     for ignore_garbage_param in vec!["-i", "--ignore-garbage"] {
         let input = "JBSWY\x013DPFQ\x02QFO33SNRSCC===\n";
-        assert_cli::Assert::main_binary()
-            .with_args(&["base32", "-d", ignore_garbage_param])
+        new_cli!()
+            .with_args(&["-d", ignore_garbage_param])
             .stdin(input)
             .succeeds()
             .and()
@@ -94,8 +93,8 @@ fn test_ignore_garbage() {
 fn test_wrap() {
     for wrap_param in vec!["-w", "--wrap"] {
         let input = "The quick brown fox jumps over the lazy dog.";
-        assert_cli::Assert::main_binary()
-            .with_args(&["base32", wrap_param, "20"])
+        new_cli!()
+            .with_args(&[wrap_param, "20"])
             .stdin(input)
             .succeeds()
             .and()
@@ -108,8 +107,8 @@ fn test_wrap() {
 #[test]
 fn test_wrap_no_arg() {
     for wrap_param in vec!["-w", "--wrap"] {
-        assert_cli::Assert::main_binary()
-            .with_args(&["base32", wrap_param])
+        new_cli!()
+            .with_args(&[wrap_param])
             .fails()
             .and()
             .stdout().is("")
@@ -121,8 +120,8 @@ fn test_wrap_no_arg() {
 #[test]
 fn test_wrap_bad_arg() {
     for wrap_param in vec!["-w", "--wrap"] {
-        assert_cli::Assert::main_binary()
-            .with_args(&["base32", wrap_param, "b"])
+        new_cli!()
+            .with_args(&[wrap_param, "b"])
             .fails()
             .and()
             .stdout().is("")
