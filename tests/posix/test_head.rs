@@ -34,6 +34,7 @@
 use util::*;
 
 const INPUT: &str = "lorem_ipsum.txt";
+const INPUT2: &str = "lorem_ipsum_reverse.txt";
 
 #[test]
 fn test_stdin_default() {
@@ -92,6 +93,27 @@ fn test_single_5_chars() {
     new_ucmd!()
         .args(&["-c", "5", INPUT])
         .run().stdout_is_fixture("lorem_ipsum_5_chars.expected");
+}
+
+#[test]
+fn test_minus_1_line() {
+    new_ucmd!()
+        .args(&["-n", "-1", INPUT])
+        .run().stdout_is_fixture("lorem_ipsum_minus_1_line.expected");
+}
+
+#[test]
+fn test_minus_5_chars() {
+    new_ucmd!()
+        .args(&["-c", "-5", INPUT])
+        .run().stdout_is_fixture("lorem_ipsum_minus_5_chars.expected");
+}
+
+#[test]
+fn test_multiple_input_files() {
+    new_ucmd!()
+        .args(&[INPUT, INPUT2])
+        .run().stdout_is_fixture("lorem_ipsum_multiple_input_files.expected");
 }
 
 #[test]
