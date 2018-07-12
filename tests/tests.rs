@@ -11,6 +11,8 @@ extern crate mesabox;
 extern crate lazy_static;
 extern crate libc;
 extern crate tempfile;
+#[macro_use]
+extern crate assert_cli;
 
 mod util;
 #[macro_use]

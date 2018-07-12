@@ -6,28 +6,37 @@
 // For a copy, see the LICENSE file.
 //
 
-use util::*;
+use assert_cli;
 
 #[test]
 #[cfg(target_arch = "x86_64")]
 fn test_x86_64() {
-    new_ucmd!()
+    assert_cli::Assert::main_binary()
+        .with_args(&["arch"])
         .succeeds()
-        .stdout_only("x86_64\n");
+        .and()
+        .stdout().is("x86_64\n")
+        .unwrap();
 }
 
 #[test]
 #[cfg(target_arch = "arm")]
 fn test_arm() {
-    new_ucmd!()
+    assert_cli::Assert::main_binary()
+        .with_args(&["arch"])
         .succeeds()
-        .stdout_only("arm\n");
+        .and()
+        .stdout().is("arm\n")
+        .unwrap();
 }
 
 #[test]
 #[cfg(target_arch = "aarch64")]
 fn test_aarch64() {
-    new_ucmd!()
+    assert_cli::Assert::main_binary()
+        .with_args(&["arch"])
         .succeeds()
-        .stdout_only("aarch64\n");
+        .and()
+        .stdout().is("aarch64\n")
+        .unwrap();
 }
