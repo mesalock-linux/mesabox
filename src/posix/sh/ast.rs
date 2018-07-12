@@ -2,18 +2,22 @@ use either::Either;
 use libc;
 use glob::{self, MatchOptions};
 use glob::Pattern as GlobPattern;
+use nix::unistd;
 
 use std::borrow::Cow;
 use std::cell::RefCell;
 use std::ffi::{OsString, OsStr};
+use std::fmt;
 use std::fs::{File, OpenOptions};
-use std::io::Write;
+use std::io::{Read, Write};
 use std::iter::FromIterator;
-use std::os::unix::ffi::OsStrExt;
+use std::os::unix::ffi::{OsStringExt, OsStrExt};
 use std::os::unix::io::RawFd;
 use std::process;
 use std::rc::Rc;
+use std::result::Result as StdResult;
 
+use util::RawFdWrapper;
 use super::{NAME, UtilSetup};
 use super::command::{CommandEnv, CommandWrapper, ExecData, ExecEnv, InProcessCommand};
 use super::env::{EnvFd, Environment};
@@ -1034,12 +1038,61 @@ impl CommandSubst {
     where
         S: UtilSetup,
     {
-        // TODO: needs to enter a subshell, so i guess enter_scope()?  if so, variables need
-        //       Locality as well.  maybe clone environment?
-        // TODO: this needs to use the same spawning mechanism used by piping, so a correct
-        //       implementation depends on correct piping
-        let _ = self.command.execute(setup, env);       // just do this for now to make sure stuff works
-        unimplemented!()
+        // set stdout for the command to an anonymous pipe so we can retrieve the output and return
+        // it later (NOTE: we might want to just do this in general if an output EnvFd is
+        // EnvFd::Piped, in which case we would just set this EnvFd to EnvFd::Piped instead of
+        // manually creating a pipe here)
+        let (read, write) = match self.write_error(setup, env, unistd::pipe()) {
+            Ok(m) => m,
+            Err(f) => return f,
+        };
+
+        // TODO: enter_scope() needs to protect variables somehow, so I guess they need Locality as
+        //       well?  Maybe clone env?
+        env.enter_scope();
+
+        env.set_local_fd(1, EnvFd::Fd(RawFdWrapper::new(write, false, true)));
+        let code = self.command.execute(setup, env);
+
+        env.exit_scope();
+        env.special_vars().set_last_exitcode(code);
+
+        // XXX: not sure if we want to just ignore
+        unistd::close(write);
+
+        // read the output from the pipe into a vector
+        let mut output = vec![];
+        let res = self.write_error(setup, env, RawFdWrapper::new(read, true, false).read_to_end(&mut output));
+
+        // XXX: not sure if we want to just ignore these so let them create warnings for now
+        unistd::close(read);
+
+        if let Err(f) = res {
+            return f;
+        }
+
+        let size = {
+            let mut iter = output.rsplitn(2, |&byte| byte != b'\n');
+            let last = iter.next().unwrap();
+            if iter.next().is_some() {
+                output.len() - last.len()
+            } else {
+                output.len()
+            }
+        };
+        output.truncate(size);
+        OsString::from_vec(output)
+    }
+
+    fn write_error<S, T, U>(&self, setup: &mut S, env: &mut Environment, res: StdResult<T, U>) -> StdResult<T, OsString>
+    where
+        S: UtilSetup,
+        U: fmt::Display,
+    {
+        write_error(setup, res).map_err(|code| {
+            env.special_vars().set_last_exitcode(code);
+            OsString::new()
+        })
     }
 }
 
@@ -1258,4 +1311,21 @@ where
         code = exec_andor_chain(setup, env, chain);
     }
     code
+}
+
+fn write_error<S, T, U>(setup: &mut S, result: StdResult<T, U>) -> StdResult<T, ExitCode>
+where
+    S: UtilSetup,
+    U: fmt::Display,
+{
+    match result {
+        Ok(m) => Ok(m),
+        Err(f) => {
+            // FIXME: needs to print out line number
+            // XXX: should we ignore any I/O errors?
+            let _ = display_msg!(setup.error(), "{}", f);
+            // FIXME: this could be different depending on the type of error
+            Err(127)
+        }
+    }
 }
