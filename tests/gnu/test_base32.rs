@@ -1,7 +1,7 @@
 //
 // Copyright (c) 2018, The MesaLock Linux Project Contributors
 // All rights reserved.
-// 
+//
 // This work is licensed under the terms of the BSD 3-Clause License.
 // For a copy, see the LICENSE file.
 //
@@ -32,50 +32,61 @@
 //     SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 //
 
-use util::*;
+use assert_cli;
 
 #[test]
 fn test_encode() {
     let input = "Hello, World!";
-    new_ucmd!()
-        .pipe_in(input)
+    assert_cli::Assert::main_binary()
+        .with_args(&["base32"])
+        .stdin(input)
         .succeeds()
-        .stdout_only("JBSWY3DPFQQFO33SNRSCC===\n");
+        .and()
+        .stdout().is("JBSWY3DPFQQFO33SNRSCC===\n")
+        .stderr().is("")
+        .unwrap();
 }
 
 #[test]
 fn test_decode() {
     for decode_param in vec!["-d", "--decode"] {
         let input = "JBSWY3DPFQQFO33SNRSCC===\n";
-        new_ucmd!()
-            .arg(decode_param)
-            .pipe_in(input)
+        assert_cli::Assert::main_binary()
+            .with_args(&["base32", decode_param])
+            .stdin(input)
             .succeeds()
-            .stdout_only("Hello, World!");
+            .and()
+            .stdout().is("Hello, World!")
+            .stderr().is("")
+            .unwrap();
     }
 }
 
 #[test]
 fn test_garbage() {
     let input = "aGVsbG8sIHdvcmxkIQ==\0";
-    new_ucmd!()
-        .arg("-d")
-        .pipe_in(input)
+    assert_cli::Assert::main_binary()
+        .with_args(&["base32", "-d"])
+        .stdin(input)
         .fails()
-        .no_stdout()
-        .stderr_contains("invalid length at 16");
+        .and()
+        .stdout().is("")
+        .stderr().contains("invalid length at 16")
+        .unwrap();
 }
 
 #[test]
 fn test_ignore_garbage() {
     for ignore_garbage_param in vec!["-i", "--ignore-garbage"] {
         let input = "JBSWY\x013DPFQ\x02QFO33SNRSCC===\n";
-        new_ucmd!()
-            .arg("-d")
-            .arg(ignore_garbage_param)
-            .pipe_in(input)
+        assert_cli::Assert::main_binary()
+            .with_args(&["base32", "-d", ignore_garbage_param])
+            .stdin(input)
             .succeeds()
-            .stdout_only("Hello, World!");
+            .and()
+            .stdout().is("Hello, World!")
+            .stderr().is("")
+            .unwrap();
     }
 }
 
@@ -83,33 +94,39 @@ fn test_ignore_garbage() {
 fn test_wrap() {
     for wrap_param in vec!["-w", "--wrap"] {
         let input = "The quick brown fox jumps over the lazy dog.";
-        new_ucmd!()
-            .arg(wrap_param)
-            .arg("20")
-            .pipe_in(input)
+        assert_cli::Assert::main_binary()
+            .with_args(&["base32", wrap_param, "20"])
+            .stdin(input)
             .succeeds()
-            .stdout_only("KRUGKIDROVUWG2ZAMJZG\n653OEBTG66BANJ2W24DT\nEBXXMZLSEB2GQZJANRQX\nU6JAMRXWOLQ=\n");
+            .and()
+            .stdout().is("KRUGKIDROVUWG2ZAMJZG\n653OEBTG66BANJ2W24DT\nEBXXMZLSEB2GQZJANRQX\nU6JAMRXWOLQ=\n")
+            .stderr().is("")
+            .unwrap();
     }
 }
 
 #[test]
 fn test_wrap_no_arg() {
     for wrap_param in vec!["-w", "--wrap"] {
-        new_ucmd!()
-            .arg(wrap_param)
+        assert_cli::Assert::main_binary()
+            .with_args(&["base32", wrap_param])
             .fails()
-            .no_stdout()
-            .stderr_contains("requires a value but none was supplied\n");
+            .and()
+            .stdout().is("")
+            .stderr().contains("requires a value but none was supplied\n")
+            .unwrap();
     }
 }
 
 #[test]
 fn test_wrap_bad_arg() {
     for wrap_param in vec!["-w", "--wrap"] {
-        new_ucmd!()
-            .arg(wrap_param).arg("b")
+        assert_cli::Assert::main_binary()
+            .with_args(&["base32", wrap_param, "b"])
             .fails()
-            .no_stdout()
-            .stderr_contains("'b' is not a number\n");
+            .and()
+            .stdout().is("")
+            .stderr().contains("'b' is not a number\n")
+            .unwrap();
     }
 }
