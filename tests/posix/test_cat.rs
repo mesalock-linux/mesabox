@@ -31,17 +31,18 @@
 //     SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 //
 
-use assert_cli;
+use assert_cmd::prelude::*;
+use predicates::prelude::*;
+use std::process::Command;
 
 #[test]
 fn test_output_multi_files_print_all_chars() {
-    new_cli!()
+    new_cmd!()
         .current_dir(fixtures_path!())
-        .with_args(&["alpha.txt", "256.txt", "-A", "-n"])
-        .succeeds()
-        .and()
-        .stderr().is("")
-        .stdout().is("     1\tabcde$\n     2\tfghij$\n     3\tklmno$\n     4\tpqrst$\n     \
+        .args(&["alpha.txt", "256.txt", "-A", "-n"])
+        .assert()
+        .success()
+        .stdout("     1\tabcde$\n     2\tfghij$\n     3\tklmno$\n     4\tpqrst$\n     \
                 5\tuvwxyz$\n     6\t^@^A^B^C^D^E^F^G^H^I$\n     \
                 7\t^K^L^M^N^O^P^Q^R^S^T^U^V^W^X^Y^Z^[^\\^]^^^_ \
                 !\"#$%&\'()*+,-./0123456789:;\
@@ -52,151 +53,145 @@ fn test_output_multi_files_print_all_chars() {
                 M-;M-<M-=M->M-?M-@M-AM-BM-CM-DM-EM-FM-GM-HM-IM-JM-KM-LM-MM-NM-OM-PM-QM-RM-SM-TM-U\
                 M-VM-WM-XM-YM-ZM-[M-\\M-]M-^M-_M-`M-aM-bM-cM-dM-eM-fM-gM-hM-iM-jM-kM-lM-mM-nM-oM-\
                 pM-qM-rM-sM-tM-uM-vM-wM-xM-yM-zM-{M-|M-}M-~M-^?")
-        .unwrap();
+        .stderr("");
 }
 
 #[test]
 fn test_numbered_lines_no_trailing_newline() {
-    new_cli!()
+    new_cmd!()
         .current_dir(fixtures_path!())
-        .with_args(&["nonewline.txt", "alpha.txt", "-n"])
-        .succeeds()
-        .and()
-        .stderr().is("")
-        .stdout().is("     1\ttext without a trailing newlineabcde\n     2\tfghij\n     \
+        .args(&["nonewline.txt", "alpha.txt", "-n"])
+        .assert()
+        .success()
+        .stdout("     1\ttext without a trailing newlineabcde\n     2\tfghij\n     \
                 3\tklmno\n     4\tpqrst\n     5\tuvwxyz\n")
-        .unwrap();
+        .stderr("");
 }
 
 #[test]
-fn test_stdin_show_nonprinting() {
+fn test_with_stdin_show_nonprinting() {
     for same_param in vec!["-v", "--show-nonprinting"] {
-        new_cli!()
-            .with_args(&[same_param])
-            .stdin("\t\0\n")
-            .succeeds()
-            .and()
-            .stderr().is("")
-            .stdout().is("\t^@\n")
-            .unwrap();
+        new_cmd!()
+            .args(&[same_param])
+            .with_stdin("\t\0\n")
+            .assert()
+            .success()
+            .stdout("\t^@\n")
+            .stderr("");
     }
 }
 
 #[test]
-fn test_stdin_show_tabs() {
+fn test_with_stdin_show_tabs() {
     for same_param in vec!["-T", "--show-tabs"] {
-        new_cli!()
-            .with_args(&[same_param])
-            .stdin("\t\0\n")
-            .succeeds()
-            .and()
-            .stderr().is("")
-            .stdout().is("^I\0\n")
-            .unwrap();
+        new_cmd!()
+            .args(&[same_param])
+            .with_stdin("\t\0\n")
+            .assert()
+            .success()
+            .stdout("^I\0\n")
+            .stderr("");
     }
 }
 
 
 #[test]
-fn test_stdin_show_ends() {
+fn test_with_stdin_show_ends() {
     for same_param in vec!["-E", "--show-ends"] {
-        new_cli!()
-            .with_args(&[same_param,"-"])
-            .stdin("\t\0\n")
-            .succeeds()
-            .and()
-            .stderr().is("")
-            .stdout().is("\t\0$\n")
-            .unwrap();
+        new_cmd!()
+            .args(&[same_param,"-"])
+            .with_stdin("\t\0\n")
+            .assert()
+            .success()
+            .stdout("\t\0$\n")
+            .stderr("");
     }
 }
 
 #[test]
-fn test_stdin_show_all() {
+fn test_with_stdin_show_all() {
     for same_param in vec!["-A", "--show-all"] {
-        new_cli!()
-            .with_args(&[same_param])
-            .stdin("\t\0\n")
-            .succeeds()
-            .and()
-            .stderr().is("")
-            .stdout().is("^I^@$\n")
-            .unwrap();
+        new_cmd!()
+            .args(&[same_param])
+            .with_stdin("\t\0\n")
+            .assert()
+            .success()
+            .stdout("^I^@$\n")
+            .stderr("");
     }
 }
 
 #[test]
-fn test_stdin_nonprinting_and_endofline() {
-    new_cli!()
-        .with_args(&["-e"])
-        .stdin("\t\0\n")
-        .succeeds()
-        .and()
-        .stderr().is("")
-        .stdout().is("\t^@$\n")
-        .unwrap();
+fn test_with_stdin_nonprinting_and_endofline() {
+    new_cmd!()
+        .args(&["-e"])
+        .with_stdin("\t\0\n")
+        .assert()
+        .success()
+        .stdout("\t^@$\n")
+        .stderr("");
 }
 
 #[test]
-fn test_stdin_nonprinting_and_tabs() {
-    new_cli!()
-        .with_args(&["-t"])
-        .stdin("\t\0\n")
-        .succeeds()
-        .stderr().is("")
-        .stdout().is("^I^@\n")
-        .unwrap();
+fn test_with_stdin_nonprinting_and_tabs() {
+    new_cmd!()
+        .args(&["-t"])
+        .with_stdin("\t\0\n")
+        .assert()
+        .success()
+        .stdout("^I^@\n")
+        .stderr("");
 }
 
 #[test]
-fn test_stdin_squeeze_blank() {
+fn test_with_stdin_squeeze_blank() {
     for same_param in vec!["-s", "--squeeze-blank"] {
-        new_cli!()
-            .with_args(&[same_param])
-            .stdin("\n\na\n\n\n\n\nb\n\n\n")
-            .succeeds()
-            .stderr().is("")
-            .stdout().is("\na\n\nb\n\n")
-            .unwrap();
+        new_cmd!()
+            .args(&[same_param])
+            .with_stdin("\n\na\n\n\n\n\nb\n\n\n")
+            .assert()
+            .success()
+            .stdout("\na\n\nb\n\n")
+            .stderr("");
     }
 }
 
 #[test]
-fn test_stdin_number_non_blank() {
+fn test_with_stdin_number_non_blank() {
     for same_param in vec!["-b", "--number-nonblank"] {
-        new_cli!()
-            .with_args(&[same_param, "-"])
-            .stdin("\na\nb\n\n\nc")
-            .succeeds()
-            .stderr().is("")
-            .stdout().is("\n     1\ta\n     2\tb\n\n\n     3\tc")
-            .unwrap();
+        new_cmd!()
+            .args(&[same_param, "-"])
+            .with_stdin("\na\nb\n\n\nc")
+            .assert()
+            .success()
+            .stdout("\n     1\ta\n     2\tb\n\n\n     3\tc")
+            .stderr("");
     }
 }
 
 #[test]
 fn test_non_blank_overrides_number() {
     for same_param in vec!["-b", "--number-nonblank"] {
-        new_cli!()
-            .with_args(&[same_param, "-"])
-            .stdin("\na\nb\n\n\nc")
-            .succeeds()
-            .stderr().is("")
-            .stdout().is("\n     1\ta\n     2\tb\n\n\n     3\tc")
-            .unwrap();
+        new_cmd!()
+            .args(&[same_param, "-"])
+            .with_stdin("\na\nb\n\n\nc")
+            .assert()
+            .success()
+            .stdout("\n     1\ta\n     2\tb\n\n\n     3\tc")
+            .stderr("");
     }
 }
 
 #[test]
 fn test_squeeze_blank_before_numbering() {
     for same_param in vec!["-s", "--squeeze-blank"] {
-        new_cli!()
-            .with_args(&[same_param, "-n", "-"])
-            .stdin("a\n\n\nb")
-            .succeeds()
-            .stderr().is("")
-            .stdout().is("     1\ta\n     2\t\n     3\tb")
-            .unwrap();
+        new_cmd!()
+            .args(&[same_param, "-n", "-"])
+            .with_stdin("a\n\n\nb")
+            .assert()
+            .success()
+            .stdout("     1\ta\n     2\t\n     3\tb")
+            .stderr("");
     }
 }
 
@@ -218,12 +213,12 @@ fn test_domain_socket() {
         stream.write_all(b"a\tb").expect("failed to write test data");
     });
 
-    new_cli!()
-        .with_args(&[socket_path])
-        .succeeds()
-        .stderr().is("")
-        .stdout().is("a\tb")
-        .unwrap();
+    new_cmd!()
+        .args(&[socket_path])
+        .assert()
+        .success()
+        .stdout("a\tb")
+        .stderr("");
 
     thread.join().unwrap();
 }

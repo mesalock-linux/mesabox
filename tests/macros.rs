@@ -90,10 +90,9 @@ macro_rules! util_name {
 }
 
 #[macro_export]
-macro_rules! new_cli {
+macro_rules! new_cmd {
     () => {
-        assert_cli::Assert::main_binary()
-            .with_args(&[util_name!()])
+        Command::main_binary().unwrap().arg(util_name!())
     };
 }
 

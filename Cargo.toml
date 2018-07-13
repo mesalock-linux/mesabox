@@ -84,7 +84,8 @@ rustyline = { git = "https://github.com/kkawakam/rustyline", optional = true }
 tempfile = "3.0.2"
 libc = "0.2.40"
 lazy_static = "1.0.1"
-assert_cli = "0.6.2"
+assert_cmd = "0.5.0"
+predicates = "0.5.1"
 
 [profile.release]
 lto = true

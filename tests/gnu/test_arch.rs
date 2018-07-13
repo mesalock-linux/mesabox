@@ -6,34 +6,35 @@
 // For a copy, see the LICENSE file.
 //
 
-use assert_cli;
+use std::process::Command;
+use assert_cmd::prelude::*;
 
 #[test]
 #[cfg(target_arch = "x86_64")]
 fn test_x86_64() {
-    new_cli!()
-        .succeeds()
-        .and()
-        .stdout().is("x86_64\n")
-        .unwrap();
+    new_cmd!()
+        .assert()
+        .success()
+        .stdout("x86_64\n")
+        .stderr("");
 }
 
 #[test]
 #[cfg(target_arch = "arm")]
 fn test_arm() {
-    new_cli!()
-        .succeeds()
-        .and()
-        .stdout().is("arm\n")
-        .unwrap();
+    new_cmd!()
+        .assert()
+        .success()
+        .stdout("arm\n")
+        .stderr("");
 }
 
 #[test]
 #[cfg(target_arch = "aarch64")]
 fn test_aarch64() {
-    new_cli!()
-        .succeeds()
-        .and()
-        .stdout().is("aarch64\n")
-        .unwrap();
+    new_cmd!()
+        .assert()
+        .success()
+        .stdout("aarch64\n")
+        .stderr("");
 }
