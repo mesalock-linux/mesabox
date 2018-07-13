@@ -36,6 +36,7 @@ use assert_cli;
 #[test]
 fn test_output_multi_files_print_all_chars() {
     new_cli!()
+        .current_dir(fixtures_path!())
         .with_args(&["alpha.txt", "256.txt", "-A", "-n"])
         .succeeds()
         .and()
@@ -57,6 +58,7 @@ fn test_output_multi_files_print_all_chars() {
 #[test]
 fn test_numbered_lines_no_trailing_newline() {
     new_cli!()
+        .current_dir(fixtures_path!())
         .with_args(&["nonewline.txt", "alpha.txt", "-n"])
         .succeeds()
         .and()
