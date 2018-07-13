@@ -91,10 +91,16 @@ macro_rules! util_name {
 
 #[macro_export]
 macro_rules! new_cli {
-    () => {
+    () => {{
+        use std::env;
+        let mut fixture_path = env::current_dir().unwrap();
+        fixture_path.push("tests");
+        fixture_path.push("fixtures");
+        fixture_path.push(util_name!());
         assert_cli::Assert::main_binary()
             .with_args(&[util_name!()])
-    };
+            .current_dir(fixture_path)
+    }};
 }
 
 #[macro_export]
