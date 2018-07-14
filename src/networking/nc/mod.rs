@@ -4,11 +4,14 @@ extern crate libc;
 extern crate socket2;
 // extern crate tempfile;
 
+use std;
+use failure;
 use tempfile::NamedTempFile;
 use clap::{Arg, App, ArgMatches};
 use mio::{Events, Event, Poll, Ready, PollOpt, Token};
 use libc::{AF_UNSPEC, AF_INET, AF_INET6, AF_UNIX};
 use std::io;
+use std::ffi::OsString;
 use std::net::{SocketAddr};
 use mio::unix::EventedFd;
 use std::io::{Read,Write, ErrorKind};
@@ -19,7 +22,8 @@ use std::os::unix::io::AsRawFd;
 use std::os::unix::io::RawFd;
 use std::time::Duration;
 use std::net::{ToSocketAddrs};
-use super::{UtilSetup, Result, ArgsIter, UtilWrite};
+use super::{UtilSetup, ArgsIter, UtilWrite};
+use super::{MesaError};
 
 // use clap::Arg;
 use std::borrow::Cow;
@@ -53,6 +57,12 @@ struct NcOptions {
     unix_dg_tmp_socket: String,
 }
 
+fn mesaerr_result<T>(err_msg: &str) -> Result<T, MesaError> {
+    Err(MesaError::from(
+        failure::err_msg(format!("{}", err_msg)).compat()
+        ))
+}
+
 fn build_ports(ports: &str) -> Vec<u16>{
     return vec!(ports.parse::<u16>().expect(&format!("invalid port[s] {}", ports)));
 }
@@ -64,10 +74,10 @@ fn usage(ret: bool, msg: &str) {
     }
 }
 
-fn err_exit(msg: &str) {
-    eprint!("{}", msg);
-    std::process::exit(1);
-}
+// fn err_exit(msg: &str) {
+//     eprint!("{}", msg);
+//     std::process::exit(1);
+// }
 
 fn warn(msg: &str) {
     eprint!("{}", msg);
@@ -78,7 +88,7 @@ fn debug_info(msg: &str) {
 }
 
 impl NcOptions {
-    pub fn parse(matches: ArgMatches, msg: &str) -> Option<NcOptions> {
+    pub fn parse(matches: ArgMatches, msg: &str) -> Result<NcOptions, MesaError> {
         let mut portlist = vec!();
         let lflag = matches.is_present("l");
         let mut host = String::from("127.0.0.1");
@@ -119,8 +129,9 @@ impl NcOptions {
                 uport = String::new();
             } else {
                 if !lflag {
-                    usage(true, msg);
-                    return None;
+                    return mesaerr_result(msg);
+                    // usage(true, msg);
+                    // return None;
                 }
                 uport = String::from(positionals[0]);
                 // host = String::from("localhost");
@@ -129,21 +140,22 @@ impl NcOptions {
             host = String::from(positionals[0]);
             uport = String::from(positionals[1]);
         } else {
-            usage(true, msg);
-            return None;
+            return mesaerr_result(msg);
+            // usage(true, msg);
+            // return None;
         }
 
         if lflag && s_addr.is_some() {
-            err_exit("cannot use -s and -l");
+            return mesaerr_result("cannot use -s and -l");
         }
         if lflag && pflag {
-            err_exit("cannot use -p and -l");
+            return mesaerr_result("cannot use -p and -l");
         }
         if lflag && zflag {
-            err_exit("cannot use -z and -l");
+            return mesaerr_result("cannot use -z and -l");
         }
         if !lflag && kflag {
-            err_exit("must use -l with -k");
+            return mesaerr_result("must use -l with -k");
         }
 
         if !uport.is_empty() {
@@ -194,7 +206,7 @@ impl NcOptions {
             zflag: zflag,
         };
 
-        return Some(ret);
+        return Ok(ret);
     }
 }
 
@@ -954,7 +966,7 @@ fn remove_item<T: Eq+Debug>(v: &mut Vec<T>, item: T) {
 
 
 
-pub fn execute<S, T>(setup: &mut S, args: T) -> Result<()>
+pub fn execute<S, T>(setup: &mut S, args: T) -> Result<(), MesaError>
 where
     S: UtilSetup,
     T: ArgsIter,
@@ -1000,15 +1012,25 @@ where
     // println!("opts = {:?}", opts);
     // if opts.is_none() {
     //     // app.write_help(&mut io::stdout());
-    //     print!("{}", help_msg);
-
+    //     // print!("{}", help_msg);
+    //     // return Err(failure::err_msg(help_msg));
+    //     // return Err(OsString::from(help_msg));
+    //     // return Err(MesaError::from(failure::err_msg("a").compat()));
+        
     // }
 
-    // let opts = opts.unwrap();
+
+    // let opts = match opts {
+    //     Ok(opts) => opts,
+    //     Err() => {
+    //         return mesaerr_result(&help_msg);
+    //     }
+    // };
 
     // if opts.lflag {
     //     ret = server(&opts);
-    // } else {
+    // }
+    // else {
     //     if opts.family == AF_UNIX {
     //         ret = unix_client(&opts);
     //     } else {
