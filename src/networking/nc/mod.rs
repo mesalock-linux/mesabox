@@ -2,7 +2,6 @@ extern crate mio;
 extern crate clap;
 extern crate libc;
 extern crate socket2;
-// extern crate tempfile;
 
 use std;
 use failure;
@@ -26,11 +25,11 @@ use super::{UtilSetup, ArgsIter};
 use super::{MesaError};
 
 
-
 pub(crate) const NAME: &str = "nc";
 pub(crate) const DESCRIPTION: &str = "netcat";
 
 const BUFSIZE: usize = 16384;
+const PRINT_DEBUG_INFO: bool = false;
 
 #[derive(Debug)]
 struct NcOptions {
@@ -59,28 +58,25 @@ fn mesaerr_result<T>(err_msg: &str) -> Result<T, MesaError> {
 }
 
 fn build_ports(ports: &str) -> Result<Vec<u16>, MesaError>{
-    return Ok(vec!(ports.parse::<u16>()?));
-    //.expect(&format!("invalid port[s] {}", ports)));
+    // TODO: suport XX-XX
+    let port_list = match ports.parse::<u16>() {
+        Ok(port) => port,
+        Err(_) => {
+            return mesaerr_result(&format!("invalid port[s] {}", ports));
+        }
+    };
+
+    Ok(vec!(port_list))
 }
-
-// fn usage(ret: bool, msg: &str) {
-//     eprint!("{}", msg);
-//     if ret {
-//         std::process::exit(1);
-//     }
-// }
-
-// fn err_exit(msg: &str) {
-//     eprint!("{}", msg);
-//     std::process::exit(1);
-// }
 
 fn warn(msg: &str) {
     eprint!("{}", msg);
 }
 
 fn debug_info(msg: &str) {
-    println!("{}", msg);
+    if PRINT_DEBUG_INFO {
+        eprint!("{}", msg);
+    }
 }
 
 impl NcOptions {
@@ -100,7 +96,6 @@ impl NcOptions {
 
         let zflag = matches.is_present("z");
         let kflag = matches.is_present("k");
-
 
         /* Cruft to make sure options are clean, and used properly. */
         let positionals: Vec<&str> = if matches.is_present("positionals") {
@@ -126,19 +121,14 @@ impl NcOptions {
             } else {
                 if !lflag {
                     return mesaerr_result(msg);
-                    // usage(true, msg);
-                    // return None;
                 }
                 uport = String::from(positionals[0]);
-                // host = String::from("localhost");
             }
         } else if positionals.len() >= 2 {
             host = String::from(positionals[0]);
             uport = String::from(positionals[1]);
         } else {
             return mesaerr_result(msg);
-            // usage(true, msg);
-            // return None;
         }
 
         if lflag && s_addr.is_some() {
@@ -175,9 +165,8 @@ impl NcOptions {
             unix_dg_tmp_socket = if s_addr.is_some() {
                 s_addr.clone().unwrap()
             } else {
-                let nf = NamedTempFile::new()?; //.expect("failed to create temporary file");
+                let nf = NamedTempFile::new()?;
                 let path = String::from(nf.path().to_str().unwrap());
-                // nf.persist(&path).expect("failed to create temporary file");
                 path
             };
         }
@@ -208,7 +197,6 @@ impl NcOptions {
 
 fn remove_item<T: Eq+Debug>(v: &mut Vec<T>, item: T) {
     debug_info(&format!("remove_item {:?}", item));
-    // let index = v.iter().position(|t| *t == item).unwrap();
     match v.iter().position(|t| *t == item) {
         Some(i) => v.remove(i),
         None => return
@@ -312,8 +300,9 @@ impl <'a> NcCore<'a> {
                 sleep(self.opts.interval.unwrap());
             }
 
-            self.poll.poll(&mut events, None)?;
-            // .expect("polling error");
+            if let Err(_) = self.poll.poll(&mut events, None) {
+                return mesaerr_result("polling error");
+            }
 
             /* timeout happened */
             if events.is_empty() {
@@ -683,17 +672,6 @@ impl <'a> NcCore<'a> {
 
 fn local_listen(opts: &NcOptions) -> Result<Socket, MesaError> {
     debug_info("local_listen");
-    // let mut addrs_iter = (&opts.host as &str, opts.portlist[0]).to_socket_addrs();//let mut addrs_iter = "127.9.0.1".to_socket_addrs();//(&(opts.host) as &str, opts.portlist[0]).to_socket_addrs();
-    // if addrs_iter.is_err() {
-    //     err_exit("get_matches")
-    // }
-
-    // let mut addrs_iter = match  {
-    //     Ok(expr) => expr,
-    //     Err(error) => {
-    //         panic!("to_socket_addrs: {:?}", error)
-    //     }
-    // };
 
     let addrs_iter = (&opts.host as &str, opts.portlist[0]).to_socket_addrs()?;
 
@@ -733,12 +711,6 @@ fn local_listen(opts: &NcOptions) -> Result<Socket, MesaError> {
 
 fn remote_connect(opts: &NcOptions, port: u16) -> Result<Socket, MesaError>{
     let addrs_iter = (&opts.host as &str, port).to_socket_addrs()?;
-    // let mut addrs_iter = match (&opts.host as &str, port).to_socket_addrs() {
-    //     Ok(expr) => expr,
-    //     Err(error) => {
-    //         panic!("to_socket_addrs: {:?}", error)
-    //     }
-    // };
 
     for addr in addrs_iter{
         let sock_domain = match addr {
@@ -756,9 +728,7 @@ fn remote_connect(opts: &NcOptions, port: u16) -> Result<Socket, MesaError>{
 
         if opts.s_addr.is_some() || opts.pflag {
             // TODO: implement
-
         }
-
 
         // TODO: maybe sometimes no timeout
         match sock.connect_timeout(&socket2::SockAddr::from(addr), Duration::new(1, 0)) {
@@ -774,25 +744,8 @@ fn remote_connect(opts: &NcOptions, port: u16) -> Result<Socket, MesaError>{
                 }
             }
         }
-
-
-
-
-        // if opts.uflag {
-        //     // UdpSocket
-        //     match UdpSocket::bind(addr) {
-        //         Ok(sock) => return sock.as_raw_fd(),
-        //         Err(_) => continue
-        //     }
-        // } else {
-        //     match TcpListener::bind(addr) {
-        //         Ok(listener) => return listener.as_raw_fd(),
-        //         Err(_) => continue
-        //     };
-        // }
     }
     mesaerr_result("local_listen failed")
-    // err_exit("local_listen failed");
 }
 
 /*
@@ -807,12 +760,7 @@ fn unix_bind(path: &str, opts: &NcOptions) -> Result<Socket, MesaError> {
     };
 
     let sock = Socket::new(Domain::unix(), sock_type, None)?;
-    // .expect("failed to create unix socket");
-
     sock.bind(&socket2::SockAddr::unix(path)?)?;
-    
-    //.expect("invalid unix socket path")).expect("bind error");
-
     Ok(sock)
 }
 
@@ -822,11 +770,8 @@ fn unix_bind(path: &str, opts: &NcOptions) -> Result<Socket, MesaError> {
  */
 fn unix_listen(path: &str) -> Result<Socket, MesaError> {
     let sock = Socket::new(Domain::unix(), socket2::Type::stream(), None)?;
-    // .expect("failed to create unix socket");
     sock.bind(&socket2::SockAddr::unix(path)?)?;
-        //.expect("invalid unix socket path")).expect("bind error");
     sock.listen(5)?;
-    //. .expect("listen error");
     Ok(sock)
 }
 
@@ -844,6 +789,7 @@ fn server(opts: &NcOptions) -> Result<(), MesaError> {
         if opts.family != AF_UNIX {
             sock = local_listen(opts)?;
         }
+        // TODO: implement
         // /*
         //  * For UDP and -k, don't connect the socket, let it
         //  * receive datagrams from multiple socket pairs.
@@ -862,13 +808,11 @@ fn server(opts: &NcOptions) -> Result<(), MesaError> {
             let mut netinbuf: [u8; BUFSIZE] = [0; BUFSIZE];
             let (_, sockaddr) = sock.peek_from(&mut netinbuf)?;
             sock.connect(&sockaddr)?;
-            //.expect("connect error");
 
             if opts.vflag {
                 eprintln!("Connection from {:?} received!", sockaddr);
             }
 
-            // readwrite(&mut sock, opts);
             NcCore::run(&mut sock, opts)?;
         } else {
             debug_info(&format!("sock = {:?}", sock));
@@ -877,12 +821,11 @@ fn server(opts: &NcOptions) -> Result<(), MesaError> {
                 eprintln!("Connection from {:?} received!", sockaddr);
             }
 
-            // readwrite(&mut sock_conn, opts);
             NcCore::run(&mut sock_conn, opts)?;
-
-            // sock_conn.shutdown(std::net::Shutdown::Both);
+            // TODO: sock_conn.shutdown(std::net::Shutdown::Both);
         }
 
+        // TODO: implement
         // if opts.family != AF_UNIX {
 
         // }
@@ -905,11 +848,9 @@ fn unix_connect(path: &str, opts: &NcOptions) -> Result<Socket, MesaError> {
         unix_bind(&opts.unix_dg_tmp_socket, opts)?
     } else {
         Socket::new(Domain::unix(), socket2::Type::stream(), None)?
-        //.expect("failed to create unix socket")
     };
 
     sock.connect(&socket2::SockAddr::unix(path)?)?;
-    //.expect("invalid unix socket path")).expect("bind error");
 
     Ok(sock)
 }
@@ -928,7 +869,6 @@ fn unix_client(opts: &NcOptions) -> Result<(), MesaError> {
 
     if opts.uflag {
         std::fs::remove_file(&opts.unix_dg_tmp_socket)?;
-        // .expect("failed to remove the unix tmp socket file");
     }
 
     Ok(())
@@ -941,29 +881,21 @@ fn nonunix_client(opts: &NcOptions) -> Result<(), MesaError> {
             Err(_) => continue,
         };
 
-        // sock.set_nonblocking(true);
-
         // if opts.vflag || opts.zflag {
         //     // TODO: implement
         // }
 
         // TODO: Fflag && !zflag
-        // readwrite(&mut sock, opts);
         NcCore::run(&mut sock, opts)?;
-
     }
     Ok(())
 }
-
-
 
 pub fn execute<S, T>(_setup: &mut S, args: T) -> Result<(), MesaError>
 where
     S: UtilSetup,
     T: ArgsIter,
 {
-    println!("this is netcat");
-
     let mut help_msg: Vec<u8> = Vec::new();
     let app = util_app!(NAME)
         .arg(Arg::with_name("l")
@@ -995,27 +927,8 @@ where
     let help_msg = String::from_utf8(help_msg)?;
     let matches = app.get_matches_from_safe(args)?;
 
-
     // println!("matches = {:?}", matches);
     let opts = NcOptions::parse(matches, &help_msg)?;
-
-    // println!("opts = {:?}", opts);
-    // if opts.is_none() {
-    //     // app.write_help(&mut io::stdout());
-    //     // print!("{}", help_msg);
-    //     // return Err(failure::err_msg(help_msg));
-    //     // return Err(OsString::from(help_msg));
-    //     // return Err(MesaError::from(failure::err_msg("a").compat()));
-        
-    // }
-
-
-    // let opts = match opts {
-    //     Ok(opts) => opts,
-    //     Err() => {
-    //         return mesaerr_result(&help_msg);
-    //     }
-    // };
 
     if opts.lflag {
         return server(&opts);
