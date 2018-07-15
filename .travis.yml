@@ -19,6 +19,12 @@ matrix:
       env: TARGET=x86_64-apple-darwin
     - rust: nightly
       env: TARGET=x86_64-unknown-linux-gnu COVERAGE=1
+      install:
+        - ./ci/build-lcov
+        - sudo apt-get install -qq libclang-common-3.8-dev llvm-3.8-dev
+      script:
+        - ./ci/run-cov
+        - bash <(curl -s https://codecov.io/bash) -f final.info
   allow_failures:
     - rust: nightly
   fast_finish: true
@@ -28,16 +34,12 @@ install:
   - if [[ "$TARGET" == "x86_64-unknown-linux-musl" ]]; then sudo apt-get install -qq musl-tools; fi
   - if [[ "$TARGET" == "aarch64-unknown-linux-gnu" ]]; then sudo apt-get install -qq gcc-aarch64-linux-gnu libc6-arm64-cross libc6-dev-arm64-cross; fi
   - if [[ "$TARGET" == "arm-unknown-linux-gnueabi" ]]; then sudo apt-get install -qq gcc-arm-linux-gnueabi libc6-armel-cross libc6-dev-armel-cross; fi
-  - if [[ "$COVERAGE" == "1" ]]; then ./ci/build-lcov; fi
-  - if [[ "$COVERAGE" == "1" ]]; then sudo apt-get install libclang-common-3.8-dev llvm-3.8-dev; fi
 before_script:
   - rustup target add $TARGET || true
 script:
   - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then cargo build --verbose --no-default-features --features gnu,lsb,networking,posix --target $TARGET; fi
   - if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then cargo build --verbose --all --target $TARGET; fi
   - if [[ "$TARGET" =~ "x86_64-unknown-linux-*" ]]; then cargo test --verbose --all --target $TARGET; fi
-  - if [[ "$COVERAGE" == "1" ]]; then ./ci/run-cov; fi
-  - if [[ "$COVERAGE" == "1" ]]; then bash <(curl -s https://codecov.io/bash) -f final.info; fi
 notifications:
   email:
     on_success: never
