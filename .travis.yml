@@ -5,8 +5,8 @@ rust:
   - stable
   - nightly
 env:
-  - TARGET=x86_64-unknown-linux-gnu
-  - TARGET=x86_64-unknown-linux-musl
+  - TARGET=x86_64-unknown-linux-gnu RUN_TEST=1
+  - TARGET=x86_64-unknown-linux-musl RUN_TEST=1
   - TARGET=aarch64-unknown-linux-gnu RUSTFLAGS="-C linker=aarch64-linux-gnu-gcc"
   - TARGET=arm-unknown-linux-gnueabi RUSTFLAGS="-C linker=arm-linux-gnueabi-gcc"
 matrix:
@@ -39,7 +39,7 @@ before_script:
 script:
   - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then cargo build --verbose --no-default-features --features gnu,lsb,networking,posix --target $TARGET; fi
   - if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then cargo build --verbose --all --target $TARGET; fi
-  - if [[ "$TARGET" =~ "x86_64-unknown-linux-*" ]]; then cargo test --verbose --all --target $TARGET; fi
+  - if [[ "$RUN_TEST" == "1" ]]; then cargo test --verbose --all --target $TARGET; fi
 notifications:
   email:
     on_success: never
