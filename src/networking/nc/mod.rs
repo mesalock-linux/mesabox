@@ -26,7 +26,7 @@ use super::{MesaError};
 
 
 pub(crate) const NAME: &str = "nc";
-pub(crate) const DESCRIPTION: &str = "netcat";
+pub(crate) const DESCRIPTION: &str = "arbitrary TCP and UDP connections and listens";
 
 const BUFSIZE: usize = 16384;
 const PRINT_DEBUG_INFO: bool = false;
@@ -182,6 +182,7 @@ impl NcOptions {
             portlist: portlist,
             family: family,
             kflag: matches.is_present("k"),
+            // TODO: implement
             // sflag: sflag,
             s_addr: s_addr,
             pflag: pflag,
@@ -276,20 +277,20 @@ impl <'a> NcCore<'a> {
             /* both inputs are gone, buffers are empty, we are done */
             if self.stdin_gone() && self.netin_gone() &&
                 self.stdinbuf_empty() && self.netinbuf_empty() {
-                self.sock.shutdown(std::net::Shutdown::Both)?;
+                // TODO: self.sock.shutdown(std::net::Shutdown::Both)?;
                 return Ok(());
             }
 
             /* both outputs are gone, we can't continue */
             if self.stdout_gone() && self.netout_gone() {
-                self.sock.shutdown(std::net::Shutdown::Both)?;
+                // TODO: self.sock.shutdown(std::net::Shutdown::Both)?;
                 return Ok(());
             }
 
             /* listen and net in gone, queues empty, done */
             if self.opts.lflag && self.netin_gone() &&
                 self.stdinbuf_empty() && self.netinbuf_empty() {
-                self.sock.shutdown(std::net::Shutdown::Both)?;
+                // TODO: self.sock.shutdown(std::net::Shutdown::Both)?;
                 return Ok(());
             }
 
@@ -329,7 +330,7 @@ impl <'a> NcCore<'a> {
                 // if no stdout, stop watching net in
                 if self.stdout_gone() {
                     if !self.netin_gone() {
-                        self.sock.shutdown(std::net::Shutdown::Read)?;
+                        // TODO: self.sock.shutdown(std::net::Shutdown::Read)?;
                     }
                     self.remove_stdin()?;
                 }
@@ -393,7 +394,7 @@ impl <'a> NcCore<'a> {
                 if self.stdin_gone() && self.stdinbuf_empty() {
                     if !self.netout_gone() {
                         // TODO: check && opts.Nflag {
-                        self.sock.shutdown(std::net::Shutdown::Write)?;
+                        // TODO: self.sock.shutdown(std::net::Shutdown::Write)?;
                     }
                     self.remove_netout()?;
                 }
@@ -548,6 +549,7 @@ impl <'a> NcCore<'a> {
                 if len > 0 {
                     self.stdinbufpos -= len;
                     if self.stdinbufpos > 0 {
+                        // TODO: improve efficiency
                         self.stdinbuf_bac.copy_from_slice(&self.stdinbuf[len..len+self.stdinbufpos]);
                         self.stdinbuf.copy_from_slice(&self.stdinbuf_bac);
                     }
@@ -595,6 +597,7 @@ impl <'a> NcCore<'a> {
                 if len > 0 {
                     self.netinbufpos -= len;
                     if self.netinbufpos > 0 {
+                        // TODO: improve efficiency
                         self.netinbuf_bac.copy_from_slice(&self.netinbuf[len..len+self.netinbufpos]);
                         self.netinbuf.copy_from_slice(&self.netinbuf_bac);
                     }
@@ -636,7 +639,7 @@ impl <'a> NcCore<'a> {
         if event.token() == NcCore::TK_NET {
             debug_info("STDOUT HUP");
             // TODO: check Nflag
-            self.sock.shutdown(std::net::Shutdown::Write)?;
+            // TODO: self.sock.shutdown(std::net::Shutdown::Write)?;
             self.remove_netout()?
         }
 
@@ -728,6 +731,7 @@ fn remote_connect(opts: &NcOptions, port: u16) -> Result<Socket, MesaError>{
 
         if opts.s_addr.is_some() || opts.pflag {
             // TODO: implement
+            unimplemented!();
         }
 
         // TODO: maybe sometimes no timeout
@@ -876,7 +880,7 @@ fn unix_client(opts: &NcOptions) -> Result<(), MesaError> {
 
 fn nonunix_client(opts: &NcOptions) -> Result<(), MesaError> {
     for port in &opts.portlist {
-        let mut sock = match remote_connect(opts, port.clone()) {
+        let mut sock = match remote_connect(opts, *port) {
             Ok(expr) => expr,
             Err(_) => continue,
         };
@@ -899,35 +903,46 @@ where
     let mut help_msg: Vec<u8> = Vec::new();
     let app = util_app!(NAME)
         .arg(Arg::with_name("l")
-            .short("l"))
+            .short("l")
+            .help("Used to specify that nc should listen for an incoming connection rather than initiate a connection to a remote host.  It is an error to use this option in conjunction with the -p, -s, or -z options.  Additionally, any timeouts specified with the -w option are ignored."))
         .arg(Arg::with_name("i")
             .short("i")
             .value_name("interval")
+            .help("Specifies a delay time interval between lines of text sent and received.  Also causes a delay time between connections to multiple ports.")
             .takes_value(true))
         .arg(Arg::with_name("s")
             .short("s")
             .value_name("source_ip_address") 
-            .takes_value(true))        
+            .takes_value(true)
+            .help("Specifies the IP of the interface which is used to send the packets.  It is an error to use this option in conjunction with the -l option."))        
         .arg(Arg::with_name("d")
-            .short("d"))
+            .short("d")
+            .help("Do not attempt to read from stdin."))
         .arg(Arg::with_name("U")
-            .short("U"))
+            .short("U")
+            .help("Specifies to use Unix Domain Sockets."))
         .arg(Arg::with_name("u")
-            .short("u"))
+            .short("u")
+            .help("Use UDP instead of the default option of TCP."))
         .arg(Arg::with_name("v")
-            .short("v"))
+            .short("v")
+            .help("Have nc give more verbose output."))
         .arg(Arg::with_name("k")
-            .short("k"))
+            .short("k")
+            .help("Forces nc to stay listening for another connection after its current connection is completed.  It is an error to use this option without the -l option."))
         .arg(Arg::with_name("z")
-            .short("z"))
+            .short("z")
+            .help("Specifies that nc should just scan for listening daemons, without sending any data to them.  It is an error to use this option in conjunction with the -l option."))
         .arg(Arg::with_name("positionals")
-            .multiple(true));
+            .value_name("[hostname] [port[s]]")
+            .multiple(true)
+            .required(true));
 
     app.write_help(&mut help_msg)?;
     let help_msg = String::from_utf8(help_msg)?;
     let matches = app.get_matches_from_safe(args)?;
 
-    // println!("matches = {:?}", matches);
+    debug_info(&format!("matches = {:?}", matches));
     let opts = NcOptions::parse(matches, &help_msg)?;
 
     if opts.lflag {
