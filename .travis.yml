@@ -38,7 +38,7 @@ matrix:
       before_install:
       install:
       before_script:
-        - cargo +nightly install clippy
+        - cargo +nightly install clippy --force
       script:
         - cargo clippy
   allow_failures:
