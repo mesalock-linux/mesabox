@@ -86,7 +86,7 @@ fn write_str<W: Write>(output: &mut W, s: &OsStr) -> Result<bool> {
                     if found > 0 {
                         // this is guaranteed to be valid, but it's unlikely the slight performance
                         // boost gained by using unsafe will make a difference
-                        let num = str::from_utf8(&buffer[..found])?.parse::<u8>()?;
+                        let num = u8::from_str_radix(str::from_utf8(&buffer[..found])?, 8)?;
                         num
                     } else {
                         b'\0'
