@@ -1,3 +1,4 @@
+use nix::sys::wait::{self, WaitStatus};
 use nix::unistd;
 
 use std::borrow::Cow;
@@ -6,22 +7,39 @@ use std::ffi::{OsStr, OsString};
 use std::io::{self, Write};
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::os::unix::process::{CommandExt, ExitStatusExt};
-use std::process::{Command, Stdio};
+use std::process::{self, Child, Command, ExitStatus, Stdio};
+use std::rc::Rc;
 
 use super::UtilSetup;
-use super::ast::ExitCode;
-use super::env::{EnvFd, Environment};
+use super::ast::{ExitCode, FunctionBody, RuntimeData};
+use super::builtin::Builtin;
+use super::env::{EnvFd, Environment, TryClone};
 use super::error::{CmdResult, CommandError};
 use util::RawFdWrapper;
 
 /// A command executed within the current shell process (e.g. a function or builtin)
 pub trait InProcessCommand {
-    fn execute<S: UtilSetup>(&self, setup: &mut S, env: &mut Environment, data: ExecData) -> CmdResult<ExitCode>;
+    fn execute<'a: 'b, 'b, S: UtilSetup + 'a>(&self, rt_data: &mut RuntimeData<'a, 'b, S>, data: ExecData) -> CmdResult<ExitCode>;
+    fn spawn<'a: 'b, 'b, S: UtilSetup + 'a>(&self, rt_data: &mut RuntimeData<'a, 'b, S>, data: ExecData) -> CmdResult<ShellChild>;
 }
 
 impl<'a, T: InProcessCommand> InProcessCommand for &'a T {
-    fn execute<S: UtilSetup>(&self, setup: &mut S, env: &mut Environment, data: ExecData) -> CmdResult<ExitCode> {
-        (**self).execute(setup, env, data)
+    fn execute<'b: 'c, 'c, S: UtilSetup + 'b>(&self, rt_data: &mut RuntimeData<'b, 'c, S>, data: ExecData) -> CmdResult<ExitCode> {
+        (**self).execute(rt_data, data)
+    }
+
+    fn spawn<'b: 'c, 'c, S: UtilSetup + 'b>(&self, rt_data: &mut RuntimeData<'b, 'c, S>, data: ExecData) -> CmdResult<ShellChild> {
+        (**self).spawn(rt_data, data)
+    }
+}
+
+impl<T: InProcessCommand> InProcessCommand for Rc<T> {
+    fn execute<'a: 'b, 'b, S: UtilSetup + 'a>(&self, rt_data: &mut RuntimeData<'a, 'b, S>, data: ExecData) -> CmdResult<ExitCode> {
+        (**self).execute(rt_data, data)
+    }
+
+    fn spawn<'a: 'b, 'b, S: UtilSetup + 'a>(&self, rt_data: &mut RuntimeData<'a, 'b, S>, data: ExecData) -> CmdResult<ShellChild> {
+        (**self).spawn(rt_data, data)
     }
 }
 
@@ -58,51 +76,8 @@ impl CommandWrapper {
             cmd: cmd,
         }
     }
-}
 
-// TODO: need to add a spawn() equivalent for backgrounded processes
-pub trait CommandEnv {
-    fn env(&mut self, key: Cow<OsStr>, val: Cow<OsStr>) -> &mut Self;
-
-    fn arg(&mut self, arg: Cow<OsStr>) -> &mut Self;
-
-    fn status<S>(self, setup: &mut S, env: &mut Environment) -> CmdResult<ExitCode>
-    where
-        S: UtilSetup;
-
-    fn envs<'a, I>(&mut self, vars: I) -> &mut Self
-    where
-        I: IntoIterator<Item = (Cow<'a, OsStr>, Cow<'a, OsStr>)>,
-    {
-        for (k, v) in vars {
-            self.env(k, v);
-        }
-        self
-    }
-
-    fn args<'a, I>(&mut self, args: I) -> &mut Self
-    where
-        I: IntoIterator<Item = Cow<'a, OsStr>>,
-    {
-        for arg in args {
-            self.arg(arg);
-        }
-        self
-    }
-}
-
-impl CommandEnv for CommandWrapper {
-    fn env(&mut self, key: Cow<OsStr>, val: Cow<OsStr>) -> &mut Self {
-        self.cmd.env(key, val);
-        self
-    }
-
-    fn arg(&mut self, arg: Cow<OsStr>) -> &mut Self {
-        self.cmd.arg(arg);
-        self
-    }
-
-    fn status<S>(mut self, setup: &mut S, env: &mut Environment) -> CmdResult<ExitCode>
+    fn setup_child<S>(&mut self, _setup: &mut S, env: &mut Environment) -> CmdResult<ShellChild>
     where
         S: UtilSetup,
     {
@@ -165,17 +140,70 @@ impl CommandEnv for CommandWrapper {
         }
         // TODO: stdout/stderr (and any other pipes that are piped into other commands)
 
-        let stat = child.wait().map_err(|e| CommandError::RealCommandStatus(e))?;
+        Ok(ShellChild::RealChild(ChildWrapper { child: child, pipes: other_pipes }))
+    }
+}
 
-        for pipe in other_pipes {
-            // XXX: not sure if we really want to error here (maybe just report the error?)
-            unistd::close(pipe).map_err(|e| CommandError::Pipe(e))?;
+// TODO: need to add a spawn() equivalent for backgrounded processes
+pub trait CommandEnv {
+    fn env(&mut self, key: Cow<OsStr>, val: Cow<OsStr>) -> &mut Self;
+
+    fn arg(&mut self, arg: Cow<OsStr>) -> &mut Self;
+
+    fn status<'a: 'b, 'b, S>(self, data: &mut RuntimeData<'a, 'b, S>) -> CmdResult<ExitCode>
+    where
+        S: UtilSetup + 'a;
+
+    fn spawn<'a: 'b, 'b, S>(self, data: &mut RuntimeData<'a, 'b, S>) -> CmdResult<ShellChild>
+    where
+        S: UtilSetup + 'a;
+
+    fn envs<'a, I>(&mut self, vars: I) -> &mut Self
+    where
+        I: IntoIterator<Item = (Cow<'a, OsStr>, Cow<'a, OsStr>)>,
+    {
+        for (k, v) in vars {
+            self.env(k, v);
         }
+        self
+    }
 
-        // NOTE: this should be fine as the only way for code() to fail is if a signal terminated
-        //       the process
-        // XXX: do we need to add 128 (iirc?) to the signal?
-        Ok(stat.code().unwrap_or_else(|| stat.signal().unwrap()))
+    fn args<'a, I>(&mut self, args: I) -> &mut Self
+    where
+        I: IntoIterator<Item = Cow<'a, OsStr>>,
+    {
+        for arg in args {
+            self.arg(arg);
+        }
+        self
+    }
+}
+
+impl CommandEnv for CommandWrapper {
+    fn env(&mut self, key: Cow<OsStr>, val: Cow<OsStr>) -> &mut Self {
+        self.cmd.env(key, val);
+        self
+    }
+
+    fn arg(&mut self, arg: Cow<OsStr>) -> &mut Self {
+        self.cmd.arg(arg);
+        self
+    }
+
+    fn status<'a: 'b, 'b, S>(mut self, data: &mut RuntimeData<'a, 'b, S>) -> CmdResult<ExitCode>
+    where
+        S: UtilSetup + 'a,
+    {
+        let mut child = self.setup_child(data.setup, data.env)?;
+        let stat = child.wait()?;
+        Ok(stat.code())
+    }
+
+    fn spawn<'a: 'b, 'b, S>(mut self, data: &mut RuntimeData<'a, 'b, S>) -> CmdResult<ShellChild>
+    where
+        S: UtilSetup + 'a,
+    {
+        self.setup_child(data.setup, data.env)
     }
 }
 
@@ -190,12 +218,221 @@ impl<C: InProcessCommand> CommandEnv for ExecEnv<C> {
         self
     }
 
-    fn status<S>(self, setup: &mut S, env: &mut Environment) -> CmdResult<ExitCode>
+    fn status<'a: 'b, 'b, S>(self, data: &mut RuntimeData<'a, 'b, S>) -> CmdResult<ExitCode>
     where
-        S: UtilSetup,
+        S: UtilSetup + 'a,
     {
         // XXX: maybe we should treat env vars the same way as fds?  it would make things simpler,
         //      but not sure of the effect on execution speed
-        self.cmd.execute(setup, env, ExecData { args: self.args, env: self.env })
+        self.cmd.execute(data, ExecData { args: self.args, env: self.env })
+    }
+
+    fn spawn<'a: 'b, 'b, S>(self, data: &mut RuntimeData<'a, 'b, S>) -> CmdResult<ShellChild>
+    where
+        S: UtilSetup + 'a,
+    {
+        // XXX: see if there's an easy way to implement this for all ExecEnvs
+        self.cmd.spawn(data, ExecData { args: self.args, env: self.env })
+    }
+}
+
+// this enum lets us return our commands up the call stack if needed and let's us use closures
+// involving the commands
+pub enum CommandEnvContainer {
+    RealCommand(CommandWrapper),
+    Builtin(ExecEnv<Builtin>),
+    Function(ExecEnv<Rc<FunctionBody>>),
+}
+
+impl CommandEnv for CommandEnvContainer {
+    fn env(&mut self, key: Cow<OsStr>, val: Cow<OsStr>) -> &mut Self {
+        use self::CommandEnvContainer::*;
+
+        match self {
+            RealCommand(cmd) => { cmd.env(key, val); }
+            Builtin(builtin) => { builtin.env(key, val); }
+            Function(func) => { func.env(key, val); }
+        }
+        self
+    }
+
+    fn arg(&mut self, arg: Cow<OsStr>) -> &mut Self {
+        use self::CommandEnvContainer::*;
+
+        match self {
+            RealCommand(cmd) => { cmd.arg(arg); }
+            Builtin(builtin) => { builtin.arg(arg); }
+            Function(func) => { func.arg(arg); }
+        }
+        self
+    }
+
+    fn status<'a: 'b, 'b, S>(self, data: &mut RuntimeData<'a, 'b, S>) -> CmdResult<ExitCode>
+    where
+        S: UtilSetup + 'a,
+    {
+        use self::CommandEnvContainer::*;
+
+        match self {
+            RealCommand(cmd) => cmd.status(data),
+            Builtin(builtin) => builtin.status(data),
+            Function(func) => func.status(data),
+        }
+    }
+
+    fn spawn<'a: 'b, 'b, S>(self, data: &mut RuntimeData<'a, 'b, S>) -> CmdResult<ShellChild>
+    where
+        S: UtilSetup + 'a,
+    {
+        use self::CommandEnvContainer::*;
+
+        match self {
+            RealCommand(cmd) => cmd.spawn(data),
+            Builtin(builtin) => builtin.spawn(data),
+            Function(func) => func.spawn(data),
+        }
+    }
+}
+
+pub struct InProcessChild {
+    pid: unistd::Pid,
+    stdout: EnvFd,
+    write_fd: Option<RawFd>,
+}
+
+impl InProcessChild {
+    pub fn new(handle: unistd::Pid, stdout: EnvFd, write_fd: Option<RawFd>) -> Self {
+        Self {
+            pid: handle,
+            stdout: stdout,
+            write_fd: write_fd,
+        }
+    }
+
+    // FIXME: stop unwrapping
+    pub fn spawn<S, F>(data: &mut RuntimeData<S>, func: F) -> CmdResult<Self>
+    where
+        S: UtilSetup,
+        F: FnOnce(&mut RuntimeData<S>) -> CmdResult<ExitCode>,
+    {
+        let mut read = None;
+        let mut write = None;
+        let stdout = match data.env.get_fd(1).current_val() {
+            EnvFd::Pipeline => {
+                let (read_pipe, write_pipe) = unistd::pipe().unwrap();
+                read = Some(read_pipe);
+                write = Some(write_pipe);
+                EnvFd::Fd(RawFdWrapper::new(read_pipe, true, false))
+            }
+            other => other.try_clone()?
+        };
+        if let Some(write) = write {
+            data.env.set_local_fd(1, EnvFd::Fd(RawFdWrapper::new(write, false, true)));
+        }
+
+        match unistd::fork().unwrap() {
+            unistd::ForkResult::Child => {
+                // FIXME: don't unwrap
+                process::exit(func(data).unwrap())
+            }
+            unistd::ForkResult::Parent { child } => {
+                if let Some(write) = write {
+                    unistd::close(write).unwrap();
+                }
+                Ok(InProcessChild::new(child, stdout, read))
+            }
+        }
+    }
+
+    pub fn wait(&mut self) -> CmdResult<ExitCode> {
+        match wait::waitpid(self.pid, None).unwrap() {
+            WaitStatus::Exited(_, code) => Ok(code),
+            _ => unimplemented!(),
+        }
+    }
+}
+
+impl Drop for InProcessChild {
+    fn drop(&mut self) {
+        if let Some(fd) = self.write_fd {
+            unistd::close(fd);
+        }
+    }
+}
+
+pub enum ShellChild {
+    RealChild(ChildWrapper),
+    InProcess(InProcessChild),
+    Empty,
+}
+
+impl ShellChild {
+    pub fn wait(&mut self) -> CmdResult<ChildExitStatus> {
+        use self::ShellChild::*;
+
+        match self {
+            RealChild(wrapper) => wrapper.child.wait().map(|stat| ChildExitStatus::RealChild(stat)).map_err(|e| CommandError::RealCommandStatus(e)),
+            InProcess(child) => child.wait().map(|code| ChildExitStatus::InProcess(code)),
+            Empty => Ok(ChildExitStatus::Empty),
+        }
+    }
+
+    pub fn try_wait(&mut self) -> CmdResult<Option<ChildExitStatus>> {
+        use self::ShellChild::*;
+
+        match self {
+            RealChild(wrapper) => wrapper.child.try_wait().map(|stat| stat.map(|stat| ChildExitStatus::RealChild(stat))).map_err(|e| CommandError::RealCommandStatus(e)),
+            InProcess(child) => unimplemented!(),
+            Empty => Ok(Some(ChildExitStatus::Empty)),
+        }
+    }
+
+    pub fn output(&self) -> EnvFd {
+        use self::ShellChild::*;
+
+        match self {
+            RealChild(wrapper) => wrapper.child.stdout.as_ref().map(|out| EnvFd::ChildStdout(RawFdWrapper::new(out.as_raw_fd(), true, false))).unwrap_or(EnvFd::Null),
+            InProcess(child) => child.stdout.try_clone().unwrap(),//unimplemented!(),
+            Empty => EnvFd::Null,
+        }
+    }
+}
+
+pub enum ChildExitStatus {
+    RealChild(ExitStatus),
+    InProcess(ExitCode),
+    Empty,
+}
+
+impl ChildExitStatus {
+    pub fn code(&self) -> ExitCode {
+        use self::ChildExitStatus::*;
+
+        match self {
+            RealChild(stat) => {
+                // NOTE: this should be fine as the only way for code() to fail is if a signal terminated
+                //       the process
+                // XXX: do we need to add 128 (iirc?) to the signal?
+                stat.code().unwrap_or_else(|| stat.signal().unwrap())
+            }
+            InProcess(code) => *code,
+            // XXX: can this be anything else???
+            Empty => 0,
+        }
+    }
+}
+
+pub struct ChildWrapper {
+    child: Child,
+    pipes: Vec<RawFd>,
+}
+
+impl Drop for ChildWrapper {
+    fn drop(&mut self) {
+        for &pipe in &self.pipes {
+            // XXX: not sure if we really want to error here (maybe just report the error?)
+            //unistd::close(pipe).map_err(|e| CommandError::Pipe(e))?;
+            unistd::close(pipe);
+        }
     }
 }

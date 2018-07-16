@@ -477,17 +477,27 @@ fn compound_command<'a>(input: &'a [u8], parser: &mut Parser) -> IResult<'a, Com
 }
 
 fn subshell<'a>(input: &'a [u8], parser: &mut Parser) -> IResult<'a, Command> {
-    terminated!(input,
-        call!(compound_list, parser),
+    map!(input, terminated!(
+        call!(compound_list_inner, parser),
         tag_token!(")")
-    )
+    ), |inner| {
+        if let CommandInner::AndOr(and_ors) = inner {
+            Command::with_inner(CommandInner::SubShell(and_ors))
+        } else {
+            unreachable!()
+        }
+    })
 }
 
 fn compound_list<'a>(input: &'a [u8], parser: &mut Parser) -> IResult<'a, Command> {
+    map!(input, call!(compound_list_inner, parser), |inner| Command::with_inner(inner))
+}
+
+fn compound_list_inner<'a>(input: &'a [u8], parser: &mut Parser) -> IResult<'a, CommandInner> {
     do_parse!(input,
         // XXX: this is technically an optional newline_list in the spec
         call!(linebreak, parser) >>
-        res: map!(call!(term, parser), |and_ors| Command::with_inner(CommandInner::AndOr(and_ors))) >>
+        res: map!(call!(term, parser), |and_ors| CommandInner::AndOr(and_ors)) >>
         opt!(call!(separator, parser)) >>
         (res)
     )
@@ -817,7 +827,7 @@ fn command_subst_dollar<'a>(input: &'a [u8], parser: &mut Parser) -> IResult<'a,
         fix_error!(ParserError, tag!("$(")) >>
         fix_error!(ParserError, not!(tag!("("))) >>        // avoid ambiguity between subshell and arithmetic expression
         ignore >>
-        cmd: return_error!(ErrorKind::Custom(ParserError::CommandSubst), terminated!(call!(command, parser), tag_token!(")"))) >>
+        cmd: return_error!(ErrorKind::Custom(ParserError::CommandSubst), terminated!(call!(compound_list, parser), tag_token!(")"))) >>
         (CommandSubst::new(Box::new(cmd)))
     )
 }
@@ -853,21 +863,6 @@ named!(single_quote<&[u8], Word, ParserError>,
         clean_tag!("'")
     )
 );
-
-/*named!(double_quote<&[u8], DoubleQuote>,
-    delimited!(
-        tag!("\""),
-        // parse param_expand, command_subst, arith_expr (for $ and `) and escape (for $ ` " \ and <newline>)
-        escaped!(
-            do_parse!(
-
-            ),
-            b'\\',
-            one_of!("$`")
-        )
-        tag!("\"")
-    )
-);*/
 
 fn double_quote<'a>(input: &'a [u8], parser: &mut Parser) -> IResult<'a, DoubleQuote> {
     do_parse!(input,

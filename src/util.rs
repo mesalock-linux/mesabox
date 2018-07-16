@@ -6,7 +6,7 @@
 // For a copy, see the LICENSE file.
 //
 
-use super::{MesaError, Result};
+use super::{LockableRead, LockableWrite, MesaError, Result};
 
 use failure;
 use libc;
@@ -22,7 +22,8 @@ use std::str::FromStr;
 const SUFFIXES: [char; 8] = ['K', 'M', 'G', 'T', 'P', 'E', 'Z', 'Y'];
 const OBSOLETE_SUFFIXES: [char; 2] = ['k', 'm'];
 
-// take note that this does NOT close the fd on drop
+/// A wrapper around a raw file descriptor that enables reading and writing using the standard
+/// traits.  Take note that this wrapper does *NOT* close the file descriptor when dropping.
 #[derive(Clone, Debug)]
 pub struct RawFdWrapper {
     pub fd: RawFd,
@@ -54,10 +55,12 @@ impl RawFdWrapper {
         ))
     }
 
+    /// Duplicate a file descriptor such that it is greater than or equal to `min`.
     pub fn dup_above(&self, min: RawFd) -> nix::Result<RawFd> {
         fcntl::fcntl(self.fd, fcntl::F_DUPFD(min))
     }
 
+    /// Duplicate a file descriptor such that it is greater than or equal to 10.
     #[cfg(feature = "sh")]
     pub fn dup_sh(&self) -> nix::Result<RawFd> {
         self.dup_above(::sh::option::FD_COUNT as RawFd + 1)
@@ -81,6 +84,73 @@ impl Write for RawFdWrapper {
     }
 }
 
+/// Wrapper around a `Vec<T>` to make it readable (using the standard `Read` trait).
+pub struct ReadableVec<T>(pub Vec<T>);
+
+impl Read for ReadableVec<u8> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        (&self.0[..]).read(buf)
+    }
+}
+
+/// A structure to enable using dynamic dispatch with an object that implements
+/// [UtilRead](../trait.UtilRead.html).
+pub struct UtilReadDyn {
+    pub(crate) inner: Box<for<'a> LockableRead<'a>>,
+    fd: Option<RawFd>,
+}
+
+impl UtilReadDyn {
+    pub fn new(inner: Box<for<'a> LockableRead<'a>>, fd: Option<RawFd>) -> Self {
+        Self {
+            inner: inner,
+            fd: fd,
+        }
+    }
+
+    pub fn fd(&self) -> Option<RawFd> {
+        self.fd
+    }
+}
+
+/// A structure to enable using dynamic dispatch with an object that implements
+/// [UtilWrite](../trait.UtilWrite.html).
+pub struct UtilWriteDyn {
+    pub(crate) inner: Box<for<'a> LockableWrite<'a>>,
+    fd: Option<RawFd>,
+}
+
+impl UtilWriteDyn {
+    pub fn new(inner: Box<for<'a> LockableWrite<'a>>, fd: Option<RawFd>) -> Self {
+        Self {
+            inner: inner,
+            fd: fd,
+        }
+    }
+
+    pub fn fd(&self) -> Option<RawFd> {
+        self.fd
+    }
+}
+
+impl Read for UtilReadDyn {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        self.inner.read(buf)
+    }
+}
+
+impl Write for UtilWriteDyn {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.inner.write(buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.inner.flush()
+    }
+}
+
+/// Set the exit code for an error to `code` and return the resulting
+/// [MesaError](../error/struct.MesaError.html).
 pub(crate) fn set_exitcode<T, E: StdError + Send + Sync + 'static>(
     error: StdResult<T, E>,
     code: libc::c_int,
@@ -92,16 +162,19 @@ pub(crate) fn set_exitcode<T, E: StdError + Send + Sync + 'static>(
     })
 }
 
+/// Convert an `Err(String)` to a [MesaError](../error/struct.MesaError.html).
 pub(crate) fn string_to_err<T>(error: StdResult<T, String>) -> Result<T> {
     error.map_err(|e| failure::err_msg(e).compat().into())
 }
 
+/// Determine whether the given file descriptor is a TTY.
 pub(crate) fn is_tty(stream: Option<RawFd>) -> bool {
     stream
         .map(|fd| unsafe { libc::isatty(fd) == 1 })
         .unwrap_or(false)
 }
 
+// XXX: the idea for this function is to limit file traversal to one filesystem
 #[allow(dead_code)]
 pub(crate) fn one_filesystem<T, U>(_start_dir: T, _func: U) -> Result<()>
 where
@@ -112,6 +185,9 @@ where
     Ok(())
 }
 
+/// Get the actual path of a file or directory assuming `current_dir` is the current working
+/// directory.  If `current_dir` is `None` or `path` is an absolute path, the returned path will
+/// be `path`.
 pub fn actual_path<D, P>(current_dir: &Option<D>, path: &P) -> PathBuf
 where
     D: AsRef<Path>,
@@ -123,10 +199,12 @@ where
     }
 }
 
+/// Parse an integer with a suffix like "kb" or "MB".
 pub fn parse_num_with_suffix(s: &str) -> Option<usize> {
     parse_num_common(s, &SUFFIXES, false)
 }
 
+/// Parse an integer with one of the suffixes used by obsolete options (_e.g._ -1k or -4m).
 pub fn parse_obsolete_num(s: &str) -> Option<usize> {
     parse_num_common(s, &OBSOLETE_SUFFIXES, true)
 }

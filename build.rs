@@ -143,4 +143,34 @@ where
         exec_output,
         "if name == \"dump-cmds\" {{ Some(dump_commands(setup)) }} else {{ None }}"
     ).unwrap();
+
+    // the following is for executing mesabox utilities in sh
+    let exists_path = Path::new(&outdir).join("util_exists.rs");
+    let exists_file = File::create(exists_path).expect("could not open util_exists.rs for writing");
+    let mut exists_output = BufWriter::new(exists_file);
+    write!(exists_output, "&[").unwrap();
+    if let Some(util) = utils.iter().next() {
+        write!(exists_output, "{:?}", util).unwrap();
+    }
+    for util in utils.iter().skip(1) {
+        write!(exists_output, ", {:?}", util).unwrap();
+    }
+    write!(exists_output, "]").unwrap();
+
+    let exec_path = Path::new(&outdir).join("execute_utils_sh.rs");
+    let exec_file =
+        File::create(exec_path).expect("could not open execute_utils_sh.rs for writing");
+    let mut exec_output = BufWriter::new(exec_file);
+    for &util in &utils {
+        // we can't do the easy "if blah { return Some(x); }" way because the compiler thinks that
+        // we are missing else statements and errors
+        if util != "sh" {
+            write!(
+                exec_output,
+                "if name == {:?} {{ Some(::{0}::execute(setup, args)) }} else ",
+                util
+            ).unwrap();
+        }
+    }
+    writeln!(exec_output, "{{ None }}").unwrap();
 }

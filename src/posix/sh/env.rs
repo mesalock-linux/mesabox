@@ -16,6 +16,10 @@ use super::builtin::{Builtin, BuiltinSet};
 use super::option::FD_COUNT;
 use util::RawFdWrapper;
 
+pub trait TryClone: Sized {
+    fn try_clone(&self) -> Result<Self, CommandError>;
+}
+
 // XXX: not exactly happy that we need to clone the data for Piped, but due to issues with
 //      lifetimes in SimpleCommand::run_command() and IoRedirect::setup() the only alternative
 //      seem to be dropping into unsafe code
@@ -26,11 +30,11 @@ use util::RawFdWrapper;
 #[derive(Debug)]
 pub enum EnvFd {
     Null,
-    Inherit,
     Piped(Vec<u8>),
     File(File),
     Fd(RawFdWrapper),
-    // TODO: child stdin/stdout/stderr
+    Pipeline,
+    ChildStdout(RawFdWrapper),
 }
 
 impl EnvFd {
@@ -39,18 +43,20 @@ impl EnvFd {
 
         Ok(match self {
             Null => Stdio::null(),
-            Inherit => Stdio::inherit(),
             Piped(_) => Stdio::piped(),
             File(file) => file.into(),
-            Fd(fd) => {
+            Fd(fd) | ChildStdout(fd) => {
                 // XXX: make sure this is right with the stdlib and such
                 let new_fd = fd.dup_sh().map_err(|e| CommandError::DupFd { fd: fd.fd, err: e })?;
                 unsafe { Stdio::from_raw_fd(new_fd) }
             }
+            Pipeline => Stdio::piped(),
         })
     }
+}
 
-    pub fn try_clone(&self) -> Result<Self, CommandError> {
+impl TryClone for EnvFd {
+    fn try_clone(&self) -> Result<Self, CommandError> {
         Ok(match self {
             EnvFd::Fd(fd) => EnvFd::Fd(fd.clone()),
             EnvFd::File(file) => {
@@ -61,10 +67,16 @@ impl EnvFd {
                 EnvFd::File(new_file)
             }
             EnvFd::Piped(data) => EnvFd::Piped(data.clone()),
-            EnvFd::Inherit => EnvFd::Inherit,
             EnvFd::Null => EnvFd::Null,
+            EnvFd::Pipeline => EnvFd::Pipeline,
+            EnvFd::ChildStdout(fd) => EnvFd::ChildStdout(fd.clone())
         })
     }
+
+    /*pub fn create_pipe() -> Result<Self, CommandError> {
+        let (read, write) = unistd::pipe().map_err(|e| CommandError::Pipe(e))?;
+        Ok(EnvFd::Pipeline(RawFdWrapper::new(read, true, false), RawFdWrapper::new(write, false, true)))
+    }*/
 }
 
 impl Default for EnvFd {
@@ -109,7 +121,7 @@ impl<T> Locality<T> {
                 let cur_value = mem::replace(cur_value, value);
                 let count = mem::replace(count, 0);
                 let prev_val = mem::replace(prev, None);
-                *prev = Some(Box::new(Locality::Local(cur_value, count, prev_val)));
+                *prev = Some(Box::new(Locality::Local(cur_value, count - 1, prev_val)));
             }
             Locality::Global(_) => {
                 let old_self = mem::replace(self, Locality::Local(value, 0, None));
@@ -145,7 +157,31 @@ impl<T: Default> Default for Locality<T> {
     }
 }
 
-#[derive(Debug)]
+impl<T: Clone> Clone for Locality<T> {
+    fn clone(&self) -> Self {
+        match self {
+            Locality::Local(item, count, prev) => Locality::Local(item.clone(), *count, prev.clone()),
+            Locality::Global(item) => Locality::Global(item.clone()),
+        }
+    }
+}
+
+impl<T: TryClone> TryClone for Locality<T> {
+    fn try_clone(&self) -> Result<Self, CommandError> {
+        Ok(match self {
+            Locality::Local(item, count, prev) => {
+                let prev = match prev {
+                    Some(v) => Some(Box::new(v.try_clone()?)),
+                    None => None,
+                };
+                Locality::Local(item.try_clone()?, *count, prev)
+            }
+            Locality::Global(item) => Locality::Global(item.try_clone()?),
+        })
+    }
+}
+
+#[derive(Clone, Debug)]
 pub struct SpecialVars {
     last_exitcode: ExitCode,
     args: Locality<Vec<OsString>>,
@@ -187,9 +223,19 @@ impl SpecialVars {
 #[derive(Debug)]
 pub struct Environment {
     special_vars: SpecialVars,
+
+    // variables local to the current shell
     vars: HashMap<OsString, OsString>,
+
+    // exportable variables (NOTE: may want to make the value an Arc for this and vars to allow the
+    // lock to release as soon as possible)
     export_vars: HashMap<OsString, Option<OsString>>,
+
+    // functions
     funcs: HashMap<OsString, Rc<FunctionBody>>,
+
+    // FIXME: figure out how to make multi-threaded (this might be small enough to just clone rather
+    //        than use an Arc)
     fds: [Locality<EnvFd>; FD_COUNT],
 
     // BuiltinSet is designed so that by enabling options the set of builtins can be changed
@@ -200,6 +246,7 @@ impl Environment {
     pub fn new() -> Self {
         Self {
             special_vars: SpecialVars::new(),
+
             vars: HashMap::new(),
             export_vars: HashMap::new(),
             funcs: HashMap::new(),
@@ -275,6 +322,10 @@ impl Environment {
         &self.fds[fd]
     }
 
+    pub fn get_fd_mut(&mut self, fd: usize) -> &mut Locality<EnvFd> {
+        &mut self.fds[fd]
+    }
+
     pub fn fds(&self) -> &[Locality<EnvFd>; FD_COUNT] {
         &self.fds
     }
@@ -283,6 +334,19 @@ impl Environment {
         CurrentFdIter { fd_iter: self.fds.iter_mut() }
     }
 
+    // XXX: may want to split into enter_scope_vars() and enter_scope_fds(), and then create an
+    //      enter_scope() method that runs them both.  adding locality to the {export_,}vars will
+    //      mean either making the hashmaps themselves local or making the variables inside the
+    //      hashmaps local.  with many variables and few scopes, i imagine the latter would be
+    //      slower than the former (as you would need to enter_scope() every variable within the
+    //      hashmaps), but if you have many scopes accessing a variable in the outermost scope
+    //      hashmap would be very slow if using the former method (as you would need to hash the
+    //      value many times (unless there's a way to retrieve the hash and search the hashmap
+    //      using the hash rather than the actual key?))
+    //      am just considering writing a custom hashmap that lets us compute the hash once and use
+    //      it to check all inner hashmaps because of the latter issue (probably should just make
+    //      it a unique structure storing both vars and export_vars in such a case to improve the
+    //      performance of setting variables)
     pub fn enter_scope(&mut self) {
         for fd in &mut self.fds {
             fd.enter_scope();
@@ -359,14 +423,34 @@ impl<T: Iterator<Item = (OsString, OsString)>> From<T> for Environment {
     fn from(iter: T) -> Self {
         Self {
             special_vars: SpecialVars::new(),
-            vars: iter.collect(),
-            export_vars: HashMap::new(),
+            vars: HashMap::new(),
+            export_vars: iter.map(|(key, value)| (key, Some(value))).collect(),
             funcs: HashMap::new(),
 
             fds: Default::default(),
 
             builtins: BuiltinSet::new(vec![]),
         }
+    }
+}
+
+impl TryClone for Environment {
+    fn try_clone(&self) -> Result<Self, CommandError> {
+        let mut fds: [Locality<EnvFd>; FD_COUNT] = Default::default();
+
+        for (new_fd, fd) in fds.iter_mut().zip(self.fds.iter()) {
+            *new_fd = fd.try_clone()?;
+        }
+        Ok(Self {
+            special_vars: self.special_vars.clone(),
+            vars: self.vars.clone(),
+            export_vars: self.export_vars.clone(),
+            funcs: self.funcs.clone(),
+
+            fds: fds,
+
+            builtins: self.builtins.clone(),
+        })
     }
 }
 
@@ -386,7 +470,7 @@ impl<'a> Iterator for CurrentFdIter<'a> {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct EnvIter<'a, I: Iterator<Item = (&'a OsStr, &'a OsStr)>> {
     inner: I,
 }

@@ -1,12 +1,11 @@
 use clap;
-use failure::Compat;
+use failure::{self, Compat};
 use nix;
 
 use std::io;
 use std::os::unix::io::RawFd;
 use std::result::Result as StdResult;
 
-use ::MesaError;
 use ::error::LockError;
 
 pub type Result<T> = StdResult<T, ShellError>;
@@ -20,6 +19,12 @@ pub enum ShellError {
         #[cause] err: CommandError,
         cmdname: String,
     },
+
+    #[fail(display = "error while running subshell: {}", _0)]
+    SubShell(#[cause] CommandError),
+
+    #[fail(display = "failed to spawn subshell: {}", _0)]
+    Spawn(#[cause] CommandError),
 }
 
 #[derive(Fail, Debug)]
@@ -55,6 +60,10 @@ pub enum CommandError {
     #[fail(display = "{}", _0)]
     Builtin(#[cause] BuiltinError),
 
+    // this should only occur when spawning a non-simple, non-subshell command
+    #[fail(display = "{}", _0)]
+    Shell(#[cause] Box<Compat<ShellError>>),
+
     // XXX: depending on any features we decide to add, this may expand to include functions
 }
 
@@ -77,7 +86,7 @@ pub enum BuiltinError {
     Lock(#[cause] LockError),
 
     #[fail(display = "{}", _0)]
-    Other(#[cause] Compat<MesaError>),
+    Other(#[cause] Compat<failure::Error>),
 }
 
 impl From<clap::Error> for BuiltinError {

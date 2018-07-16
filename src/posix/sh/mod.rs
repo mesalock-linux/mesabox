@@ -66,7 +66,12 @@ where
 
             //println!("{:#?}", m);
             //println!();
-            println!("status: {}", m.1.execute(setup, &mut env));
+
+            let mut data = ast::RuntimeData { setup: setup, env: &mut env };
+
+            println!("status: {}", m.1.execute(&mut data));
+
+            Ok(())
         }
         Err(nom::Err::Failure(ctx)) | Err(nom::Err::Error(ctx)) => {
             //println!("{}", f.into_error_kind())
@@ -82,14 +87,13 @@ where
                             }
                         }
                     }
+                    Ok(())
                 }
                 _ => unimplemented!()
             }
         }
         _ => unreachable!()
     }
-
-    Ok(())
 }
 
 // FIXME: rustyline (and linefeed) seem to only return Strings instead of OsStrings, so they fail
@@ -107,11 +111,13 @@ where
     let mut env = setup.env().into();
     setup_default_env(setup, &mut env)?;
 
+    let mut setup_data = ast::RuntimeData { setup: setup, env: &mut env };
+
     let mut parser = Parser::new();
 
     loop {
         let readline = {
-            let ps1 = env.get_var("PS1");
+            let ps1 = setup_data.env.get_var("PS1");
             // FIXME: if string contains non-utf8, it won't be displayed
             rl.readline(&ps1.map(|s| s.to_string_lossy()).unwrap_or(Cow::from("")))
         };
@@ -125,7 +131,7 @@ where
                         let res = complete!(line.as_bytes(), call_m!(parser.complete_command));
                         match res {
                             Ok(m) => {
-                                println!("status: {}", m.1.execute(setup, &mut env));
+                                println!("status: {}", m.1.execute(&mut setup_data));
                                 break;
                             }
                             // FIXME: this is super wasteful (we build up part of the tree and then
@@ -149,10 +155,19 @@ where
                                         }
                                         break;
                                     }
+                                    nom::Context::Code(_, err) => {
+                                        match err {
+                                            nom::ErrorKind::Custom(s) => {
+                                                println!("{}", s);
+                                            }
+                                            other => {
+                                                println!("{:#?}", other);
+                                            }
+                                        }
+                                    }
                                     _ => unimplemented!()
                                 }
                             }
-                            _ => unreachable!()
                         }
                     }
 
@@ -161,7 +176,7 @@ where
                     // the input is incomplete, so read more
                     loop {
                         let new_data = {
-                            let ps2 = env.get_var("PS2");
+                            let ps2 = setup_data.env.get_var("PS2");
                             rl.readline(&ps2.map(|s| s.to_string_lossy()).unwrap_or(Cow::from("")))
                         };
                         match new_data {
@@ -172,7 +187,7 @@ where
                                 let res = complete!(line.as_bytes(), call_m!(parser.complete_command));
                                 match res {
                                     Ok(m) => {
-                                        println!("status: {}", m.1.execute(setup, &mut env));
+                                        println!("status: {}", m.1.execute(&mut setup_data));
                                         break 'outer;
                                     }
                                     Err(nom::Err::Incomplete(_))

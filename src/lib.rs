@@ -178,7 +178,15 @@ where
     }
 }
 
-pub trait UtilRead<'a>: Read + Send + Sync {
+pub trait LockableRead<'a>: Read + Send + Sync {
+    fn lock_reader_dyn<'b: 'a>(&'b mut self) -> StdResult<Box<BufRead + 'a>, LockError>;
+}
+
+pub trait LockableWrite<'a>: Write + Send + Sync {
+    fn lock_writer_dyn<'b: 'a>(&'b mut self) -> StdResult<Box<Write + 'a>, LockError>;
+}
+
+pub trait UtilRead<'a>: LockableRead<'a> {
     type Lock: BufRead + 'a;
 
     fn lock_reader<'b: 'a>(&'b mut self) -> StdResult<Self::Lock, LockError>;
@@ -188,7 +196,7 @@ pub trait UtilRead<'a>: Read + Send + Sync {
     }
 }
 
-pub trait UtilWrite<'a>: Write + Send + Sync {
+pub trait UtilWrite<'a>: LockableWrite<'a> {
     type Lock: Write + 'a;
 
     fn lock_writer<'b: 'a>(&'b mut self) -> StdResult<Self::Lock, LockError>;
