@@ -182,8 +182,6 @@ impl NcOptions {
             portlist: portlist,
             family: family,
             kflag: matches.is_present("k"),
-            // TODO: implement
-            // sflag: sflag,
             s_addr: s_addr,
             pflag: pflag,
             vflag: matches.is_present("v"),
