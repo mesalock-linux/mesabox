@@ -36,6 +36,7 @@ impl BuiltinSet {
         let name = name.to_string_lossy();
         loop {
             return Some(match &*name {
+                ":" => Builtin::Colon(ColonBuiltin),
                 "exec" => Builtin::Exec(ExecBuiltin),
                 "exit" => Builtin::Exit(ExitBuiltin),
                 "export" => Builtin::Export(ExportBuiltin),
@@ -53,6 +54,7 @@ impl BuiltinSet {
 
 #[derive(Clone)]
 pub enum Builtin {
+    Colon(ColonBuiltin),
     Exec(ExecBuiltin),
     Exit(ExitBuiltin),
     Export(ExportBuiltin),
@@ -112,6 +114,7 @@ impl Builtin {
             let setup = &mut util_setup;
 
             return match self {
+                Colon(u) => u.run(setup, env, data),
                 Exec(u) => u.run(setup, env, data),
                 Exit(u) => u.run(setup, env, data),
                 Export(u) => u.run(setup, env, data),
@@ -182,6 +185,18 @@ impl InProcessCommand for Builtin {
 
 trait BuiltinSetup {
     fn run<S: UtilSetup>(&self, setup: &mut S, env: &mut Environment, data: ExecData) -> Result<ExitCode>;
+}
+
+#[derive(Clone, Copy)]
+pub struct ColonBuiltin;
+
+impl BuiltinSetup for ColonBuiltin {
+    fn run<S>(&self, _setup: &mut S, _env: &mut Environment, _data: ExecData) -> Result<ExitCode>
+    where
+        S: UtilSetup,
+    {
+        Ok(0)
+    }
 }
 
 #[derive(Clone, Copy)]
