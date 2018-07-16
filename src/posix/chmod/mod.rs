@@ -213,7 +213,7 @@ where
         for filename in files {
             let file = util::actual_path(&self.current_dir, filename);
 
-            r &= if file.is_dir() && self.recursive {
+            r |= if file.is_dir() && self.recursive {
                 self.chmod_dir(&file)
             } else {
                 self.chmod_file(&file)
@@ -230,7 +230,7 @@ where
             let walker = WalkDir::new(file).contents_first(true);
             for entry in walker {
                 match entry {
-                    Ok(entry) => r &= self.chmod_file(&entry.path())?,
+                    Ok(entry) => r |= self.chmod_file(&entry.path())?,
                     Err(f) => writeln!(self.stderr, "{}", f)?,
                 }
             }
