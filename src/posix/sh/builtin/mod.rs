@@ -128,9 +128,7 @@ impl Builtin {
         // FIXME: this needs use dynamic dispatch at the moment to avoid very, very slow build
         //        times and huge binaries (e.g. 8.5 min and 18 MB for release build with maybe 10
         //        utils + sh, like 30 sec and 112 MB for debug build with the same).  ideally, we
-        //        would not have to do this (as doing so prevents proper locking, so writing to
-        //        stdout or anything else that needs to lock is very slow (with enough input it is
-        //        probably slower than just starting up a separate process)
+        //        would not have to do this (as obviously static dispatch is faster)
         // TODO: add anything else in data to setup
         // TODO: add export_vars to setup
         let input_fd = input.raw_fd();
