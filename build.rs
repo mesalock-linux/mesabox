@@ -28,6 +28,7 @@ fn create_util_map() -> HashMap<&'static str, &'static str> {
 
     hashmap.insert("cat", "posix");
     hashmap.insert("chmod", "posix");
+    hashmap.insert("echo", "posix");
     hashmap.insert("head", "posix");
     hashmap.insert("sh", "posix");
     hashmap.insert("sleep", "posix");
@@ -104,7 +105,7 @@ where
             "pub fn {}<T, U, V>(args: T) -> Result<()>
 where
     T: IntoIterator<IntoIter = V, Item = U>,
-    U: Into<OsString> + Clone,
+    U: Into<OsString> + AsRef<OsStr> + Clone,
     V: ArgsIter<ArgItem = U>,
 {{
     let mut args = iter::once(OsString::from({0:?})).chain(args.into_iter().map(|s| s.into()));

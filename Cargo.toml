@@ -35,12 +35,14 @@ networking = [
 
 cat = []
 chmod = ["regex", "walkdir", "uucore"]
+echo = []
 head = []
 sh = ["either", "nom", "glob", "rustyline"]
 sleep = ["uucore"]
 posix = [
     "cat",
     "chmod",
+    "echo",
     "head",
     "sh",
     "sleep"

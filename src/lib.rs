@@ -207,10 +207,10 @@ pub trait UtilWrite<'a>: LockableWrite<'a> {
 }
 
 pub trait ArgsIter: Iterator<Item = <Self as ArgsIter>::ArgItem> {
-    type ArgItem: Into<OsString> + Clone;
+    type ArgItem: Into<OsString> + AsRef<OsStr> + Clone;
 }
 
-impl<'a, T: Into<OsString> + Clone, U: Iterator<Item = T>> ArgsIter for &'a mut U {
+impl<'a, T: Into<OsString> + AsRef<OsStr> + Clone, U: Iterator<Item = T>> ArgsIter for &'a mut U {
     type ArgItem = T;
 }
 
@@ -251,7 +251,7 @@ impl EasyUtil {
     pub fn execute<'a, T, U, V, F>(&'a mut self, args: T, func: F) -> Result<()>
     where
         T: IntoIterator<IntoIter = V, Item = U>,
-        U: Into<OsString> + Clone,
+        U: Into<OsString> + AsRef<OsStr> + Clone,
         V: ArgsIter<ArgItem = U>,
         F: Fn(&mut UtilData<'a, 'a, 'a, Stdin, Stdout, Stderr, VarsOs>, V) -> Result<()>,
     {
@@ -270,7 +270,7 @@ pub fn execute<S, T, U, V>(setup: &mut S, args: T) -> Result<()>
 where
     S: UtilSetup,
     T: IntoIterator<IntoIter = V, Item = U>,
-    U: Into<OsString> + Clone,
+    U: Into<OsString> + AsRef<OsStr> + Clone,
     V: ArgsIter<ArgItem = U>,
 {
     let mut args = args.into_iter();
