@@ -38,7 +38,7 @@ matrix:
       before_install:
       install:
       before_script:
-        - cargo +nightly install clippy --force
+        - rustup component add clippy-preview --toolchain=nightly
       script:
         - cargo clippy
   allow_failures:
