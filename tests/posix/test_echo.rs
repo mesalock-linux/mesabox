@@ -94,3 +94,28 @@ fn test_escape_tab() {
 fn test_escape_vertical_tab() {
     new_ucmd!().arg(r"\v").succeeds().stdout_only("\x0B\n");
 }
+
+#[test]
+fn test_escape_others() {
+    new_ucmd!().arg(r"\o").succeeds().stdout_only("\\o\n");
+}
+
+#[test]
+fn test_escape_octal_break() {
+    new_ucmd!().arg(r"\0178").succeeds().stdout_only("\x0f\x38\n");
+}
+
+#[test]
+fn test_escape_octal_nothing() {
+    new_ucmd!().arg(r"\0").succeeds().stdout_only("\x00\n");
+}
+
+#[test]
+fn test_multiple_args() {
+    new_ucmd!().args(&[r"a", r"b", r"c"]).succeeds().stdout_only("a b c\n");
+}
+
+#[test]
+fn test_no_arg() {
+    new_ucmd!().succeeds().stdout_only("\n");
+}
