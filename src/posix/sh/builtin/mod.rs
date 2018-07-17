@@ -43,6 +43,7 @@ impl BuiltinSet {
                 "exit" => Builtin::Exit(ExitBuiltin),
                 "export" => Builtin::Export(ExportBuiltin),
                 "read" => Builtin::Read(ReadBuiltin),
+                "shift" => Builtin::Shift(ShiftBuiltin),
                 "unset" => Builtin::Unset(UnsetBuiltin),
 
                 // TODO: should prevent certain utils from being run here (e.g. init and sh)
@@ -63,6 +64,7 @@ pub enum Builtin {
     Exit(ExitBuiltin),
     Export(ExportBuiltin),
     Read(ReadBuiltin),
+    Shift(ShiftBuiltin),
     Unset(UnsetBuiltin),
 
     Other(String),
@@ -125,6 +127,7 @@ impl Builtin {
                 Exit(u) => u.run(setup, env, data),
                 Export(u) => u.run(setup, env, data),
                 Read(u) => u.run(setup, env, data),
+                Shift(u) => u.run(setup, env, data),
                 Unset(u) => u.run(setup, env, data),
 
                 Other(util) => {
@@ -197,27 +200,14 @@ trait BuiltinSetup {
 pub struct BreakBuiltin;
 
 impl BreakBuiltin {
-    pub fn run_common<S>(setup: &mut S, env: &mut Environment, data: ExecData, kind: CheckBreak) -> Result<ExitCode>
+    pub fn run_common<S>(_setup: &mut S, env: &mut Environment, data: ExecData, kind: CheckBreak) -> Result<ExitCode>
     where
         S: UtilSetup,
     {
         let mut args = data.args.into_iter();
 
         let count = match args.next() {
-            Some(arg) => {
-                // borrow checker work-around (to avoid an unnecessary allocation)
-                let res = if let Some(s) = arg.to_str() {
-                    Some(s.parse::<usize>())
-                } else {
-                    None
-                };
-                match res {
-                    Some(Ok(0)) => Err(BuiltinError::InvalidNumber(arg))?,
-                    Some(Ok(count)) => count,
-                    Some(Err(f)) => Err(BuiltinError::ParseInt { err: f, string: arg })?,
-                    None => Err(BuiltinError::InvalidUtf8(arg))?,
-                }
-            }
+            Some(arg) => arg_to_usize(arg, |count| count != 0)?,
             None => 1,
         };
 
@@ -344,45 +334,6 @@ impl BuiltinSetup for ExportBuiltin {
 }
 
 #[derive(Clone, Copy)]
-pub struct UnsetBuiltin;
-
-impl BuiltinSetup for UnsetBuiltin {
-    fn run<S>(&self, _setup: &mut S, env: &mut Environment, data: ExecData) -> Result<ExitCode>
-    where
-        S: UtilSetup,
-    {
-        // TODO: suppress --help/--version (non-POSIX, although they could perhaps serve as an extension)
-        let matches = App::new("unset")
-            .setting(AppSettings::NoBinaryName)
-            .arg(Arg::with_name("function")
-                .short("f")
-                .overrides_with("variable"))
-            .arg(Arg::with_name("variable")
-                .short("v"))
-            .arg(Arg::with_name("NAMES")
-                .index(1)
-                .multiple(true))
-            .get_matches_from_safe(data.args)?;
-
-        let func = matches.is_present("function");
-
-        // TODO: if variable/whatever is readonly, this function should return >0 and NOT remove that
-        //       variable
-        if let Some(values) = matches.values_of_os("NAMES") {
-            for name in values {
-                if func {
-                    env.remove_func(name);
-                } else {
-                    env.remove_var(name);
-                }
-            }
-        }
-
-        Ok(0)
-    }
-}
-
-#[derive(Clone, Copy)]
 pub struct ReadBuiltin;
 
 impl BuiltinSetup for ReadBuiltin {
@@ -473,6 +424,94 @@ impl BuiltinSetup for ReadBuiltin {
         }
 
         Ok(0)
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct ShiftBuiltin;
+
+impl BuiltinSetup for ShiftBuiltin {
+    fn run<S>(&self, _setup: &mut S, env: &mut Environment, data: ExecData) -> Result<ExitCode>
+    where
+        S: UtilSetup,
+    {
+        let mut args = data.args.into_iter();
+
+        let count = match args.next() {
+            Some(arg) => arg_to_usize(arg, |count| {
+                count <= env.special_vars().get_positionals().len()
+            })?,
+            None => if env.special_vars().get_positionals().len() > 0 {
+                1
+            } else {
+                Err(BuiltinError::InvalidNumber(OsString::from("1")))?
+            },
+        };
+
+        for _ in 0..count {
+            env.special_vars().shift_positionals();
+        }
+
+        Ok(0)
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct UnsetBuiltin;
+
+impl BuiltinSetup for UnsetBuiltin {
+    fn run<S>(&self, _setup: &mut S, env: &mut Environment, data: ExecData) -> Result<ExitCode>
+    where
+        S: UtilSetup,
+    {
+        // TODO: suppress --help/--version (non-POSIX, although they could perhaps serve as an extension)
+        let matches = App::new("unset")
+            .setting(AppSettings::NoBinaryName)
+            .arg(Arg::with_name("function")
+                .short("f")
+                .overrides_with("variable"))
+            .arg(Arg::with_name("variable")
+                .short("v"))
+            .arg(Arg::with_name("NAMES")
+                .index(1)
+                .multiple(true))
+            .get_matches_from_safe(data.args)?;
+
+        let func = matches.is_present("function");
+
+        // TODO: if variable/whatever is readonly, this function should return >0 and NOT remove that
+        //       variable
+        if let Some(values) = matches.values_of_os("NAMES") {
+            for name in values {
+                if func {
+                    env.remove_func(name);
+                } else {
+                    env.remove_var(name);
+                }
+            }
+        }
+
+        Ok(0)
+    }
+}
+
+fn arg_to_usize<F: FnOnce(usize) -> bool>(arg: OsString, validator: F) -> Result<usize> {
+    // borrow checker work-around (to avoid an unnecessary allocation)
+    let res = if let Some(s) = arg.to_str() {
+        Some(s.parse::<usize>())
+    } else {
+        None
+    };
+    match res {
+        Some(Ok(count)) => {
+            if validator(count) {
+                Ok(count)
+            } else {
+                Err(BuiltinError::InvalidNumber(arg))
+            }
+        }
+        Some(Err(f)) => Err(BuiltinError::ParseInt { err: f, string: arg }),
+        None => Err(BuiltinError::InvalidUtf8(arg)),
     }
 }
 

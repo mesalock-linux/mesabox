@@ -309,7 +309,6 @@ impl InProcessChild {
         }
     }
 
-    // FIXME: stop unwrapping
     pub fn spawn<S, F>(data: &mut RuntimeData<S>, func: F) -> CmdResult<Self>
     where
         S: UtilSetup,
@@ -319,7 +318,7 @@ impl InProcessChild {
         let mut write = None;
         let stdout = match data.env.get_fd(1).current_val() {
             EnvFd::Pipeline => {
-                let (read_pipe, write_pipe) = unistd::pipe().unwrap();
+                let (read_pipe, write_pipe) = unistd::pipe().map_err(|e| CommandError::Pipe(e))?;
                 read = Some(read_pipe);
                 write = Some(write_pipe);
                 EnvFd::Fd(RawFdWrapper::new(read_pipe, true, false))
@@ -330,7 +329,7 @@ impl InProcessChild {
             data.env.set_local_fd(1, EnvFd::Fd(RawFdWrapper::new(write, false, true)));
         }
 
-        match unistd::fork().unwrap() {
+        match unistd::fork().map_err(|e| CommandError::Fork(e))? {
             unistd::ForkResult::Child => {
                 // FIXME: don't unwrap
                 process::exit(func(data).unwrap())

@@ -218,6 +218,12 @@ impl SpecialVars {
         self.args.current_val()
     }
 
+    pub fn shift_positionals(&mut self) {
+        // XXX: maybe switch a VecDeque?  or store the array in reverse?  VecDeque might let us
+        //      implement a pop command
+        self.args.current_val_mut().remove(0);
+    }
+
     pub fn enter_scope(&mut self) {
         self.args.enter_scope();
     }

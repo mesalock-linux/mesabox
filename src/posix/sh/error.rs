@@ -52,6 +52,9 @@ pub enum CommandError {
     #[fail(display = "{}", _0)]
     PipeIo(#[cause] io::Error),
 
+    #[fail(display = "could not fork: {}", _0)]
+    Fork(#[cause] nix::Error),
+
     #[fail(display = "could not set up fd {} as file {}: {}", fd, filename, err)]
     FdAsFile {
         #[cause] err: io::Error,
