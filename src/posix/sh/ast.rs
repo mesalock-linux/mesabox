@@ -21,7 +21,7 @@ use std::result::Result as StdResult;
 use util::RawFdWrapper;
 use super::{NAME, UtilSetup};
 use super::command::{CommandEnv, CommandEnvContainer, CommandWrapper, ExecData, ExecEnv, InProcessCommand, InProcessChild, ShellChild};
-use super::env::{EnvFd, Environment, TryClone};
+use super::env::{CheckBreak, EnvFd, Environment, TryClone};
 use super::error::{Result, CmdResult, CommandError, ShellError};
 
 pub type ExitCode = libc::c_int;
@@ -347,12 +347,12 @@ impl Pipeline {
                 }
             }
 
-            data.env.enter_scope();
-            if let Some(child) = children.last_mut() {
-                data.env.set_local_fd(0, child.output());
-            }
-            let code = last_cmd.execute(data);
-            data.env.exit_scope();
+            let code = fake_subshell(data, |data| {
+                if let Some(child) = children.last_mut() {
+                    data.env.set_local_fd(0, child.output());
+                }
+                last_cmd.execute(data)
+            });
 
             // make sure all the children exit to avoid zombies
             // XXX: currently, this will cause the last command's error (if any) first and then the
@@ -458,7 +458,7 @@ impl CommandInner {
             Case(ref clause) => Ok(clause.execute(data)),
             FunctionDef(ref def) => Ok(def.execute(data)),
             AndOr(ref and_ors) => Ok(exec_list(data, and_ors)),
-            SubShell(ref and_ors) => {
+            SubShell(_) => {
                 // XXX: this would be a use case for variable locality, but for now fork
                 // FIXME: need to set up so that it dumps to stdout (currently will just make a pipe to nowhere)
                 self
@@ -552,7 +552,11 @@ impl IfClause {
     {
         // TODO: redirects
         if self.cond.execute(data) == 0 {
-            self.body.execute(data)
+            if check_break(data) {
+                0
+            } else {
+                self.body.execute(data)
+            }
         } else if let Some(ref clause) = self.else_stmt {
             clause.execute(data)
         } else {
@@ -588,6 +592,8 @@ impl ElseClause {
                     Some(ref clause) => clause.execute(data),
                     None => 0
                 };
+            } else if check_break(data) {
+                return 0;
             }
         }
         self.body.execute(data)
@@ -615,10 +621,34 @@ impl WhileClause {
         S: UtilSetup + 'a,
     {
         // TODO: redirects
+        data.env.inc_loop_depth();
+
         let mut code = 0;
-        while (self.cond.execute(data) == 0) == self.desired {
-            code = self.body.execute(data);
+        loop {
+            // we can't just use a while loop as continue/break work in the condition as well
+            let condres = self.cond.execute(data) == 0;
+            if condres {
+                match check_break_loop(data) {
+                    CheckBreak::Continue => continue,
+                    CheckBreak::Break => break,
+                    _ => {}
+                }
+            }
+
+            // check the actual condition (i.e. if the command was 0 for while or !0 for until)
+            if condres == self.desired {
+                code = self.body.execute(data);
+
+                if check_break_loop(data) == CheckBreak::Break {
+                    break;
+                }
+            } else {
+                break;
+            }
         }
+
+        data.env.dec_loop_depth();
+
         code
     }
 }
@@ -644,6 +674,8 @@ impl ForClause {
         S: UtilSetup + 'a,
     {
         // TODO: redirects
+        data.env.inc_loop_depth();
+
         // TODO: when self.words is None it should act as if it were the value in $@ (retrieve from env)
         let words = match self.words {
             Some(ref words) => &words[..],
@@ -655,7 +687,14 @@ impl ForClause {
             let value = word.eval(data);
             data.env.set_var(Cow::Borrowed(&self.name), value);
             code = self.body.execute(data);
+
+            if check_break_loop(data) == CheckBreak::Break {
+                break;
+            }
         }
+
+        data.env.dec_loop_depth();
+
         code
     }
 }
@@ -1193,14 +1232,10 @@ impl CommandSubst {
             Err(f) => return f,
         };
 
-        // TODO: enter_scope() needs to protect variables somehow, so I guess they need Locality as
-        //       well?  Maybe clone env?
-        data.env.enter_scope();
-
-        data.env.set_local_fd(1, EnvFd::Fd(RawFdWrapper::new(write, false, true)));
-        let code = self.command.execute(data);
-
-        data.env.exit_scope();
+        let code = fake_subshell(data, |data| {
+            data.env.set_local_fd(1, EnvFd::Fd(RawFdWrapper::new(write, false, true)));
+            self.command.execute(data)
+        });
         data.env.special_vars().set_last_exitcode(code);
 
         // XXX: not sure if we want to just ignore
@@ -1444,6 +1479,9 @@ where
     let mut code = 0;
     for and_or in chain {
         code = and_or.execute(data, code);
+        if check_break(data) {
+            break;
+        }
     }
     code
 }
@@ -1455,6 +1493,9 @@ where
     let mut code = 0;
     for chain in list {
         code = exec_andor_chain(data, chain);
+        if check_break(data) {
+            break;
+        }
     }
     code
 }
@@ -1474,4 +1515,48 @@ where
             Err(127)
         }
     }
+}
+
+/// Set up a "subshell" that actually executes in the current process.  This function takes care of
+/// saving various information that could get destroyed/modified in the executed commands and
+/// restoring it afterwards.
+fn fake_subshell<'a: 'b, 'b, S, F>(data: &mut RuntimeData<'a, 'b, S>, func: F) -> ExitCode
+where
+    S: UtilSetup + 'a,
+    F: FnOnce(&mut RuntimeData<'a, 'b, S>) -> ExitCode,
+{
+    let loop_depth = data.env.loop_depth();
+
+    // TODO: enter_scope() needs to protect variables somehow, so I guess they need Locality as
+    //       well?  Maybe clone env?
+    data.env.enter_scope();
+    let code = func(data);
+    data.env.exit_scope();
+
+    // fix loop depth
+    data.env.set_loop_depth(loop_depth);
+
+    // reset break counter in case it got set in the "subshell"
+    data.env.set_break_counter(0);
+
+    code
+}
+
+fn check_break_loop<'a: 'b, 'b, S>(data: &mut RuntimeData<'a, 'b, S>) -> CheckBreak
+where
+    S: UtilSetup + 'a,
+{
+    if check_break(data) {
+        data.env.dec_break_counter();
+        data.env.break_type()
+    } else {
+        CheckBreak::None
+    }
+}
+
+fn check_break<'a: 'b, 'b, S>(data: &mut RuntimeData<'a, 'b, S>) -> bool
+where
+    S: UtilSetup + 'a,
+{
+    data.env.break_counter() != 0
 }

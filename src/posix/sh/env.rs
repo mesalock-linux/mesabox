@@ -181,6 +181,13 @@ impl<T: TryClone> TryClone for Locality<T> {
     }
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub enum CheckBreak {
+    None,
+    Break,
+    Continue,
+}
+
 #[derive(Clone, Debug)]
 pub struct SpecialVars {
     last_exitcode: ExitCode,
@@ -240,6 +247,15 @@ pub struct Environment {
 
     // BuiltinSet is designed so that by enabling options the set of builtins can be changed
     builtins: BuiltinSet,
+
+    // used to track how far back to go for break/continue statements
+    break_counter: usize,
+
+    // break/continue type
+    break_type: CheckBreak,
+
+    // track how many loops deep we are (if 0, break/continue don't do anything)
+    loop_depth: usize,
 }
 
 impl Environment {
@@ -254,7 +270,47 @@ impl Environment {
             fds: Default::default(),
 
             builtins: BuiltinSet::new(vec![]),
+
+            break_counter: 0,
+            break_type: CheckBreak::None,
+            loop_depth: 0,
         }
+    }
+
+    pub fn set_break_type(&mut self, kind: CheckBreak) {
+        self.break_type = kind;
+    }
+
+    pub fn break_type(&self) -> CheckBreak {
+        self.break_type.clone()
+    }
+
+    pub fn set_break_counter(&mut self, count: usize) {
+        self.break_counter = count;
+    }
+
+    pub fn dec_break_counter(&mut self) {
+        self.break_counter -= 1;
+    }
+
+    pub fn break_counter(&self) -> usize {
+        self.break_counter
+    }
+
+    pub fn set_loop_depth(&mut self, depth: usize) {
+        self.loop_depth = depth;
+    }
+
+    pub fn inc_loop_depth(&mut self) {
+        self.loop_depth += 1;
+    }
+
+    pub fn dec_loop_depth(&mut self) {
+        self.loop_depth -= 1;
+    }
+
+    pub fn loop_depth(&self) -> usize {
+        self.loop_depth
     }
 
     pub fn special_vars(&mut self) -> &mut SpecialVars {
@@ -430,6 +486,10 @@ impl<T: Iterator<Item = (OsString, OsString)>> From<T> for Environment {
             fds: Default::default(),
 
             builtins: BuiltinSet::new(vec![]),
+
+            break_counter: 0,
+            break_type: CheckBreak::None,
+            loop_depth: 0,
         }
     }
 }
@@ -450,6 +510,10 @@ impl TryClone for Environment {
             fds: fds,
 
             builtins: self.builtins.clone(),
+
+            break_counter: self.break_counter,
+            break_type: self.break_type.clone(),
+            loop_depth: self.loop_depth,
         })
     }
 }

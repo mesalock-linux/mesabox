@@ -2,7 +2,9 @@ use clap;
 use failure::{self, Compat};
 use nix;
 
+use std::ffi::OsString;
 use std::io;
+use std::num::ParseIntError;
 use std::os::unix::io::RawFd;
 use std::result::Result as StdResult;
 
@@ -84,6 +86,18 @@ pub enum BuiltinError {
     /// implemented for something that can fail to lock)
     #[fail(display = "{}", _0)]
     Lock(#[cause] LockError),
+
+    #[fail(display = "illegal number {:?}: {}", string, err)]
+    ParseInt {
+        #[cause] err: ParseIntError,
+        string: OsString,
+    },
+
+    #[fail(display = "illegal number {:?}", _0)]
+    InvalidNumber(OsString),
+
+    #[fail(display = "invalid string {:?}", _0)]
+    InvalidUtf8(OsString),
 
     #[fail(display = "{}", _0)]
     Other(#[cause] Compat<failure::Error>),

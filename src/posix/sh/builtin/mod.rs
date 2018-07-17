@@ -13,7 +13,7 @@ use util::{ReadableVec, UtilReadDyn, UtilWriteDyn};
 use super::UtilSetup;
 use super::ast::{ExitCode, RuntimeData};
 use super::command::{ExecData, InProcessChild, InProcessCommand, ShellChild};
-use super::env::{EnvFd, Environment, TryClone};
+use super::env::{CheckBreak, EnvFd, Environment, TryClone};
 use super::error::{CmdResult, BuiltinError, CommandError};
 use super::option::ShellOption;
 
@@ -36,7 +36,9 @@ impl BuiltinSet {
         let name = name.to_string_lossy();
         loop {
             return Some(match &*name {
+                "break" => Builtin::Break(BreakBuiltin),
                 ":" => Builtin::Colon(ColonBuiltin),
+                "continue" => Builtin::Continue(ContinueBuiltin),
                 "exec" => Builtin::Exec(ExecBuiltin),
                 "exit" => Builtin::Exit(ExitBuiltin),
                 "export" => Builtin::Export(ExportBuiltin),
@@ -54,7 +56,9 @@ impl BuiltinSet {
 
 #[derive(Clone)]
 pub enum Builtin {
+    Break(BreakBuiltin),
     Colon(ColonBuiltin),
+    Continue(ContinueBuiltin),
     Exec(ExecBuiltin),
     Exit(ExitBuiltin),
     Export(ExportBuiltin),
@@ -114,7 +118,9 @@ impl Builtin {
             let setup = &mut util_setup;
 
             return match self {
+                Break(u) => u.run(setup, env, data),
                 Colon(u) => u.run(setup, env, data),
+                Continue(u) => u.run(setup, env, data),
                 Exec(u) => u.run(setup, env, data),
                 Exit(u) => u.run(setup, env, data),
                 Export(u) => u.run(setup, env, data),
@@ -188,6 +194,51 @@ trait BuiltinSetup {
 }
 
 #[derive(Clone, Copy)]
+pub struct BreakBuiltin;
+
+impl BreakBuiltin {
+    pub fn run_common<S>(setup: &mut S, env: &mut Environment, data: ExecData, kind: CheckBreak) -> Result<ExitCode>
+    where
+        S: UtilSetup,
+    {
+        let mut args = data.args.into_iter();
+
+        let count = match args.next() {
+            Some(arg) => {
+                // borrow checker work-around (to avoid an unnecessary allocation)
+                let res = if let Some(s) = arg.to_str() {
+                    Some(s.parse::<usize>())
+                } else {
+                    None
+                };
+                match res {
+                    Some(Ok(0)) => Err(BuiltinError::InvalidNumber(arg))?,
+                    Some(Ok(count)) => count,
+                    Some(Err(f)) => Err(BuiltinError::ParseInt { err: f, string: arg })?,
+                    None => Err(BuiltinError::InvalidUtf8(arg))?,
+                }
+            }
+            None => 1,
+        };
+
+        let count = count.min(env.loop_depth());
+        env.set_break_counter(count);
+        env.set_break_type(kind);
+
+        Ok(0)
+    }
+}
+
+impl BuiltinSetup for BreakBuiltin {
+    fn run<S>(&self, setup: &mut S, env: &mut Environment, data: ExecData) -> Result<ExitCode>
+    where
+        S: UtilSetup,
+    {
+        Self::run_common(setup, env, data, CheckBreak::Break)
+    }
+}
+
+#[derive(Clone, Copy)]
 pub struct ColonBuiltin;
 
 impl BuiltinSetup for ColonBuiltin {
@@ -196,6 +247,18 @@ impl BuiltinSetup for ColonBuiltin {
         S: UtilSetup,
     {
         Ok(0)
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct ContinueBuiltin;
+
+impl BuiltinSetup for ContinueBuiltin {
+    fn run<S>(&self, setup: &mut S, env: &mut Environment, data: ExecData) -> Result<ExitCode>
+    where
+        S: UtilSetup,
+    {
+        BreakBuiltin::run_common(setup, env, data, CheckBreak::Continue)
     }
 }
 
