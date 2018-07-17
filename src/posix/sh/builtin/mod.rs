@@ -1,11 +1,6 @@
-use clap::{App, Arg, AppSettings};
-use nix::unistd;
-
-use std::borrow::Cow;
 use std::ffi::{OsStr, OsString};
-use std::io::{self, BufRead, Write};
+use std::io::{self, Write};
 use std::iter;
-use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::result::Result as StdResult;
 
 use ::{UtilData, UtilRead, UtilWrite, ArgsIter};
@@ -16,6 +11,28 @@ use super::command::{ExecData, InProcessChild, InProcessCommand, ShellChild};
 use super::env::{CheckBreak, EnvFd, Environment, TryClone};
 use super::error::{CmdResult, BuiltinError, CommandError};
 use super::option::ShellOption;
+
+use self::break_builtin::BreakBuiltin;
+use self::colon::ColonBuiltin;
+use self::continue_builtin::ContinueBuiltin;
+use self::exec::ExecBuiltin;
+use self::exit::ExitBuiltin;
+use self::export::ExportBuiltin;
+use self::read::ReadBuiltin;
+use self::shift::ShiftBuiltin;
+use self::unset::UnsetBuiltin;
+
+#[path = "break.rs"]
+mod break_builtin;
+mod colon;
+#[path = "continue.rs"]
+mod continue_builtin;
+mod exec;
+mod exit;
+mod export;
+mod read;
+mod shift;
+mod unset;
 
 type Result<T> = StdResult<T, BuiltinError>;
 
@@ -194,305 +211,6 @@ impl InProcessCommand for Builtin {
 
 trait BuiltinSetup {
     fn run<S: UtilSetup>(&self, setup: &mut S, env: &mut Environment, data: ExecData) -> Result<ExitCode>;
-}
-
-#[derive(Clone, Copy)]
-pub struct BreakBuiltin;
-
-impl BreakBuiltin {
-    pub fn run_common<S>(_setup: &mut S, env: &mut Environment, data: ExecData, kind: CheckBreak) -> Result<ExitCode>
-    where
-        S: UtilSetup,
-    {
-        let mut args = data.args.into_iter();
-
-        let count = match args.next() {
-            Some(arg) => arg_to_usize(arg, |count| count != 0)?,
-            None => 1,
-        };
-
-        let count = count.min(env.loop_depth());
-        env.set_break_counter(count);
-        env.set_break_type(kind);
-
-        Ok(0)
-    }
-}
-
-impl BuiltinSetup for BreakBuiltin {
-    fn run<S>(&self, setup: &mut S, env: &mut Environment, data: ExecData) -> Result<ExitCode>
-    where
-        S: UtilSetup,
-    {
-        Self::run_common(setup, env, data, CheckBreak::Break)
-    }
-}
-
-#[derive(Clone, Copy)]
-pub struct ColonBuiltin;
-
-impl BuiltinSetup for ColonBuiltin {
-    fn run<S>(&self, _setup: &mut S, _env: &mut Environment, _data: ExecData) -> Result<ExitCode>
-    where
-        S: UtilSetup,
-    {
-        Ok(0)
-    }
-}
-
-#[derive(Clone, Copy)]
-pub struct ContinueBuiltin;
-
-impl BuiltinSetup for ContinueBuiltin {
-    fn run<S>(&self, setup: &mut S, env: &mut Environment, data: ExecData) -> Result<ExitCode>
-    where
-        S: UtilSetup,
-    {
-        BreakBuiltin::run_common(setup, env, data, CheckBreak::Continue)
-    }
-}
-
-#[derive(Clone, Copy)]
-pub struct ExecBuiltin;
-
-// XXX: given that this replaces the current process, if we are being used as a library the calling
-//      process will be replaced.  this could be an issue when e.g. running our tests
-// TODO: because this needs to affect the "current shell execution environment," we need to somehow
-//       return the fds to the parent environment
-impl BuiltinSetup for ExecBuiltin {
-    fn run<S>(&self, setup: &mut S, env: &mut Environment, data: ExecData) -> Result<ExitCode>
-    where
-        S: UtilSetup,
-    {
-        use std::process::{Command, Stdio};
-        use std::os::unix::io::FromRawFd;
-        use std::os::unix::process::CommandExt;
-
-        let mut args = data.args.into_iter();
-        if let Some(name) = args.next() {
-            // replace the current process with that started by the given command
-            let mut cmd = Command::new(name);
-            cmd.args(args)
-                .env_clear()
-                .envs(env.export_iter())
-                .envs(data.env.iter());
-
-            // TODO: figure out what to do if one of the IO interfaces doesn't have a file
-            //       descriptor (such as as Vec<u8>).  afaict this is only really an issue with
-            //       heredocs and when we are called as a library from a process that most likely
-            //       does not actually want to be replaced
-            // NOTE: we need to duplicate the fds as from_raw_fd() takes ownership
-            // TODO: this needs to duplicate all the fds (3-9 because stdin/stdout/stderr are done
-            //       already below) like in command.rs
-            if let Some(fd) = setup.input().raw_fd() {
-                let fd = unistd::dup(fd)?;
-                cmd.stdin(unsafe { Stdio::from_raw_fd(fd) });
-            }
-            if let Some(fd) = setup.output().raw_fd() {
-                let fd = unistd::dup(fd)?;
-                cmd.stdout(unsafe { Stdio::from_raw_fd(fd) });
-            }
-            if let Some(fd) = setup.error().raw_fd() {
-                let fd = unistd::dup(fd)?;
-                cmd.stderr(unsafe { Stdio::from_raw_fd(fd) });
-            }
-
-            // if this actually returns an error the process failed to start
-            Err(cmd.exec().into())
-        } else {
-            Ok(0)
-        }
-    }
-}
-
-#[derive(Clone, Copy)]
-pub struct ExitBuiltin;
-
-impl BuiltinSetup for ExitBuiltin {
-    fn run<S: UtilSetup>(&self, _setup: &mut S, _env: &mut Environment, _data: ExecData) -> Result<ExitCode> {
-        // TODO: figure out how to exit properly
-        unimplemented!()
-    }
-}
-
-#[derive(Clone, Copy)]
-pub struct ExportBuiltin;
-
-impl BuiltinSetup for ExportBuiltin {
-    // TODO: needs to support -p option
-    fn run<S>(&self, _setup: &mut S, env: &mut Environment, data: ExecData) -> Result<ExitCode>
-    where
-        S: UtilSetup,
-    {
-        // TODO: need to split args like VarAssign (we are just assuming names are given atm)
-        for arg in data.args {
-            env.export_var(Cow::Owned(arg));
-        }
-
-        Ok(0)
-    }
-}
-
-#[derive(Clone, Copy)]
-pub struct ReadBuiltin;
-
-impl BuiltinSetup for ReadBuiltin {
-    fn run<S>(&self, setup: &mut S, env: &mut Environment, data: ExecData) -> Result<ExitCode>
-    where
-        S: UtilSetup,
-    {
-        let matches = App::new("read")
-            .setting(AppSettings::NoBinaryName)
-            // if present we treat backslash as a normal character rather than the start of an escape
-            // sequence
-            .arg(Arg::with_name("backslash")
-                .short("r"))
-            .arg(Arg::with_name("VARS")
-                .index(1)
-                .multiple(true)
-                .required(true))
-            .get_matches_from_safe(data.args)?;
-
-        let input = setup.input();
-        let mut input = input.lock_reader()?;
-
-        let ignore_backslash = matches.is_present("backslash");
-
-        let check_backslash = |buffer: &mut Vec<u8>| {
-            loop {
-                let res = match buffer.iter().last() {
-                    Some(b'\n') => {
-                        buffer.pop();
-                        continue;
-                    }
-                    Some(b'\\') => {
-                        // need to make sure this byte isn't escaped
-                        buffer.iter().rev().skip(1).take_while(|&&byte| byte == b'\\').count() % 2 == 1
-                    }
-                    _ => true,
-                };
-                return res;
-            }
-        };
-
-        let mut buffer = vec![];
-        loop {
-            // TODO: check for EOF
-            input.read_until(b'\n', &mut buffer)?;
-            let not_backslash = check_backslash(&mut buffer);
-            // TODO: handle heredoc portion?
-            if ignore_backslash || not_backslash {
-                break;
-            }
-            // we need to remove the backslash
-            buffer.pop();
-        }
-
-        let vars = matches.values_of_os("VARS").unwrap();
-        let var_count = vars.clone().count();
-
-        let field_iter = {
-            // XXX: maybe this should be extracted into a separate function (i feel like this will be used
-            //      to split fields normally too)
-            let ifs = env.get_var("IFS").map(|v| v.clone()).unwrap_or_else(|| OsString::from(" \t\n"));
-            buffer.splitn(var_count, move |byte| {
-                ifs.as_bytes().contains(byte)
-            })
-        };
-        for (var, value) in vars.zip(field_iter) {
-            let value = if ignore_backslash {
-                value.to_owned()
-            } else {
-                let mut result = Vec::with_capacity(value.len());
-                let mut in_escape = false;
-                for &byte in value {
-                    if in_escape {
-                        result.push(byte);
-                        in_escape = false;
-                    } else {
-                        if byte == b'\\' {
-                            in_escape = true;
-                        } else {
-                            result.push(byte);
-                        }
-                    }
-                }
-                // it should be impossible for there to be an extra escape
-                result
-            };
-            env.set_var(Cow::Borrowed(var), OsString::from_vec(value));
-        }
-
-        Ok(0)
-    }
-}
-
-#[derive(Clone, Copy)]
-pub struct ShiftBuiltin;
-
-impl BuiltinSetup for ShiftBuiltin {
-    fn run<S>(&self, _setup: &mut S, env: &mut Environment, data: ExecData) -> Result<ExitCode>
-    where
-        S: UtilSetup,
-    {
-        let mut args = data.args.into_iter();
-
-        let count = match args.next() {
-            Some(arg) => arg_to_usize(arg, |count| {
-                count <= env.special_vars().get_positionals().len()
-            })?,
-            None => if env.special_vars().get_positionals().len() > 0 {
-                1
-            } else {
-                Err(BuiltinError::InvalidNumber(OsString::from("1")))?
-            },
-        };
-
-        for _ in 0..count {
-            env.special_vars().shift_positionals();
-        }
-
-        Ok(0)
-    }
-}
-
-#[derive(Clone, Copy)]
-pub struct UnsetBuiltin;
-
-impl BuiltinSetup for UnsetBuiltin {
-    fn run<S>(&self, _setup: &mut S, env: &mut Environment, data: ExecData) -> Result<ExitCode>
-    where
-        S: UtilSetup,
-    {
-        // TODO: suppress --help/--version (non-POSIX, although they could perhaps serve as an extension)
-        let matches = App::new("unset")
-            .setting(AppSettings::NoBinaryName)
-            .arg(Arg::with_name("function")
-                .short("f")
-                .overrides_with("variable"))
-            .arg(Arg::with_name("variable")
-                .short("v"))
-            .arg(Arg::with_name("NAMES")
-                .index(1)
-                .multiple(true))
-            .get_matches_from_safe(data.args)?;
-
-        let func = matches.is_present("function");
-
-        // TODO: if variable/whatever is readonly, this function should return >0 and NOT remove that
-        //       variable
-        if let Some(values) = matches.values_of_os("NAMES") {
-            for name in values {
-                if func {
-                    env.remove_func(name);
-                } else {
-                    env.remove_var(name);
-                }
-            }
-        }
-
-        Ok(0)
-    }
 }
 
 fn arg_to_usize<F: FnOnce(usize) -> bool>(arg: OsString, validator: F) -> Result<usize> {
