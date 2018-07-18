@@ -63,7 +63,7 @@ impl RawFdWrapper {
     /// Duplicate a file descriptor such that it is greater than or equal to 10.
     #[cfg(feature = "sh")]
     pub fn dup_sh(&self) -> nix::Result<RawFd> {
-        self.dup_above(::sh::option::FD_COUNT as RawFd + 1)
+        self.dup_above(::posix::sh::option::FD_COUNT as RawFd + 1)
     }
 }
 

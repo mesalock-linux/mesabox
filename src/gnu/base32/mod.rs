@@ -6,7 +6,7 @@
 // For a copy, see the LICENSE file.
 //
 
-use super::{ArgsIter, Result, UtilSetup};
+use {ArgsIter, Result, UtilSetup};
 use uucore::encoding::Format;
 
 pub(crate) mod common;

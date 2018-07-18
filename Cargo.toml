@@ -3,7 +3,6 @@ name = "mesabox"
 version = "0.1.0"
 authors = ["Alex Lyon <alexlyon@baidu.com>"]
 description = "A collection of utilities important to basic system functionality"
-build = "build.rs"
 autotests = false
 
 [features]

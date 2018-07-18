@@ -6,8 +6,8 @@
 // For a copy, see the LICENSE file.
 //
 
-use super::{ArgsIter, Result, UtilSetup};
-use base32::common;
+use {ArgsIter, Result, UtilSetup};
+use super::base32::common;
 use uucore::encoding::Format;
 
 pub const DESCRIPTION: &str = "Encode or decode input data to standard output using Base64";

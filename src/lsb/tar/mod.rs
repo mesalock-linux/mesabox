@@ -8,7 +8,7 @@
 
 extern crate tar;
 
-use super::{ArgsIter, UtilSetup, Result};
+use {ArgsIter, UtilSetup, Result};
 use util;
 
 use clap::{Arg, ArgGroup, OsValues};
@@ -178,7 +178,7 @@ where
     }
 }
 
-pub fn execute<S, T>(setup: &mut S, args: T) -> super::Result<()>
+pub fn execute<S, T>(setup: &mut S, args: T) -> Result<()>
 where
     S: UtilSetup,
     T: ArgsIter,

@@ -6,7 +6,7 @@
 // For a copy, see the LICENSE file.
 //
 
-use super::{ArgsIter, Result, UtilSetup, UtilWrite};
+use {ArgsIter, Result, UtilSetup, UtilWrite};
 
 use std::ffi::OsStr;
 use std::io::Write;

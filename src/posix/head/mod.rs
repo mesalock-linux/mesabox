@@ -6,7 +6,7 @@
 // For a copy, see the LICENSE file.
 //
 
-use super::{ArgsIter, Result, UtilRead, UtilWrite, UtilSetup};
+use {ArgsIter, Result, UtilRead, UtilWrite, UtilSetup};
 use util;
 
 use clap::{Arg, ArgGroup, AppSettings};

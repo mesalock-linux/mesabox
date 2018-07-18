@@ -31,7 +31,7 @@
 //     SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 //
 
-use super::{UtilSetup, Result, ArgsIter, UtilWrite};
+use {UtilSetup, Result, ArgsIter, UtilWrite};
 
 use clap::Arg;
 use std::borrow::Cow;

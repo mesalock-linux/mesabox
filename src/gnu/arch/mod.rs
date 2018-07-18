@@ -8,7 +8,7 @@
 
 extern crate platform_info;
 
-use super::{UtilSetup, Result, ArgsIter};
+use {UtilSetup, Result, ArgsIter};
 use std::io::Write;
 use self::platform_info::*;
 

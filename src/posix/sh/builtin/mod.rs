@@ -238,12 +238,11 @@ where
     S: UtilSetup,
     T: ArgsIter,
 {
-    include!(concat!(env!("OUT_DIR"), "/execute_utils_sh.rs"))
+    ::execute_util_sh(setup, name, args)
         .map(|res| ::handle_util_result(setup, name, res))
         .expect("invalid command name given to execute_util in sh")
 }
 
 fn util_exists(name: &str) -> bool {
-    const UTIL_ARR: &[&str] = include!(concat!(env!("OUT_DIR"), "/util_exists.rs"));
-    UTIL_ARR.contains(&name) && name != "sh"
+    ::util_exists(name) && name != "sh"
 }

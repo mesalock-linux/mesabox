@@ -31,7 +31,7 @@
 //     SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 //
 
-use super::{ArgsIter, Result, UtilSetup, string_to_err};
+use {ArgsIter, Result, UtilSetup, string_to_err};
 
 use std::thread;
 use std::time::Duration;

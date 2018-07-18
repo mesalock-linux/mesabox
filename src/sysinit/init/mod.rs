@@ -6,7 +6,7 @@
 // For a copy, see the LICENSE file.
 //
 
-use super::{ArgsIter, Result, MesaError, UtilSetup, UtilRead, UtilWrite};
+use {ArgsIter, Result, MesaError, UtilSetup, UtilRead, UtilWrite};
 
 use fnv::FnvHashMap as HashMap;
 use nix;

@@ -41,7 +41,7 @@ use std::fs::{metadata, File};
 use std::iter;
 use std::io::{self, BufRead, Read, Write};
 use std::path::Path;
-use super::{UtilSetup, ArgsIter, UtilRead, UtilWrite, is_tty};
+use {UtilSetup, ArgsIter, LockError, UtilRead, UtilWrite, Result, is_tty};
 use util;
 
 /// Unix domain socket support
@@ -90,7 +90,7 @@ enum CatError {
 
     /// Denotes an error caused by one of stdin, stdout, or stderr failing to lock
     #[fail(display = "{}", _0)]
-    Lock(#[cause] super::LockError),
+    Lock(#[cause] LockError),
 }
 
 impl From<io::Error> for CatError {
@@ -99,8 +99,8 @@ impl From<io::Error> for CatError {
     }
 }
 
-impl From<super::LockError> for CatError {
-    fn from(err: super::LockError) -> Self {
+impl From<LockError> for CatError {
+    fn from(err: LockError) -> Self {
         CatError::Lock(err)
     }
 }
@@ -400,7 +400,7 @@ where
 
 type CatResult<T> = ::std::result::Result<T, CatError>;
 
-pub fn execute<S, T>(setup: &mut S, args: T) -> super::Result<()>
+pub fn execute<S, T>(setup: &mut S, args: T) -> Result<()>
 where
     S: UtilSetup,
     T: ArgsIter,
@@ -470,7 +470,7 @@ where
     }
 }
 
-fn run<'a, 'b, S, T>(setup: &mut S, files: T, mut options: OutputOptions<'b>) -> super::Result<()>
+fn run<'a, 'b, S, T>(setup: &mut S, files: T, mut options: OutputOptions<'b>) -> Result<()>
 where
     S: UtilSetup,
     T: Iterator<Item = &'a OsStr>,

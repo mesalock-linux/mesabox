@@ -5,7 +5,7 @@ use rustyline::error::ReadlineError;
 use std::borrow::Cow;
 use std::ffi::{OsStr, OsString};
 
-use super::{UtilRead, UtilWrite, UtilSetup, ArgsIter, Result};
+use {UtilRead, UtilWrite, UtilSetup, ArgsIter, Result};
 use util::RawFdWrapper;
 
 use self::env::{EnvFd, Environment};

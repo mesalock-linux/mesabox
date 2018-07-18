@@ -33,7 +33,7 @@
 //     SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 //
 
-use ::{ArgsIter, Result, UtilRead, UtilWrite, UtilSetup};
+use {ArgsIter, Result, UtilRead, UtilWrite, UtilSetup};
 use util;
 
 use clap::Arg;

@@ -6,7 +6,7 @@
 // For a copy, see the LICENSE file.
 //
 
-use super::{ArgsIter, UtilSetup, Result};
+use {ArgsIter, UtilSetup, Result};
 
 use libc;
 use nix::fcntl::{self, FcntlArg, OFlag};

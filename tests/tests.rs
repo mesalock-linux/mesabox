@@ -16,5 +16,18 @@ mod util;
 #[macro_use]
 mod macros;
 
-// contains all the "mod"s needed to test the utils
-include!(concat!(env!("OUT_DIR"), "/test_utils.rs"));
+macro_rules! generate_fns {
+    ($($group:ident { $(($util:ident, $feature:expr)),+ }),*) => {
+        $(
+            mod $group {
+                $(
+                    #[cfg(feature = $feature)]
+                    mod $util;
+                )+
+            }
+        )*
+    }
+}
+
+// calls generate_fns!()
+include!("../src/util_list.rs");

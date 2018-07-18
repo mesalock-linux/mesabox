@@ -31,7 +31,7 @@
 //     SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 //
 
-use super::{MesaError, UtilSetup, Result, ArgsIter, UtilWrite};
+use {MesaError, UtilSetup, Result, ArgsIter, UtilWrite};
 use util;
 
 use clap::{Arg, ArgGroup, AppSettings, OsValues};
