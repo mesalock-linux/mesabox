@@ -360,6 +360,13 @@ impl Environment {
         self.vars.get(name).or_else(|| self.export_vars.get(name).and_then(|var| var.as_ref()))
     }
 
+    pub fn get_var_nonempty<Q: ?Sized>(&self, name: &Q) -> Option<&OsString>
+    where
+        Q: AsRef<OsStr>,
+    {
+        self.get_var(name).and_then(|value| if value.is_empty() { None } else { Some(value) })
+    }
+
     pub fn remove_var<Q: ?Sized>(&mut self, name: &Q) -> Option<OsString>
     where
         Q: AsRef<OsStr>,

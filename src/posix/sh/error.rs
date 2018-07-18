@@ -102,6 +102,12 @@ pub enum BuiltinError {
     #[fail(display = "invalid string {:?}", _0)]
     InvalidUtf8(OsString),
 
+    #[fail(display = "could not set working directory {:?}: {}", dir, err)]
+    SetCurrentDir {
+        dir: OsString,
+        #[cause] err: io::Error,
+    },
+
     #[fail(display = "{}", _0)]
     Other(#[cause] Compat<failure::Error>),
 }

@@ -13,6 +13,7 @@ use super::error::{CmdResult, BuiltinError, CommandError};
 use super::option::ShellOption;
 
 use self::break_builtin::BreakBuiltin;
+use self::cd::CdBuiltin;
 use self::colon::ColonBuiltin;
 use self::continue_builtin::ContinueBuiltin;
 use self::exec::ExecBuiltin;
@@ -24,6 +25,7 @@ use self::unset::UnsetBuiltin;
 
 #[path = "break.rs"]
 mod break_builtin;
+mod cd;
 mod colon;
 #[path = "continue.rs"]
 mod continue_builtin;
@@ -54,6 +56,7 @@ impl BuiltinSet {
         loop {
             return Some(match &*name {
                 "break" => Builtin::Break(BreakBuiltin),
+                "cd" => Builtin::Cd(CdBuiltin),
                 ":" => Builtin::Colon(ColonBuiltin),
                 "continue" => Builtin::Continue(ContinueBuiltin),
                 "exec" => Builtin::Exec(ExecBuiltin),
@@ -75,6 +78,7 @@ impl BuiltinSet {
 #[derive(Clone)]
 pub enum Builtin {
     Break(BreakBuiltin),
+    Cd(CdBuiltin),
     Colon(ColonBuiltin),
     Continue(ContinueBuiltin),
     Exec(ExecBuiltin),
@@ -138,6 +142,7 @@ impl Builtin {
 
             return match self {
                 Break(u) => u.run(setup, env, data),
+                Cd(u) => u.run(setup, env, data),
                 Colon(u) => u.run(setup, env, data),
                 Continue(u) => u.run(setup, env, data),
                 Exec(u) => u.run(setup, env, data),
