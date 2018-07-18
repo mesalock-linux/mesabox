@@ -126,7 +126,7 @@ fn set_cwd(env: &mut Environment, curpath: Cow<Path>, physical: bool, dirlen: us
     }
 }
 
-fn fixup_path<'a>(env: &Environment, curpath: &'a Path, dirlen: usize) -> Option<&'a Path> {
+fn fixup_path<'a>(env: &'a Environment, curpath: &'a Path, dirlen: usize) -> Option<&'a Path> {
     // we don't care about error cases as we can just say that setting the directory failed
     if let Ok(pathmax) = unistd::pathconf(curpath, PathconfVar::PATH_MAX) {
         let pathmax = pathmax.unwrap_or(c_long::max_value()) as usize;
