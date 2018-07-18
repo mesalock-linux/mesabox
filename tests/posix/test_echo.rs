@@ -119,3 +119,8 @@ fn test_multiple_args() {
 fn test_no_arg() {
     new_ucmd!().succeeds().stdout_only("\n");
 }
+
+#[test]
+fn test_escape_none() {
+    new_ucmd!().arg(r"\").succeeds().stdout_only("\\\n");
+}
