@@ -40,7 +40,7 @@ use std::process::Command;
 fn test_encode() {
     let input = "hello, world!";
     new_cmd!()
-        .with_stdin(input)
+        .with_stdin().buffer(input)
         .assert()
         .success()
         .stdout("aGVsbG8sIHdvcmxkIQ==\n")
@@ -53,7 +53,7 @@ fn test_decode() {
         let input = "aGVsbG8sIHdvcmxkIQ==";
         new_cmd!()
             .arg(decode_param)
-            .with_stdin(input)
+            .with_stdin().buffer(input)
             .assert()
             .success()
             .stdout("hello, world!")
@@ -66,7 +66,7 @@ fn test_garbage() {
     let input = "aGVsbG8sIHdvcmxkIQ==\0";
     new_cmd!()
         .arg("-d")
-        .with_stdin(input)
+        .with_stdin().buffer(input)
         .assert()
         .failure()
         .stderr(predicate::str::contains("invalid length at 20").from_utf8())
@@ -79,7 +79,7 @@ fn test_ignore_garbage() {
         let input = "aGVsbG8sIHdvcmxkIQ==\0";
         new_cmd!()
             .args(&["-d", ignore_garbage_param])
-            .with_stdin(input)
+            .with_stdin().buffer(input)
             .assert()
             .success()
             .stdout("hello, world!")
@@ -93,7 +93,7 @@ fn test_wrap() {
         let input = "The quick brown fox jumps over the lazy dog.";
         new_cmd!()
             .args(&[wrap_param, "20"])
-            .with_stdin(input)
+            .with_stdin().buffer(input)
             .assert()
             .success()
             .stdout("VGhlIHF1aWNrIGJyb3du\nIGZveCBqdW1wcyBvdmVy\nIHRoZSBsYXp5IGRvZy4=\n")
@@ -109,7 +109,7 @@ fn test_wrap_no_arg() {
             .assert()
             .failure()
             .stdout("")
-            .stderr(predicate::str::contains("requires a value but none was supplied").from_utf8());
+            .stderr(pred_str_contains!("requires a value but none was supplied"));
     }
 }
 
@@ -121,6 +121,6 @@ fn test_wrap_bad_arg() {
             .assert()
             .failure()
             .stdout("")
-            .stderr(predicate::str::contains("'b' is not a number\n").from_utf8());
+            .stderr(pred_str_contains!("'b' is not a number\n"));
     }
 }

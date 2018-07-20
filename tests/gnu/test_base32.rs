@@ -40,7 +40,7 @@ use std::process::Command;
 fn test_encode() {
     let input = "Hello, World!";
      new_cmd!()
-        .with_stdin(input)
+        .with_stdin().buffer(input)
         .assert()
         .success()
         .stdout("JBSWY3DPFQQFO33SNRSCC===\n")
@@ -53,7 +53,7 @@ fn test_decode() {
         let input = "JBSWY3DPFQQFO33SNRSCC===\n";
         new_cmd!()
             .arg(decode_param)
-            .with_stdin(input)
+            .with_stdin().buffer(input)
             .assert()
             .success()
             .stdout("Hello, World!")
@@ -66,7 +66,7 @@ fn test_garbage() {
     let input = "aGVsbG8sIHdvcmxkIQ==\0";
     new_cmd!()
         .arg("-d")
-        .with_stdin(input)
+        .with_stdin().buffer(input)
         .assert()
         .failure()
         .stdout("")
@@ -79,7 +79,7 @@ fn test_ignore_garbage() {
         let input = "JBSWY\x013DPFQ\x02QFO33SNRSCC===\n";
         new_cmd!()
             .args(&["-d", ignore_garbage_param])
-            .with_stdin(input)
+            .with_stdin().buffer(input)
             .assert()
             .success()
             .stdout("Hello, World!")
@@ -93,7 +93,7 @@ fn test_wrap() {
         let input = "The quick brown fox jumps over the lazy dog.";
         new_cmd!()
             .args(&[wrap_param, "20"])
-            .with_stdin(input)
+            .with_stdin().buffer(input)
             .assert()
             .success()
             .stdout("KRUGKIDROVUWG2ZAMJZG\n653OEBTG66BANJ2W24DT\nEBXXMZLSEB2GQZJANRQX\nU6JAMRXWOLQ=\n")

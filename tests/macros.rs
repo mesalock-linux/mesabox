@@ -97,7 +97,7 @@ macro_rules! new_cmd {
 }
 
 #[macro_export]
-macro_rules! fixtures_path {
+macro_rules! fixtures_dir {
     () => {{
         use std::env;
         let mut path = env::current_dir().unwrap();
@@ -120,4 +120,27 @@ macro_rules! at_and_ucmd {
         let ts = TestScenario::new(util_name!());
         (ts.fixtures.clone(), ts.ucmd())
     }};
+}
+
+#[macro_export]
+macro_rules! fixtures_path {
+    ($filename:expr) => {{
+        let mut fixtures_path = fixtures_dir!();
+        fixtures_path.push($filename);
+        fixtures_path
+    }};
+}
+
+#[macro_export]
+macro_rules! pred_eq_file {
+    ($filename:expr) => {
+        predicate::path::eq_file(fixtures_path!($filename).as_path())
+    }
+}
+
+#[macro_export]
+macro_rules! pred_str_contains {
+    ($str:expr) => {
+        predicate::str::contains($str).from_utf8()
+    }
 }

@@ -38,7 +38,7 @@ use std::process::Command;
 #[test]
 fn test_output_multi_files_print_all_chars() {
     new_cmd!()
-        .current_dir(fixtures_path!())
+        .current_dir(fixtures_dir!())
         .args(&["alpha.txt", "256.txt", "-A", "-n"])
         .assert()
         .success()
@@ -59,7 +59,7 @@ fn test_output_multi_files_print_all_chars() {
 #[test]
 fn test_numbered_lines_no_trailing_newline() {
     new_cmd!()
-        .current_dir(fixtures_path!())
+        .current_dir(fixtures_dir!())
         .args(&["nonewline.txt", "alpha.txt", "-n"])
         .assert()
         .success()
@@ -73,7 +73,7 @@ fn test_with_stdin_show_nonprinting() {
     for same_param in vec!["-v", "--show-nonprinting"] {
         new_cmd!()
             .args(&[same_param])
-            .with_stdin("\t\0\n")
+            .with_stdin().buffer("\t\0\n")
             .assert()
             .success()
             .stdout("\t^@\n")
@@ -86,7 +86,7 @@ fn test_with_stdin_show_tabs() {
     for same_param in vec!["-T", "--show-tabs"] {
         new_cmd!()
             .args(&[same_param])
-            .with_stdin("\t\0\n")
+            .with_stdin().buffer("\t\0\n")
             .assert()
             .success()
             .stdout("^I\0\n")
@@ -100,7 +100,7 @@ fn test_with_stdin_show_ends() {
     for same_param in vec!["-E", "--show-ends"] {
         new_cmd!()
             .args(&[same_param,"-"])
-            .with_stdin("\t\0\n")
+            .with_stdin().buffer("\t\0\n")
             .assert()
             .success()
             .stdout("\t\0$\n")
@@ -113,7 +113,7 @@ fn test_with_stdin_show_all() {
     for same_param in vec!["-A", "--show-all"] {
         new_cmd!()
             .args(&[same_param])
-            .with_stdin("\t\0\n")
+            .with_stdin().buffer("\t\0\n")
             .assert()
             .success()
             .stdout("^I^@$\n")
@@ -125,7 +125,7 @@ fn test_with_stdin_show_all() {
 fn test_with_stdin_nonprinting_and_endofline() {
     new_cmd!()
         .args(&["-e"])
-        .with_stdin("\t\0\n")
+        .with_stdin().buffer("\t\0\n")
         .assert()
         .success()
         .stdout("\t^@$\n")
@@ -136,7 +136,7 @@ fn test_with_stdin_nonprinting_and_endofline() {
 fn test_with_stdin_nonprinting_and_tabs() {
     new_cmd!()
         .args(&["-t"])
-        .with_stdin("\t\0\n")
+        .with_stdin().buffer("\t\0\n")
         .assert()
         .success()
         .stdout("^I^@\n")
@@ -148,7 +148,7 @@ fn test_with_stdin_squeeze_blank() {
     for same_param in vec!["-s", "--squeeze-blank"] {
         new_cmd!()
             .args(&[same_param])
-            .with_stdin("\n\na\n\n\n\n\nb\n\n\n")
+            .with_stdin().buffer("\n\na\n\n\n\n\nb\n\n\n")
             .assert()
             .success()
             .stdout("\na\n\nb\n\n")
@@ -161,7 +161,7 @@ fn test_with_stdin_number_non_blank() {
     for same_param in vec!["-b", "--number-nonblank"] {
         new_cmd!()
             .args(&[same_param, "-"])
-            .with_stdin("\na\nb\n\n\nc")
+            .with_stdin().buffer("\na\nb\n\n\nc")
             .assert()
             .success()
             .stdout("\n     1\ta\n     2\tb\n\n\n     3\tc")
@@ -174,7 +174,7 @@ fn test_non_blank_overrides_number() {
     for same_param in vec!["-b", "--number-nonblank"] {
         new_cmd!()
             .args(&[same_param, "-"])
-            .with_stdin("\na\nb\n\n\nc")
+            .with_stdin().buffer("\na\nb\n\n\nc")
             .assert()
             .success()
             .stdout("\n     1\ta\n     2\tb\n\n\n     3\tc")
@@ -187,7 +187,7 @@ fn test_squeeze_blank_before_numbering() {
     for same_param in vec!["-s", "--squeeze-blank"] {
         new_cmd!()
             .args(&[same_param, "-n", "-"])
-            .with_stdin("a\n\n\nb")
+            .with_stdin().buffer("a\n\n\nb")
             .assert()
             .success()
             .stdout("     1\ta\n     2\t\n     3\tb")

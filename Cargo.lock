@@ -24,11 +24,11 @@ dependencies = [
 
 [[package]]
 name = "assert_cmd"
-version = "0.5.0"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
  "escargot 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "predicates 0.5.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "predicates 0.5.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde 1.0.70 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
@@ -442,7 +442,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 name = "mesabox"
 version = "0.1.0"
 dependencies = [
- "assert_cmd 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "assert_cmd 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "byteorder 1.2.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "chrono 0.4.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "clap 2.32.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -460,7 +460,7 @@ dependencies = [
  "nom 4.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "platform-info 0.1.0 (git+https://github.com/uutils/platform-info)",
  "pnet 0.21.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "predicates 0.5.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "predicates 0.5.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "regex 1.0.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "rustyline 2.0.0-alpha (git+https://github.com/kkawakam/rustyline)",
  "socket2 0.3.7 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -666,7 +666,7 @@ dependencies = [
 
 [[package]]
 name = "predicates"
-version = "0.5.1"
+version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
  "difference 2.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -1348,7 +1348,7 @@ dependencies = [
 "checksum aho-corasick 0.6.5 (registry+https://github.com/rust-lang/crates.io-index)" = "f0ba20154ea1f47ce2793322f049c5646cc6d0fa9759d5f333f286e507bf8080"
 "checksum ansi_term 0.11.0 (registry+https://github.com/rust-lang/crates.io-index)" = "ee49baf6cb617b853aa8d93bf420db2383fab46d314482ca2803b40d5fde979b"
 "checksum arrayvec 0.4.7 (registry+https://github.com/rust-lang/crates.io-index)" = "a1e964f9e24d588183fcb43503abda40d288c8657dfc27311516ce2f05675aef"
-"checksum assert_cmd 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)" = "f1ab456fa53d12b810a6e042654df36b30933f786c00e170099f68b469f75084"
+"checksum assert_cmd 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)" = "11d61ba2f519654febb9a504d172cfc21c667c9889e707b9860d78dd5e2b69b3"
 "checksum atty 0.2.10 (registry+https://github.com/rust-lang/crates.io-index)" = "2fc4a1aa4c24c0718a250f0681885c1af91419d242f29eb8f2ab28502d80dbd1"
 "checksum backtrace 0.2.3 (registry+https://github.com/rust-lang/crates.io-index)" = "346d7644f0b5f9bc73082d3b2236b69a05fd35cce0cfa3724e184e6a5c9e2a2f"
 "checksum backtrace 0.3.9 (registry+https://github.com/rust-lang/crates.io-index)" = "89a47830402e9981c5c41223151efcced65a0510c13097c769cede7efb34782a"
@@ -1423,7 +1423,7 @@ dependencies = [
 "checksum pnet_packet 0.21.0 (registry+https://github.com/rust-lang/crates.io-index)" = "ef99f3cfa2c0ed07e9ad6d9f788592d863361a8dd3102989d79b0f6a787ba434"
 "checksum pnet_sys 0.21.0 (registry+https://github.com/rust-lang/crates.io-index)" = "963b9109a05c3ac370abc3fda61bff20d03743c2947942173871b9cac2b9acb0"
 "checksum pnet_transport 0.21.0 (registry+https://github.com/rust-lang/crates.io-index)" = "568a118fe2f74ebb08e9b9b6ac812b9730a7b043c5ca4d97325f4edeb018cae0"
-"checksum predicates 0.5.1 (registry+https://github.com/rust-lang/crates.io-index)" = "6c87e42b16f01ca45f0eaa339080b18491a3b8b99cb2bf111de1d7edcb3914a1"
+"checksum predicates 0.5.2 (registry+https://github.com/rust-lang/crates.io-index)" = "f3dc50ff273939a7688f8bccd748add1a0822dd6a9aa132b52600c7c45cc6409"
 "checksum proc-macro2 0.4.6 (registry+https://github.com/rust-lang/crates.io-index)" = "effdb53b25cdad54f8f48843d67398f7ef2e14f12c1b4cb4effc549a6462a4d6"
 "checksum quick-error 1.2.2 (registry+https://github.com/rust-lang/crates.io-index)" = "9274b940887ce9addde99c4eee6b5c44cc494b182b97e73dc8ffdcb3397fd3f0"
 "checksum quote 0.3.15 (registry+https://github.com/rust-lang/crates.io-index)" = "7a6e920b65c65f10b2ae65c831a81a073a89edd28c7cce89475bff467ab4167a"
