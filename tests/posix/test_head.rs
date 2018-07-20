@@ -54,6 +54,7 @@ fn test_stdin_1_line_obsolete() {
         .args(&["-1"])
         .with_stdin().path(fixtures_path!(INPUT)).unwrap()
         .assert()
+        .success()
         .stdout(pred_eq_file!("lorem_ipsum_1_line.expected"))
         .stderr("");
 }
@@ -64,6 +65,7 @@ fn test_stdin_1_line() {
         .args(&["-n", "1"])
         .with_stdin().path(fixtures_path!(INPUT)).unwrap()
         .assert()
+        .success()
         .stdout(pred_eq_file!("lorem_ipsum_1_line.expected"))
         .stderr("");
 }
@@ -74,6 +76,7 @@ fn test_stdin_5_chars() {
         .args(&["-c", "5"])
         .with_stdin().path(fixtures_path!(INPUT)).unwrap()
         .assert()
+        .success()
         .stdout(pred_eq_file!("lorem_ipsum_5_chars.expected"))
         .stderr("");
 }
@@ -84,6 +87,7 @@ fn test_single_default() {
         .current_dir(fixtures_dir!())
         .arg(INPUT)
         .assert()
+        .success()
         .stdout(pred_eq_file!("lorem_ipsum_default.expected"))
         .stderr("");
 }
@@ -94,6 +98,7 @@ fn test_single_1_line_obsolete() {
         .current_dir(fixtures_dir!())
         .args(&["-1", INPUT])
         .assert()
+        .success()
         .stdout(pred_eq_file!("lorem_ipsum_1_line.expected"))
         .stderr("");
 }
@@ -104,6 +109,7 @@ fn test_single_1_line() {
         .current_dir(fixtures_dir!())
         .args(&["-n", "1", INPUT])
         .assert()
+        .success()
         .stdout(pred_eq_file!("lorem_ipsum_1_line.expected"))
         .stderr("");
 }
@@ -114,6 +120,7 @@ fn test_single_5_chars() {
         .current_dir(fixtures_dir!())
         .args(&["-c", "5", INPUT])
         .assert()
+        .success()
         .stdout(pred_eq_file!("lorem_ipsum_5_chars.expected"))
         .stderr("");
 }
@@ -124,6 +131,7 @@ fn test_minus_1_line() {
         .current_dir(fixtures_dir!())
         .args(&["-n", "-1", INPUT])
         .assert()
+        .success()
         .stdout(pred_eq_file!("lorem_ipsum_minus_1_line.expected"))
         .stderr("");
 }
@@ -134,6 +142,7 @@ fn test_minus_5_chars() {
         .current_dir(fixtures_dir!())
         .args(&["-c", "-5", INPUT])
         .assert()
+        .success()
         .stdout(pred_eq_file!("lorem_ipsum_minus_5_chars.expected"))
         .stderr("");
 }
@@ -144,6 +153,7 @@ fn test_multiple_input_files() {
         .current_dir(fixtures_dir!())
         .args(&[INPUT, INPUT2])
         .assert()
+        .success()
         .stdout(pred_eq_file!("lorem_ipsum_multiple_input_files.expected"))
         .stderr("");
 }
@@ -154,6 +164,7 @@ fn test_verbose() {
         .current_dir(fixtures_dir!())
         .args(&["-v", INPUT])
         .assert()
+        .success()
         .stdout(pred_eq_file!("lorem_ipsum_verbose.expected"))
         .stderr("");
 }
