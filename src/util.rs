@@ -6,14 +6,13 @@
 // For a copy, see the LICENSE file.
 //
 
+pub(crate) use super::{RawObject, RawObjectWrapper, OsStrExt, is_tty};
 use super::{LockableRead, LockableWrite, MesaError, Result};
 
 use failure;
 use libc;
-use nix::{self, fcntl, unistd};
 use std::error::Error as StdError;
 use std::io::{self, Read, Write};
-use std::os::unix::io::RawFd;
 use std::path::{Path, PathBuf};
 use std::result::Result as StdResult;
 use std::str::FromStr;
@@ -21,68 +20,6 @@ use std::str::FromStr;
 // defined out here rather than in parse_num_with_suffix() because we need the array for testing
 const SUFFIXES: [char; 8] = ['K', 'M', 'G', 'T', 'P', 'E', 'Z', 'Y'];
 const OBSOLETE_SUFFIXES: [char; 2] = ['k', 'm'];
-
-/// A wrapper around a raw file descriptor that enables reading and writing using the standard
-/// traits.  Take note that this wrapper does *NOT* close the file descriptor when dropping.
-#[derive(Clone, Debug)]
-pub struct RawFdWrapper {
-    pub fd: RawFd,
-    pub readable: bool,
-    pub writable: bool,
-}
-// TODO: add way to determine if fd is readable and/or writable
-
-impl RawFdWrapper {
-    pub fn new(fd: RawFd, readable: bool, writable: bool) -> Self {
-        Self {
-            fd: fd,
-            readable: readable,
-            writable: writable,
-        }
-    }
-
-    // implement here until TryFrom trait is stable
-    pub fn try_from(fd: RawFd) -> nix::Result<Self> {
-        use nix::fcntl::OFlag;
-
-        let res = fcntl::fcntl(fd, fcntl::F_GETFL)?;
-        let mode = OFlag::from_bits(res & OFlag::O_ACCMODE.bits()).unwrap();
-
-        Ok(RawFdWrapper::new(
-            fd,
-            mode == OFlag::O_RDONLY || mode == OFlag::O_RDWR,
-            mode == OFlag::O_WRONLY || mode == OFlag::O_RDWR,
-        ))
-    }
-
-    /// Duplicate a file descriptor such that it is greater than or equal to `min`.
-    pub fn dup_above(&self, min: RawFd) -> nix::Result<RawFd> {
-        fcntl::fcntl(self.fd, fcntl::F_DUPFD(min))
-    }
-
-    /// Duplicate a file descriptor such that it is greater than or equal to 10.
-    #[cfg(feature = "sh")]
-    pub fn dup_sh(&self) -> nix::Result<RawFd> {
-        self.dup_above(::posix::sh::option::FD_COUNT as RawFd + 1)
-    }
-}
-
-impl Read for RawFdWrapper {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        unistd::read(self.fd, buf).map_err(|_| io::Error::last_os_error())
-    }
-}
-
-impl Write for RawFdWrapper {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        unistd::write(self.fd, buf).map_err(|_| io::Error::last_os_error())
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        // XXX: may want to try fsync() or something and ignore failures due to invalid fd type
-        Ok(())
-    }
-}
 
 /// Wrapper around a `Vec<T>` to make it readable (using the standard `Read` trait).
 pub struct ReadableVec<T>(pub Vec<T>);
@@ -97,18 +34,18 @@ impl Read for ReadableVec<u8> {
 /// [UtilRead](../trait.UtilRead.html).
 pub struct UtilReadDyn {
     pub(crate) inner: Box<for<'a> LockableRead<'a>>,
-    fd: Option<RawFd>,
+    fd: Option<RawObject>,
 }
 
 impl UtilReadDyn {
-    pub fn new(inner: Box<for<'a> LockableRead<'a>>, fd: Option<RawFd>) -> Self {
+    pub fn new(inner: Box<for<'a> LockableRead<'a>>, fd: Option<RawObject>) -> Self {
         Self {
             inner: inner,
             fd: fd,
         }
     }
 
-    pub fn fd(&self) -> Option<RawFd> {
+    pub fn fd(&self) -> Option<RawObject> {
         self.fd
     }
 }
@@ -117,18 +54,18 @@ impl UtilReadDyn {
 /// [UtilWrite](../trait.UtilWrite.html).
 pub struct UtilWriteDyn {
     pub(crate) inner: Box<for<'a> LockableWrite<'a>>,
-    fd: Option<RawFd>,
+    fd: Option<RawObject>,
 }
 
 impl UtilWriteDyn {
-    pub fn new(inner: Box<for<'a> LockableWrite<'a>>, fd: Option<RawFd>) -> Self {
+    pub fn new(inner: Box<for<'a> LockableWrite<'a>>, fd: Option<RawObject>) -> Self {
         Self {
             inner: inner,
             fd: fd,
         }
     }
 
-    pub fn fd(&self) -> Option<RawFd> {
+    pub fn fd(&self) -> Option<RawObject> {
         self.fd
     }
 }
@@ -165,13 +102,6 @@ pub(crate) fn set_exitcode<T, E: StdError + Send + Sync + 'static>(
 /// Convert an `Err(String)` to a [MesaError](../error/struct.MesaError.html).
 pub(crate) fn string_to_err<T>(error: StdResult<T, String>) -> Result<T> {
     error.map_err(|e| failure::err_msg(e).compat().into())
-}
-
-/// Determine whether the given file descriptor is a TTY.
-pub(crate) fn is_tty(stream: Option<RawFd>) -> bool {
-    stream
-        .map(|fd| unsafe { libc::isatty(fd) == 1 })
-        .unwrap_or(false)
 }
 
 // XXX: the idea for this function is to limit file traversal to one filesystem

@@ -40,6 +40,7 @@ use std::env;
 use std::ffi::{OsStr, OsString};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Result, Write};
+#[cfg(unix)]
 use std::os::unix::ffi::OsStringExt;
 #[cfg(unix)]
 use std::os::unix::fs::symlink as symlink_file;
@@ -546,6 +547,7 @@ impl UCommand {
     }
 
     /// like arg(...), but uses the contents of the file at the provided relative path as the argument
+    #[cfg(unix)]
     pub fn arg_fixture<S: AsRef<OsStr>>(&mut self, file_rel_path: S) -> &mut UCommand {
         let contents = read_scenario_fixture(&self.tmpd, file_rel_path);
         self.arg(OsString::from_vec(contents))

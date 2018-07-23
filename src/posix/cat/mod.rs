@@ -477,7 +477,7 @@ where
 {
     let can_write_fast = options.can_write_fast();
     
-    let interactive = is_tty(setup.input().raw_fd());
+    let interactive = is_tty(setup.input().raw_object());
     // XXX: should current_dir() just return Option<Rc<Path>> or something similar to avoid the cloning?
     let curdir = setup.current_dir().map(|p| p.to_path_buf());
     let (input, output, error) = setup.stdio();

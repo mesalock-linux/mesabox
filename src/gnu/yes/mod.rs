@@ -35,8 +35,10 @@ use {UtilSetup, Result, ArgsIter, UtilWrite};
 
 use clap::Arg;
 use std::borrow::Cow;
+use std::ffi::{OsString, OsStr};
 use std::io::Write;
-use std::os::unix::ffi::OsStrExt;
+
+use util::OsStrExt;
 
 pub(crate) const NAME: &str = "yes";
 pub(crate) const DESCRIPTION: &str = "Repeatedly print 'y' or a series of user-provided strings to stdout";
@@ -57,21 +59,23 @@ where
         app.get_matches_from_safe(args)?
     };
 
-    let string = if let Some(values) = matches.values_of_os("STRING") {
-        let mut result = values.fold(vec![], |mut res, s| {
-            res.extend_from_slice(s.as_bytes());
-            res.push(b' ');
+    let string = if let Some(mut values) = matches.values_of_os("STRING") {
+        let start = values.next().unwrap().to_owned();
+        let mut result = values.fold(start, |mut res, s| {
+            res.push(OsStr::new(" "));
+            res.push(s);
             res
         });
-        result.pop();
-        result.push(b'\n');
+        result.push(OsStr::new("\n"));
         Cow::from(result)
     } else {
-        Cow::from(&b"y\n"[..])
+        Cow::from(OsStr::new("y\n"))
     };
 
+    let bytes = string.try_as_bytes()?;
+
     let mut buffer = [0; BUF_SIZE];
-    let bytes = prepare_buffer(&string, &mut buffer);
+    let bytes = prepare_buffer(bytes, &mut buffer);
 
     run(setup, bytes)?;
 
@@ -94,7 +98,7 @@ fn prepare_buffer<'a>(input: &'a [u8], buffer: &'a mut [u8; BUF_SIZE]) -> &'a [u
 }
 
 #[cfg(feature = "latency")]
-fn prepare_buffer<'a>(input: &'a str, _buffer: &'a mut [u8; BUF_SIZE]) -> &'a [u8] {
+fn prepare_buffer<'a>(input: &'a [u8], _buffer: &'a mut [u8; BUF_SIZE]) -> &'a [u8] {
     input
 }
 

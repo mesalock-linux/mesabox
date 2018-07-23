@@ -1,9 +1,8 @@
 use super::{LockError, LockableRead, LockableWrite, UtilRead, UtilWrite};
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, BufWriter, Empty, Sink, Write};
-use std::os::unix::io::{AsRawFd, RawFd};
 use std::result::Result as StdResult;
-use util::{RawFdWrapper, ReadableVec, UtilReadDyn, UtilWriteDyn};
+use util::{RawObject, RawObjectWrapper, ReadableVec, UtilReadDyn, UtilWriteDyn};
 
 impl<'a, 'b, T: UtilRead<'a>> UtilRead<'a> for &'b mut T {
     type Lock = T::Lock;
@@ -12,8 +11,8 @@ impl<'a, 'b, T: UtilRead<'a>> UtilRead<'a> for &'b mut T {
         (**self).lock_reader()
     }
 
-    fn raw_fd(&self) -> Option<RawFd> {
-        (**self).raw_fd()
+    fn raw_object(&self) -> Option<RawObject> {
+        (**self).raw_object()
     }
 }
 
@@ -24,8 +23,8 @@ impl<'a, 'b, T: UtilWrite<'a>> UtilWrite<'a> for &'b mut T {
         (**self).lock_writer()
     }
 
-    fn raw_fd(&self) -> Option<RawFd> {
-        (**self).raw_fd()
+    fn raw_object(&self) -> Option<RawObject> {
+        (**self).raw_object()
     }
 }
 
@@ -48,7 +47,7 @@ impl<'a> UtilRead<'a> for UtilReadDyn {
         self.inner.lock_reader_dyn() as StdResult<Box<BufRead + 'a>, LockError>
     }
 
-    fn raw_fd(&self) -> Option<RawFd> {
+    fn raw_object(&self) -> Option<RawObject> {
         self.fd()
     }
 }
@@ -60,7 +59,7 @@ impl<'a> UtilWrite<'a> for UtilWriteDyn {
         self.inner.lock_writer_dyn()
     }
 
-    fn raw_fd(&self) -> Option<RawFd> {
+    fn raw_object(&self) -> Option<RawObject> {
         self.fd()
     }
 }
@@ -91,87 +90,27 @@ impl<'a> UtilWrite<'a> for Vec<u8> {
     }
 }
 
-impl<'a> UtilRead<'a> for File {
+impl<'a> UtilRead<'a> for RawObjectWrapper {
     type Lock = BufReader<&'a mut Self>;
 
     fn lock_reader<'b: 'a>(&'b mut self) -> StdResult<Self::Lock, LockError> {
         Ok(BufReader::new(self))
     }
 
-    fn raw_fd(&self) -> Option<RawFd> {
-        Some(self.as_raw_fd())
+    fn raw_object(&self) -> Option<RawObject> {
+        Some(self.inner_object())
     }
 }
 
-impl<'a> UtilRead<'a> for io::Stdin {
-    type Lock = io::StdinLock<'a>;
-
-    fn lock_reader<'b: 'a>(&'b mut self) -> StdResult<Self::Lock, LockError> {
-        Ok(self.lock())
-    }
-
-    fn raw_fd(&self) -> Option<RawFd> {
-        Some(self.as_raw_fd())
-    }
-}
-
-impl<'a> UtilWrite<'a> for File {
+impl<'a> UtilWrite<'a> for RawObjectWrapper {
     type Lock = BufWriter<&'a mut Self>;
 
     fn lock_writer<'b: 'a>(&'b mut self) -> StdResult<Self::Lock, LockError> {
         Ok(BufWriter::new(self))
     }
 
-    fn raw_fd(&self) -> Option<RawFd> {
-        Some(self.as_raw_fd())
-    }
-}
-
-impl<'a> UtilWrite<'a> for io::Stdout {
-    type Lock = io::StdoutLock<'a>;
-
-    fn lock_writer<'b: 'a>(&'b mut self) -> StdResult<Self::Lock, LockError> {
-        Ok(self.lock())
-    }
-
-    fn raw_fd(&self) -> Option<RawFd> {
-        Some(self.as_raw_fd())
-    }
-}
-
-impl<'a> UtilWrite<'a> for io::Stderr {
-    type Lock = io::StderrLock<'a>;
-
-    fn lock_writer<'b: 'a>(&'b mut self) -> StdResult<Self::Lock, LockError> {
-        Ok(self.lock())
-    }
-
-    fn raw_fd(&self) -> Option<RawFd> {
-        Some(self.as_raw_fd())
-    }
-}
-
-impl<'a> UtilRead<'a> for RawFdWrapper {
-    type Lock = BufReader<&'a mut Self>;
-
-    fn lock_reader<'b: 'a>(&'b mut self) -> StdResult<Self::Lock, LockError> {
-        Ok(BufReader::new(self))
-    }
-
-    fn raw_fd(&self) -> Option<RawFd> {
-        Some(self.fd)
-    }
-}
-
-impl<'a> UtilWrite<'a> for RawFdWrapper {
-    type Lock = BufWriter<&'a mut Self>;
-
-    fn lock_writer<'b: 'a>(&'b mut self) -> StdResult<Self::Lock, LockError> {
-        Ok(BufWriter::new(self))
-    }
-
-    fn raw_fd(&self) -> Option<RawFd> {
-        Some(self.fd)
+    fn raw_object(&self) -> Option<RawObject> {
+        Some(self.inner_object())
     }
 }
 
@@ -181,10 +120,6 @@ impl<'a> UtilRead<'a> for Empty {
     fn lock_reader<'b: 'a>(&'b mut self) -> StdResult<Self::Lock, LockError> {
         Ok(self)
     }
-
-    fn raw_fd(&self) -> Option<RawFd> {
-        None
-    }
 }
 
 impl<'a> UtilWrite<'a> for Sink {
@@ -192,9 +127,5 @@ impl<'a> UtilWrite<'a> for Sink {
 
     fn lock_writer<'b: 'a>(&'b mut self) -> StdResult<Self::Lock, LockError> {
         Ok(self)
-    }
-
-    fn raw_fd(&self) -> Option<RawFd> {
-        None
     }
 }

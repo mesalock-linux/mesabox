@@ -168,8 +168,7 @@ fn test_squeeze_blank_before_numbering() {
     }
 }
 
-
-
+#[cfg(unix)]
 #[test]
 fn test_domain_socket() {
     use std::thread;

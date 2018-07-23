@@ -10,8 +10,9 @@ use {ArgsIter, Result, UtilSetup, UtilWrite};
 
 use std::ffi::OsStr;
 use std::io::Write;
-use std::os::unix::ffi::OsStrExt;
 use std::str;
+
+use util::OsStrExt;
 
 #[allow(unused)]
 pub(crate) const NAME: &str = "echo";
@@ -56,7 +57,7 @@ where
 fn write_str<W: Write>(output: &mut W, s: &OsStr) -> Result<bool> {
     let mut found_c = false;
 
-    let mut iter = s.as_bytes().iter();
+    let mut iter = s.try_as_bytes()?.iter();
     while let Some(&byte) = iter.next() {
         let out_byte = match byte {
             b'\\' => match iter.next() {

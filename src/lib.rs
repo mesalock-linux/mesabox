@@ -12,7 +12,13 @@ extern crate failure;
 #[macro_use]
 extern crate failure_derive;
 extern crate libc;
+
+#[cfg(unix)]
 extern crate nix;
+#[cfg(windows)]
+extern crate kernel32;
+#[cfg(windows)]
+extern crate winapi;
 
 #[cfg(feature = "byteorder")]
 extern crate byteorder;
@@ -54,11 +60,11 @@ use std::env::{self, VarsOs};
 use std::ffi::{OsStr, OsString};
 use std::io::{self, BufRead, Read, Stderr, Stdin, Stdout, Write};
 use std::iter;
-use std::os::unix::io::RawFd;
 use std::path::{Path, PathBuf};
 use std::result::Result as StdResult;
 
 pub use error::*;
+pub(crate) use platform::*;
 pub use setup::*;
 #[allow(unused)]
 pub(crate) use util::*;
@@ -67,6 +73,7 @@ mod error;
 #[macro_use]
 #[allow(unused_macros)]
 mod macros;
+mod platform;
 mod setup;
 #[allow(dead_code)]
 mod util;
@@ -313,7 +320,7 @@ pub trait UtilRead<'a>: LockableRead<'a> {
 
     fn lock_reader<'b: 'a>(&'b mut self) -> StdResult<Self::Lock, LockError>;
 
-    fn raw_fd(&self) -> Option<RawFd> {
+    fn raw_object(&self) -> Option<RawObject> {
         None
     }
 }
@@ -323,7 +330,7 @@ pub trait UtilWrite<'a>: LockableWrite<'a> {
 
     fn lock_writer<'b: 'a>(&'b mut self) -> StdResult<Self::Lock, LockError>;
 
-    fn raw_fd(&self) -> Option<RawFd> {
+    fn raw_object(&self) -> Option<RawObject> {
         None
     }
 }

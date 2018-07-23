@@ -53,12 +53,38 @@ sysinit = [
     "init"
 ]
 
-default = ["gnu", "loginutils", "lsb", "networking", "posix", "sysinit"]
+# utilities that work on Unix
+unix = [
+    "gnu",
+    "loginutils",
+    "lsb",
+    "networking",
+    "posix",
+    "sysinit",
+]
+
+# utilities that work on Windows
+windows = [
+    "gnu",
+
+    "cat",
+    "echo",
+    "head",
+    "sleep",
+]
+
+# the following are real features (rather than utilities)
+# used to prioritize latency over throughput in utilites that care
+latency = []
+
+default = ["unix"]
 
 [dependencies]
 clap = "2.31.2"
 failure = "0.1.1"
 failure_derive = "0.1.1"
+kernel32-sys = "0.2.2"
+winapi = "0.3.5"
 libc = "0.2.40"
 nix = "0.10.0"
 
