@@ -18,7 +18,7 @@ use std::process;
 use std::rc::Rc;
 use std::result::Result as StdResult;
 
-use util::RawFdWrapper;
+use util::RawObjectWrapper;
 use super::{NAME, UtilSetup};
 use super::command::{CommandEnv, CommandEnvContainer, CommandWrapper, ExecData, ExecEnv, InProcessCommand, InProcessChild, ShellChild};
 use super::env::{CheckBreak, EnvFd, Environment, TryClone};
@@ -1233,7 +1233,7 @@ impl CommandSubst {
         };
 
         let code = fake_subshell(data, |data| {
-            data.env.set_local_fd(1, EnvFd::Fd(RawFdWrapper::new(write, false, true)));
+            data.env.set_local_fd(1, EnvFd::Fd(RawObjectWrapper::new(write, false, true)));
             self.command.execute(data)
         });
         data.env.special_vars().set_last_exitcode(code);
@@ -1243,7 +1243,7 @@ impl CommandSubst {
 
         // read the output from the pipe into a vector
         let mut output = vec![];
-        let res = self.write_error(data.setup, data.env, RawFdWrapper::new(read, true, false).read_to_end(&mut output));
+        let res = self.write_error(data.setup, data.env, RawObjectWrapper::new(read, true, false).read_to_end(&mut output));
 
         // XXX: not sure if we want to just ignore these so let them create warnings for now
         unistd::close(read);

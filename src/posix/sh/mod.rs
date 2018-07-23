@@ -6,7 +6,7 @@ use std::borrow::Cow;
 use std::ffi::{OsStr, OsString};
 
 use {UtilRead, UtilWrite, UtilSetup, ArgsIter, Result};
-use util::RawFdWrapper;
+use util::RawObjectWrapper;
 
 use self::env::{EnvFd, Environment};
 use self::parser::Parser;
@@ -244,9 +244,9 @@ where
     // although HOME and PATH and stuff are used, we shouldn't set them explicitly
 
     // FIXME: what to do if can't create fd? (such as in testing framework)
-    env.set_global_fd(0, EnvFd::Fd(RawFdWrapper::try_from(setup.input().raw_fd().unwrap())?));
-    env.set_global_fd(1, EnvFd::Fd(RawFdWrapper::try_from(setup.output().raw_fd().unwrap())?));
-    env.set_global_fd(2, EnvFd::Fd(RawFdWrapper::try_from(setup.error().raw_fd().unwrap())?));
+    env.set_global_fd(0, EnvFd::Fd(RawObjectWrapper::try_from(setup.input().raw_object().unwrap())?));
+    env.set_global_fd(1, EnvFd::Fd(RawObjectWrapper::try_from(setup.output().raw_object().unwrap())?));
+    env.set_global_fd(2, EnvFd::Fd(RawObjectWrapper::try_from(setup.error().raw_object().unwrap())?));
 
     Ok(())
 }

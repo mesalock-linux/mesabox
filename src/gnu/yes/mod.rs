@@ -35,7 +35,7 @@ use {UtilSetup, Result, ArgsIter, UtilWrite};
 
 use clap::Arg;
 use std::borrow::Cow;
-use std::ffi::{OsString, OsStr};
+use std::ffi::OsStr;
 use std::io::Write;
 
 use util::OsStrExt;
@@ -67,9 +67,10 @@ where
             res
         });
         result.push(OsStr::new("\n"));
-        Cow::from(result)
+        // XXX: interestingly, Cow::from() only seems to work on Windows for OsString/OsStr
+        Cow::Owned(result)
     } else {
-        Cow::from(OsStr::new("y\n"))
+        Cow::Borrowed(OsStr::new("y\n"))
     };
 
     let bytes = string.try_as_bytes()?;

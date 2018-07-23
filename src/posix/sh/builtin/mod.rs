@@ -165,9 +165,9 @@ impl Builtin {
         //        would not have to do this (as obviously static dispatch is faster)
         // TODO: add anything else in data to setup
         // TODO: add export_vars to setup
-        let input_fd = input.raw_fd();
-        let output_fd = output.raw_fd();
-        let error_fd = error.raw_fd();
+        let input_fd = input.raw_object();
+        let output_fd = output.raw_object();
+        let error_fd = error.raw_object();
 
         let mut input = UtilReadDyn::new(Box::new(input), input_fd);
         let mut output = UtilWriteDyn::new(Box::new(output), output_fd);

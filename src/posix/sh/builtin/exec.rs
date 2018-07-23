@@ -34,15 +34,15 @@ impl BuiltinSetup for ExecBuiltin {
             // NOTE: we need to duplicate the fds as from_raw_fd() takes ownership
             // TODO: this needs to duplicate all the fds (3-9 because stdin/stdout/stderr are done
             //       already below) like in command.rs
-            if let Some(fd) = setup.input().raw_fd() {
+            if let Some(fd) = setup.input().raw_object() {
                 let fd = unistd::dup(fd)?;
                 cmd.stdin(unsafe { Stdio::from_raw_fd(fd) });
             }
-            if let Some(fd) = setup.output().raw_fd() {
+            if let Some(fd) = setup.output().raw_object() {
                 let fd = unistd::dup(fd)?;
                 cmd.stdout(unsafe { Stdio::from_raw_fd(fd) });
             }
-            if let Some(fd) = setup.error().raw_fd() {
+            if let Some(fd) = setup.error().raw_object() {
                 let fd = unistd::dup(fd)?;
                 cmd.stderr(unsafe { Stdio::from_raw_fd(fd) });
             }

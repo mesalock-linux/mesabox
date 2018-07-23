@@ -1,6 +1,5 @@
 use super::{LockError, LockableRead, LockableWrite, UtilRead, UtilWrite};
-use std::fs::File;
-use std::io::{self, BufRead, BufReader, BufWriter, Empty, Sink, Write};
+use std::io::{BufRead, BufReader, BufWriter, Empty, Sink, Write};
 use std::result::Result as StdResult;
 use util::{RawObject, RawObjectWrapper, ReadableVec, UtilReadDyn, UtilWriteDyn};
 

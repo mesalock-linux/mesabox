@@ -39,7 +39,7 @@ pub enum CommandError {
 
     #[fail(display = "could not duplicate fd {}: {}", fd, err)]
     DupFd {
-        #[cause] err: nix::Error,
+        #[cause] err: io::Error,
         fd: RawFd,
     },
 

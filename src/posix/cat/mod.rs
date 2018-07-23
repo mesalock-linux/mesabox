@@ -41,8 +41,8 @@ use std::fs::{metadata, File};
 use std::iter;
 use std::io::{self, BufRead, Read, Write};
 use std::path::Path;
-use {UtilSetup, ArgsIter, LockError, UtilRead, UtilWrite, Result, is_tty};
-use util;
+use {UtilSetup, ArgsIter, LockError, UtilRead, UtilWrite, Result};
+use util::{self, is_tty};
 
 /// Unix domain socket support
 #[cfg(unix)]

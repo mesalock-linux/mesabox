@@ -15,7 +15,7 @@ use super::ast::{ExitCode, FunctionBody, RuntimeData};
 use super::builtin::Builtin;
 use super::env::{EnvFd, Environment, TryClone};
 use super::error::{CmdResult, CommandError};
-use util::RawFdWrapper;
+use util::RawObjectWrapper;
 
 /// A command executed within the current shell process (e.g. a function or builtin)
 pub trait InProcessCommand {
@@ -116,7 +116,7 @@ impl CommandWrapper {
 
                     // just write now and close the writable end of the pipe as we won't need it
                     // later
-                    RawFdWrapper::new(write, false, true).write_all(data).map_err(|e| CommandError::PipeIo(e))?;
+                    RawObjectWrapper::new(write, false, true).write_all(data).map_err(|e| CommandError::PipeIo(e))?;
                     unistd::close(write).map_err(|e| CommandError::Pipe(e))?;
 
                     other_pipes.push(read);
@@ -321,12 +321,12 @@ impl InProcessChild {
                 let (read_pipe, write_pipe) = unistd::pipe().map_err(|e| CommandError::Pipe(e))?;
                 read = Some(read_pipe);
                 write = Some(write_pipe);
-                EnvFd::Fd(RawFdWrapper::new(read_pipe, true, false))
+                EnvFd::Fd(RawObjectWrapper::new(read_pipe, true, false))
             }
             other => other.try_clone()?
         };
         if let Some(write) = write {
-            data.env.set_local_fd(1, EnvFd::Fd(RawFdWrapper::new(write, false, true)));
+            data.env.set_local_fd(1, EnvFd::Fd(RawObjectWrapper::new(write, false, true)));
         }
 
         match unistd::fork().map_err(|e| CommandError::Fork(e))? {
@@ -390,7 +390,7 @@ impl ShellChild {
         use self::ShellChild::*;
 
         match self {
-            RealChild(wrapper) => wrapper.child.stdout.as_ref().map(|out| EnvFd::ChildStdout(RawFdWrapper::new(out.as_raw_fd(), true, false))).unwrap_or(EnvFd::Null),
+            RealChild(wrapper) => wrapper.child.stdout.as_ref().map(|out| EnvFd::ChildStdout(RawObjectWrapper::new(out.as_raw_fd(), true, false))).unwrap_or(EnvFd::Null),
             InProcess(child) => child.stdout.try_clone().unwrap(),//unimplemented!(),
             Empty => EnvFd::Null,
         }

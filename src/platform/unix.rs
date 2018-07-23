@@ -1,10 +1,17 @@
+use libc;
+use nix::{fcntl, unistd};
+
 use std::ffi::OsStr;
+use std::fs::File;
+use std::io::{self, BufReader, BufWriter, Read, Write};
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::io::{AsRawFd, RawFd};
 
+use {UtilRead, UtilWrite, LockError};
+
 impl super::OsStrExt for OsStr {
-    fn try_as_bytes(&self) -> Option<&[u8]> {
-        self.as_bytes()
+    fn try_as_bytes(&self) -> Result<&[u8], super::Utf8Error> {
+        Ok(self.as_bytes())
     }
 }
 
@@ -29,11 +36,15 @@ impl RawObjectWrapper {
         }
     }
 
+    pub fn inner_object(&self) -> RawObject {
+        self.fd
+    }
+
     // implement here until TryFrom trait is stable
-    pub fn try_from(fd: RawObject) -> nix::Result<Self> {
+    pub fn try_from(fd: RawObject) -> io::Result<Self> {
         use nix::fcntl::OFlag;
 
-        let res = fcntl::fcntl(fd, fcntl::F_GETFL)?;
+        let res = fcntl::fcntl(fd, fcntl::F_GETFL).map_err(|_| io::Error::last_os_error())?;
         let mode = OFlag::from_bits(res & OFlag::O_ACCMODE.bits()).unwrap();
 
         Ok(RawObjectWrapper::new(
@@ -44,14 +55,14 @@ impl RawObjectWrapper {
     }
 
     /// Duplicate a file descriptor such that it is greater than or equal to `min`.
-    pub fn dup_above(&self, min: RawObject) -> nix::Result<RawObject> {
-        fcntl::fcntl(self.fd, fcntl::F_DUPFD(min))
+    pub fn dup_above(&self, min: RawObject) -> io::Result<RawObject> {
+        fcntl::fcntl(self.fd, fcntl::F_DUPFD(min)).map_err(|_| io::Error::last_os_error())
     }
 
     /// Duplicate a file descriptor such that it is greater than or equal to 10.
     #[cfg(feature = "sh")]
-    pub fn dup_sh(&self) -> nix::Result<RawObject> {
-        self.dup_above(::posix::sh::option::FD_COUNT as RawFd + 1)
+    pub fn dup_sh(&self) -> io::Result<RawObject> {
+        self.dup_above(::posix::sh::option::FD_COUNT as RawObject + 1)
     }
 }
 
@@ -82,11 +93,11 @@ pub(crate) fn is_tty(stream: Option<RawObject>) -> bool {
 impl<'a> UtilRead<'a> for File {
     type Lock = BufReader<&'a mut Self>;
 
-    fn lock_reader<'b: 'a>(&'b mut self) -> StdResult<Self::Lock, LockError> {
+    fn lock_reader<'b: 'a>(&'b mut self) -> Result<Self::Lock, LockError> {
         Ok(BufReader::new(self))
     }
 
-    fn raw_fd(&self) -> Option<RawFd> {
+    fn raw_object(&self) -> Option<RawObject> {
         Some(self.as_raw_fd())
     }
 }
@@ -94,11 +105,11 @@ impl<'a> UtilRead<'a> for File {
 impl<'a> UtilRead<'a> for io::Stdin {
     type Lock = io::StdinLock<'a>;
 
-    fn lock_reader<'b: 'a>(&'b mut self) -> StdResult<Self::Lock, LockError> {
+    fn lock_reader<'b: 'a>(&'b mut self) -> Result<Self::Lock, LockError> {
         Ok(self.lock())
     }
 
-    fn raw_fd(&self) -> Option<RawFd> {
+    fn raw_object(&self) -> Option<RawObject> {
         Some(self.as_raw_fd())
     }
 }
@@ -106,11 +117,11 @@ impl<'a> UtilRead<'a> for io::Stdin {
 impl<'a> UtilWrite<'a> for File {
     type Lock = BufWriter<&'a mut Self>;
 
-    fn lock_writer<'b: 'a>(&'b mut self) -> StdResult<Self::Lock, LockError> {
+    fn lock_writer<'b: 'a>(&'b mut self) -> Result<Self::Lock, LockError> {
         Ok(BufWriter::new(self))
     }
 
-    fn raw_fd(&self) -> Option<RawFd> {
+    fn raw_object(&self) -> Option<RawObject> {
         Some(self.as_raw_fd())
     }
 }
@@ -118,11 +129,11 @@ impl<'a> UtilWrite<'a> for File {
 impl<'a> UtilWrite<'a> for io::Stdout {
     type Lock = io::StdoutLock<'a>;
 
-    fn lock_writer<'b: 'a>(&'b mut self) -> StdResult<Self::Lock, LockError> {
+    fn lock_writer<'b: 'a>(&'b mut self) -> Result<Self::Lock, LockError> {
         Ok(self.lock())
     }
 
-    fn raw_fd(&self) -> Option<RawFd> {
+    fn raw_object(&self) -> Option<RawObject> {
         Some(self.as_raw_fd())
     }
 }
@@ -130,11 +141,12 @@ impl<'a> UtilWrite<'a> for io::Stdout {
 impl<'a> UtilWrite<'a> for io::Stderr {
     type Lock = io::StderrLock<'a>;
 
-    fn lock_writer<'b: 'a>(&'b mut self) -> StdResult<Self::Lock, LockError> {
+    fn lock_writer<'b: 'a>(&'b mut self) -> Result<Self::Lock, LockError> {
         Ok(self.lock())
     }
 
-    fn raw_fd(&self) -> Option<RawFd> {
+    fn raw_object(&self) -> Option<RawObject> {
         Some(self.as_raw_fd())
     }
 }
+

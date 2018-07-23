@@ -14,7 +14,7 @@ use super::error::CommandError;
 use super::ast::{ExitCode, FunctionBody};
 use super::builtin::{Builtin, BuiltinSet};
 use super::option::FD_COUNT;
-use util::RawFdWrapper;
+use util::RawObjectWrapper;
 
 pub trait TryClone: Sized {
     fn try_clone(&self) -> Result<Self, CommandError>;
@@ -32,9 +32,9 @@ pub enum EnvFd {
     Null,
     Piped(Vec<u8>),
     File(File),
-    Fd(RawFdWrapper),
+    Fd(RawObjectWrapper),
     Pipeline,
-    ChildStdout(RawFdWrapper),
+    ChildStdout(RawObjectWrapper),
 }
 
 impl EnvFd {
@@ -62,7 +62,7 @@ impl TryClone for EnvFd {
             EnvFd::File(file) => {
                 // XXX: maybe just convert into Fd?
                 let fd = file.as_raw_fd();
-                let new_fd = RawFdWrapper::new(fd, false, false).dup_sh().map_err(|e| CommandError::DupFd { fd: fd, err: e })?;
+                let new_fd = RawObjectWrapper::new(fd, false, false).dup_sh().map_err(|e| CommandError::DupFd { fd: fd, err: e })?;
                 let new_file = unsafe { File::from_raw_fd(new_fd) };
                 EnvFd::File(new_file)
             }
@@ -75,7 +75,7 @@ impl TryClone for EnvFd {
 
     /*pub fn create_pipe() -> Result<Self, CommandError> {
         let (read, write) = unistd::pipe().map_err(|e| CommandError::Pipe(e))?;
-        Ok(EnvFd::Pipeline(RawFdWrapper::new(read, true, false), RawFdWrapper::new(write, false, true)))
+        Ok(EnvFd::Pipeline(RawObjectWrapper::new(read, true, false), RawObjectWrapper::new(write, false, true)))
     }*/
 }
 
