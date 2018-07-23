@@ -27,7 +27,7 @@ where
     args.next();
 
     let output = setup.output();
-    let mut output = output.lock_writer()?;
+    let mut output = output.lock()?;
 
     let mut print_newline = true;
 

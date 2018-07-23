@@ -1,10 +1,8 @@
 extern crate mesabox;
 
 use mesabox::UtilData;
-use std::env;
-use std::io::{self, Read, Write};
+use std::io::Write;
 use std::iter;
-use std::process;
 
 use std::net::TcpListener;
 

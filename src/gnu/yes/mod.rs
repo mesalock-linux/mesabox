@@ -108,7 +108,7 @@ where
     S: UtilSetup,
 {
     let stdout = setup.output();
-    let mut stdout = stdout.lock_writer()?;
+    let mut stdout = stdout.lock()?;
     loop {
         stdout.write_all(bytes)?;
     }

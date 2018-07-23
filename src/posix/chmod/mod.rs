@@ -148,8 +148,8 @@ where
         recursive: recursive,
         fmode: fmode,
         cmode: matches.value_of("MODE"),
-        stdout: stdout.lock_writer()?,
-        stderr: stderr.lock_writer()?,
+        stdout: stdout.lock()?,
+        stderr: stderr.lock()?,
         current_dir: current_dir,
     };
 

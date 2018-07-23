@@ -345,7 +345,7 @@ where
 
     let addr = socket::SockAddr::new_inet(socket::InetAddr::from_std(&options.sock_addr));
 
-    let mut stdout = stdout.lock_writer()?;
+    let mut stdout = stdout.lock()?;
     while options.count.unwrap_or(1) > 0 && !should_stop.load(Ordering::Acquire) {
         let request = IcmpPacket::new(icmp_kind, ident, seq_num);
         // FIXME: should print error rather than return
@@ -451,7 +451,7 @@ where
     set.thread_set_mask()?;
 
     let stdout = setup.output();
-    let mut stdout = stdout.lock_writer()?;
+    let mut stdout = stdout.lock()?;
 
     writeln!(stdout, "\n--- {} ping statistics ---", hostname)?;
     writeln!(stdout, "{} packets transmitted, {} packets received, {}% packet loss", stats.sent, stats.received, stats.packet_loss())?;

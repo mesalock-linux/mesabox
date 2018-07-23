@@ -79,7 +79,7 @@ impl BuiltinSetup for CdBuiltin {
             if should_print {
                 // XXX: ignore errors?
                 let output = setup.output();
-                if let Ok(mut output) = output.lock_writer() {
+                if let Ok(mut output) = output.lock() {
                     let _ = output.write_all(env.get_var("PWD").unwrap().as_bytes());
                     let _ = writeln!(output);
                 }

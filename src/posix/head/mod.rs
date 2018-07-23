@@ -123,10 +123,10 @@ where
     let current_dir = setup.current_dir().map(|p| p.to_owned());
     let (input, output, error) = setup.stdio();
 
-    let mut output = output.lock_writer()?;
+    let mut output = output.lock()?;
     if matches.is_present("FILES") {
         let mut result = Ok(());
-        let mut err_stream = error.lock_writer()?;
+        let mut err_stream = error.lock()?;
 
         let file_count = matches.occurrences_of("FILES");
 
@@ -167,7 +167,7 @@ where
     I: for<'a> UtilRead<'a>,
     O: Write,
 {
-    let stdin = stdin.lock_reader()?;
+    let stdin = stdin.lock()?;
     handle_data(output, stdin, filename, options)
 }
 

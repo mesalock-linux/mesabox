@@ -481,9 +481,9 @@ where
     // XXX: should current_dir() just return Option<Rc<Path>> or something similar to avoid the cloning?
     let curdir = setup.current_dir().map(|p| p.to_path_buf());
     let (input, output, error) = setup.stdio();
-    let stdin = input.lock_reader()?;
-    let stdout = output.lock_writer()?;
-    let stderr = error.lock_writer()?;
+    let stdin = input.lock()?;
+    let stdout = output.lock()?;
+    let stderr = error.lock()?;
 
     let mut util = Cat::new(stdin, stdout, stderr, curdir.as_ref().map(|p| p.as_path()), interactive);
 

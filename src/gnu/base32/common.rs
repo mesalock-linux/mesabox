@@ -102,13 +102,13 @@ where
             let file = File::open(path)?;
 
             let mut output = setup.output();
-            let output = output.lock_writer()?;
+            let output = output.lock()?;
             handle_data(output, BufReader::new(file), options)
         }
         _ => {
             let (mut input, mut output, _) = setup.stdio();
-            let input = input.lock_reader()?;
-            let output = output.lock_writer()?;
+            let input = input.lock()?;
+            let output = output.lock()?;
             handle_data(output, input, options)
         }
     }

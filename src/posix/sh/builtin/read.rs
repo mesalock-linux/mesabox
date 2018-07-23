@@ -28,7 +28,7 @@ impl BuiltinSetup for ReadBuiltin {
             .get_matches_from_safe(data.args)?;
 
         let input = setup.input();
-        let mut input = input.lock_reader()?;
+        let mut input = input.lock()?;
 
         let ignore_backslash = matches.is_present("backslash");
 

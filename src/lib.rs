@@ -104,7 +104,7 @@ macro_rules! generate_fns {
             S: UtilSetup,
         {
             let stdout = setup.output();
-            let mut stdout = stdout.lock_writer()?;
+            let mut stdout = stdout.lock()?;
 
             $($(
                 #[cfg(feature = $feature)]
@@ -308,17 +308,17 @@ where
 }
 
 pub trait LockableRead<'a>: Read + Send + Sync {
-    fn lock_reader_dyn<'b: 'a>(&'b mut self) -> StdResult<Box<BufRead + 'a>, LockError>;
+    fn lock_dyn<'b: 'a>(&'b mut self) -> StdResult<Box<BufRead + 'a>, LockError>;
 }
 
 pub trait LockableWrite<'a>: Write + Send + Sync {
-    fn lock_writer_dyn<'b: 'a>(&'b mut self) -> StdResult<Box<Write + 'a>, LockError>;
+    fn lock_dyn<'b: 'a>(&'b mut self) -> StdResult<Box<Write + 'a>, LockError>;
 }
 
 pub trait UtilRead<'a>: LockableRead<'a> {
     type Lock: BufRead + 'a;
 
-    fn lock_reader<'b: 'a>(&'b mut self) -> StdResult<Self::Lock, LockError>;
+    fn lock<'b: 'a>(&'b mut self) -> StdResult<Self::Lock, LockError>;
 
     fn raw_object(&self) -> Option<RawObject> {
         None
@@ -328,7 +328,7 @@ pub trait UtilRead<'a>: LockableRead<'a> {
 pub trait UtilWrite<'a>: LockableWrite<'a> {
     type Lock: Write + 'a;
 
-    fn lock_writer<'b: 'a>(&'b mut self) -> StdResult<Self::Lock, LockError>;
+    fn lock<'b: 'a>(&'b mut self) -> StdResult<Self::Lock, LockError>;
 
     fn raw_object(&self) -> Option<RawObject> {
         None

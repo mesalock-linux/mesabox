@@ -328,9 +328,9 @@ where
     }
 
     let (stdin, stdout, stderr) = setup.stdio();
-    let mut stdin = stdin.lock_reader()?;
-    let mut stdout = stdout.lock_writer()?;
-    let mut stderr = stderr.lock_writer()?;
+    let mut stdin = stdin.lock()?;
+    let mut stdout = stdout.lock()?;
+    let mut stderr = stderr.lock()?;
 
     display_msg!(stdout, "starting")?;
 
