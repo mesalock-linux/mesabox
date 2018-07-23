@@ -62,17 +62,20 @@ impl TryClone for EnvFd {
         Ok(match self {
             EnvFd::Fd(fd) => EnvFd::Fd(fd.clone()),
             EnvFd::File(file) => {
-                // XXX: maybe just convert into Fd?
+                // XXX: should be fine as we should only use this when borrow checking is too
+                //      strict (although the read/write part for RawObjectWrapper is wrong)
                 let obj = file.as_raw_object();
-                let new_fd = RawObjectWrapper::new(obj, false, false).dup_sh().map_err(|e| CommandError::DupFd { fd: obj.raw_value(), err: e })?;
-                let new_file = unsafe { File::from_raw_fd(new_fd.raw_value()) };
-                EnvFd::File(new_file)
+                let new_fd = RawObjectWrapper::new(obj, true, true);
+                EnvFd::Fd(new_fd)
             }
             EnvFd::Piped(data) => EnvFd::Piped(data.clone()),
             EnvFd::Null => EnvFd::Null,
             EnvFd::Pipeline => EnvFd::Pipeline,
-            // FIXME: don't like this as it means we have to call dup()
-            EnvFd::Pipe(pipe) => EnvFd::Pipe(pipe.try_clone().map_err(|e| CommandError::Pipe(e))?),
+            EnvFd::Pipe(pipe) => {
+                // XXX: this behavior should be fine, as try_clone() should only be used for EnvFd
+                //      in situations that would be solved by NLL
+                EnvFd::Fd(pipe.raw_object_wrapper())
+            }
             EnvFd::ChildStdout(fd) => EnvFd::ChildStdout(fd.clone())
         })
     }

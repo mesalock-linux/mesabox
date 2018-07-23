@@ -945,6 +945,13 @@ impl SimpleCommand {
                 WordEval::Globbed(files) => files.into_iter().next().unwrap(),
             };
 
+            // store the newly created fds so we don't accidentally destroy them if the user does
+            // something like 1>&2 2>&1 1>&2
+            let mut new_fds = Vec::with_capacity(0);
+
+            // NOTE: if child.output() were to return something like EnvFd::Pipe rather than
+            //       EnvFd::Fd, we'd need to do two enter_scope() here instead of one to ensure
+            //       any and all EnvFds created by init_fn() remain valid
             data.env.enter_scope();
             init_fn(data.env).map_err(|e| ShellError::Command { cmdname: cmdname.to_string_lossy().into_owned(), err: e })?;
             let (cmdenv, res) = {
@@ -955,15 +962,15 @@ impl SimpleCommand {
                 //       didn't catch it, that is))
                 if let Some(builtin) = data.env.get_builtin(&cmdname) {
                     let mut cmd = ExecEnv::new(builtin);
-                    let res = self.setup_command(data, &mut cmd);
+                    let res = self.setup_command(data, &mut cmd, &mut new_fds);
                     (CommandEnvContainer::Builtin(cmd), res)
                 } else if let Some(func) = data.env.get_func(&cmdname) {
                     let mut cmd = ExecEnv::new(func);
-                    let res = self.setup_command(data, &mut cmd);
+                    let res = self.setup_command(data, &mut cmd, &mut new_fds);
                     (CommandEnvContainer::Function(cmd), res)
                 } else {
                     let mut cmd = CommandWrapper::new(RealCommand::new(&cmdname));
-                    let res = self.setup_command(data, &mut cmd);
+                    let res = self.setup_command(data, &mut cmd, &mut new_fds);
                     (CommandEnvContainer::RealCommand(cmd), res)
                 }
             };
@@ -989,7 +996,7 @@ impl SimpleCommand {
         Ok(None)
     }
 
-    fn setup_command<'a: 'b, 'b, S, E>(&self, data: &mut RuntimeData<'a, 'b, S>, cmd: &mut E) -> CmdResult<()>
+    fn setup_command<'a: 'b, 'b, S, E>(&self, data: &mut RuntimeData<'a, 'b, S>, cmd: &mut E, new_fds: &mut Vec<EnvFd>) -> CmdResult<()>
     where
         S: UtilSetup + 'a,
         E: CommandEnv,
@@ -1000,7 +1007,7 @@ impl SimpleCommand {
             for act in actions.iter() {
                 match act {
                     Either::Left(ref redirect) => {
-                        redirect.setup(data)?;
+                        redirect.setup(data, new_fds)?;
                     }
                     Either::Right(ref assign) => {
                         let (k, v) = assign.eval(data);
@@ -1013,7 +1020,7 @@ impl SimpleCommand {
             for act in actions.iter() {
                 match act {
                     Either::Left(ref redirect) => {
-                        redirect.setup(data)?;
+                        redirect.setup(data, new_fds)?;
                     }
                     Either::Right(ref word) => {
                         match word.eval_glob_fs(data) {
@@ -1039,7 +1046,7 @@ pub enum IoRedirect {
 }
 
 impl IoRedirect {
-    pub fn setup<'a: 'b, 'b, S>(&self, data: &mut RuntimeData<'a, 'b, S>) -> CmdResult<()>
+    pub fn setup<'a: 'b, 'b, S>(&self, data: &mut RuntimeData<'a, 'b, S>, new_fds: &mut Vec<EnvFd>) -> CmdResult<()>
     where
         S: UtilSetup + 'a,
     {
@@ -1047,7 +1054,7 @@ impl IoRedirect {
 
         match self {
             File(fd, ref file) => {
-                file.setup(data, *fd)?;
+                file.setup(data, *fd, new_fds)?;
             }
             Heredoc(fd, ref doc) => {
                 let fd = fd.unwrap_or(0);
@@ -1081,7 +1088,7 @@ impl IoRedirectFile {
     //        stderr (fd 2) will be set to whatever stdout (fd 1) is and then stdout will be set to
     //        whatever fd 4 is, but stderr will still be whatever value stdout was (unless this is
     //        the correct behavior, need to verify)
-    pub fn setup<'a: 'b, 'b, S>(&self, data: &mut RuntimeData<'a, 'b, S>, fd: Option<RawFd>) -> CmdResult<()>
+    pub fn setup<'a: 'b, 'b, S>(&self, data: &mut RuntimeData<'a, 'b, S>, fd: Option<RawFd>, new_fds: &mut Vec<EnvFd>) -> CmdResult<()>
     where
         S: UtilSetup + 'a,
     {
@@ -1094,34 +1101,47 @@ impl IoRedirectFile {
             CommandError::FdAsFile { fd: fd, filename: filename.to_string_lossy().into_owned(), err: err }
         };
 
+        let mut create_file_fd = |data: &mut RuntimeData<'a, 'b, S>, fd, file| {
+            let new_fd = EnvFd::File(file);
+            // FIXME: this really shouldn't be at risk of failing as we can directly create the
+            //        RawObjectWrapper (we know the read/write status)
+            data.env.set_local_fd(fd as _, new_fd.try_clone()?);
+            new_fds.push(new_fd);
+            Ok(())
+        };
+
         match self.kind {
             Input => {
                 let fd = fd.unwrap_or(0);
                 let file = File::open(&name).map_err(|e| file_err(fd, name, e))?;
-                data.env.set_local_fd(fd as _, EnvFd::File(file))
+
+                create_file_fd(data, fd, file)?;
             }
             Output => {
                 // TODO: fail if noclobber option is set (by set -C), so if that option is present
                 //       use OpenOptions with create_new() instead of File::create()
                 let fd = fd.unwrap_or(1);
                 let file = File::create(&name).map_err(|e| file_err(fd, name, e))?;
-                data.env.set_local_fd(fd as _, EnvFd::File(file))
+
+                create_file_fd(data, fd, file)?;
             }
             Clobber => {
                 let fd = fd.unwrap_or(1);
                 let file = File::create(&name).map_err(|e| file_err(fd, name, e))?;
-                data.env.set_local_fd(fd as _, EnvFd::File(file))
+
+                create_file_fd(data, fd, file)?;
             }
             ReadWrite => {
                 let fd = fd.unwrap_or(0);
                 let file = OpenOptions::new().create(true).read(true).write(true).open(&name).map_err(|e| file_err(fd, name, e))?;
 
-                data.env.set_local_fd(fd as _, EnvFd::File(file))
+                create_file_fd(data, fd, file)?;
             }
             Append => {
                 let fd = fd.unwrap_or(1);
                 let file = OpenOptions::new().create(true).append(true).open(&name).map_err(|e| file_err(fd, name, e))?;
-                data.env.set_local_fd(fd as _, EnvFd::File(file))
+
+                create_file_fd(data, fd, file)?;
             }
             DupInput if name.len() == 1 => {
                 match name.as_bytes()[0] {
