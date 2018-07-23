@@ -4,8 +4,8 @@ use nix::unistd;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::ffi::{OsStr, OsString};
-use std::io::{self, Write};
-use std::os::unix::io::{AsRawFd, RawFd};
+use std::io::Write;
+use std::os::unix::io::RawFd;
 use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::process::{self, Child, Command, ExitStatus, Stdio};
 use std::rc::Rc;
@@ -15,7 +15,7 @@ use super::ast::{ExitCode, FunctionBody, RuntimeData};
 use super::builtin::Builtin;
 use super::env::{EnvFd, Environment, TryClone};
 use super::error::{CmdResult, CommandError};
-use util::RawObjectWrapper;
+use util::{AsRawObject, RawObject, RawObjectWrapper, Pipe};
 
 /// A command executed within the current shell process (e.g. a function or builtin)
 pub trait InProcessCommand {
@@ -109,18 +109,19 @@ impl CommandWrapper {
         for (i, val) in fd_iter {
             fds.push(match val {
                 EnvFd::Fd(fd) => (i, fd.fd),
-                EnvFd::File(file) => (i, file.as_raw_fd()),
+                EnvFd::File(file) => (i, file.as_raw_object()),
                 EnvFd::Piped(ref data) => {
                     // we need to manually create the pipe as the stdlib only handles stdio
-                    let (read, mut write) = unistd::pipe().map_err(|e| CommandError::Pipe(e))?;
+                    let (read, mut write) = Pipe::create().map_err(|e| CommandError::Pipe(e))?;
 
                     // just write now and close the writable end of the pipe as we won't need it
                     // later
-                    RawObjectWrapper::new(write, false, true).write_all(data).map_err(|e| CommandError::PipeIo(e))?;
-                    unistd::close(write).map_err(|e| CommandError::Pipe(e))?;
+                    write.write_all(data).map_err(|e| CommandError::Pipe(e))?;
+
+                    let read_obj = read.as_raw_object();
 
                     other_pipes.push(read);
-                    (i, read)
+                    (i, read_obj)
                 }
                 EnvFd::Null => continue,
                 _ => unimplemented!(),
@@ -129,18 +130,18 @@ impl CommandWrapper {
 
         self.cmd.before_exec(move || {
             for &(i, old_fd) in fds.iter() {
-                unistd::dup2(old_fd, i as RawFd).map_err(|_| io::Error::last_os_error())?;
+                RawObjectWrapper::new(old_fd, true, true).dup_as(RawObject::new(i as RawFd))?;
             }
             Ok(())
         });
         let mut child = self.cmd.spawn().map_err(|e| CommandError::StartRealCommand(e))?;
 
         if let Some(data) = stdin_pipe {
-            child.stdin.as_mut().expect("Could not open stdin pipe").write_all(&data).map_err(|e| CommandError::PipeIo(e))?;
+            child.stdin.as_mut().expect("Could not open stdin pipe").write_all(&data).map_err(|e| CommandError::Pipe(e))?;
         }
         // TODO: stdout/stderr (and any other pipes that are piped into other commands)
 
-        Ok(ShellChild::RealChild(ChildWrapper { child: child, pipes: other_pipes }))
+        Ok(ShellChild::RealChild(ChildWrapper { child: child, _pipes: other_pipes }))
     }
 }
 
@@ -297,15 +298,13 @@ impl CommandEnv for CommandEnvContainer {
 pub struct InProcessChild {
     pid: unistd::Pid,
     stdout: EnvFd,
-    write_fd: Option<RawFd>,
 }
 
 impl InProcessChild {
-    pub fn new(handle: unistd::Pid, stdout: EnvFd, write_fd: Option<RawFd>) -> Self {
+    pub fn new(handle: unistd::Pid, stdout: EnvFd) -> Self {
         Self {
             pid: handle,
             stdout: stdout,
-            write_fd: write_fd,
         }
     }
 
@@ -314,20 +313,21 @@ impl InProcessChild {
         S: UtilSetup,
         F: FnOnce(&mut RuntimeData<S>) -> CmdResult<ExitCode>,
     {
-        let mut read = None;
         let mut write = None;
         let stdout = match data.env.get_fd(1).current_val() {
             EnvFd::Pipeline => {
-                let (read_pipe, write_pipe) = unistd::pipe().map_err(|e| CommandError::Pipe(e))?;
-                read = Some(read_pipe);
+                let (read_pipe, write_pipe) = Pipe::create().map_err(|e| CommandError::Pipe(e))?;
                 write = Some(write_pipe);
-                EnvFd::Fd(RawObjectWrapper::new(read_pipe, true, false))
+                EnvFd::Pipe(read_pipe)
             }
             other => other.try_clone()?
         };
-        if let Some(write) = write {
-            data.env.set_local_fd(1, EnvFd::Fd(RawObjectWrapper::new(write, false, true)));
-        }
+        let set_write = if let Some(write) = write {
+            data.env.set_local_fd(1, EnvFd::Pipe(write));
+            true
+        } else {
+            false
+        };
 
         match unistd::fork().map_err(|e| CommandError::Fork(e))? {
             unistd::ForkResult::Child => {
@@ -335,10 +335,11 @@ impl InProcessChild {
                 process::exit(func(data).unwrap())
             }
             unistd::ForkResult::Parent { child } => {
-                if let Some(write) = write {
-                    unistd::close(write).unwrap();
+                if set_write {
+                    // drop write pipe
+                    data.env.set_local_fd(1, EnvFd::Null);
                 }
-                Ok(InProcessChild::new(child, stdout, read))
+                Ok(InProcessChild::new(child, stdout))
             }
         }
     }
@@ -347,14 +348,6 @@ impl InProcessChild {
         match wait::waitpid(self.pid, None).unwrap() {
             WaitStatus::Exited(_, code) => Ok(code),
             _ => unimplemented!(),
-        }
-    }
-}
-
-impl Drop for InProcessChild {
-    fn drop(&mut self) {
-        if let Some(fd) = self.write_fd {
-            unistd::close(fd);
         }
     }
 }
@@ -390,8 +383,9 @@ impl ShellChild {
         use self::ShellChild::*;
 
         match self {
-            RealChild(wrapper) => wrapper.child.stdout.as_ref().map(|out| EnvFd::ChildStdout(RawObjectWrapper::new(out.as_raw_fd(), true, false))).unwrap_or(EnvFd::Null),
-            InProcess(child) => child.stdout.try_clone().unwrap(),//unimplemented!(),
+            RealChild(wrapper) => wrapper.child.stdout.as_ref().map(|out| EnvFd::ChildStdout(RawObjectWrapper::new(out.as_raw_object(), true, false))).unwrap_or(EnvFd::Null),
+            // FIXME: don't unwrap
+            InProcess(child) => child.stdout.try_clone().unwrap(),
             Empty => EnvFd::Null,
         }
     }
@@ -423,15 +417,6 @@ impl ChildExitStatus {
 
 pub struct ChildWrapper {
     child: Child,
-    pipes: Vec<RawFd>,
-}
-
-impl Drop for ChildWrapper {
-    fn drop(&mut self) {
-        for &pipe in &self.pipes {
-            // XXX: not sure if we really want to error here (maybe just report the error?)
-            //unistd::close(pipe).map_err(|e| CommandError::Pipe(e))?;
-            unistd::close(pipe);
-        }
-    }
+    // store the pipes so they don't drop too early
+    _pipes: Vec<Pipe>,
 }

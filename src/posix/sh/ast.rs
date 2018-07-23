@@ -3,7 +3,6 @@ use failure::Fail;
 use libc;
 use glob::{self, MatchOptions};
 use glob::Pattern as GlobPattern;
-use nix::unistd;
 
 use std::borrow::Cow;
 use std::cell::RefCell;
@@ -18,7 +17,7 @@ use std::process;
 use std::rc::Rc;
 use std::result::Result as StdResult;
 
-use util::RawObjectWrapper;
+use util::Pipe;
 use super::{NAME, UtilSetup};
 use super::command::{CommandEnv, CommandEnvContainer, CommandWrapper, ExecData, ExecEnv, InProcessCommand, InProcessChild, ShellChild};
 use super::env::{CheckBreak, EnvFd, Environment, TryClone};
@@ -1226,27 +1225,20 @@ impl CommandSubst {
         // it later (NOTE: we might want to just do this in general if an output EnvFd is
         // EnvFd::Piped, in which case we would just set this EnvFd to EnvFd::Piped instead of
         // manually creating a pipe here)
-        // TODO: abstract pipe creation behind ReadPipe and WritePipe structs that close the pipe on drop
-        let (read, write) = match self.write_error(data.setup, data.env, unistd::pipe()) {
+        let (mut read, write) = match self.write_error(data.setup, data.env, Pipe::create()) {
             Ok(m) => m,
             Err(f) => return f,
         };
 
         let code = fake_subshell(data, |data| {
-            data.env.set_local_fd(1, EnvFd::Fd(RawObjectWrapper::new(write, false, true)));
+            data.env.set_local_fd(1, EnvFd::Pipe(write));
             self.command.execute(data)
         });
         data.env.special_vars().set_last_exitcode(code);
 
-        // XXX: not sure if we want to just ignore
-        unistd::close(write);
-
         // read the output from the pipe into a vector
         let mut output = vec![];
-        let res = self.write_error(data.setup, data.env, RawObjectWrapper::new(read, true, false).read_to_end(&mut output));
-
-        // XXX: not sure if we want to just ignore these so let them create warnings for now
-        unistd::close(read);
+        let res = self.write_error(data.setup, data.env, read.read_to_end(&mut output));
 
         if let Err(f) = res {
             return f;

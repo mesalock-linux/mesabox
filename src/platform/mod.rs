@@ -18,3 +18,7 @@ pub struct Utf8Error(OsString);
 pub trait OsStrExt {
     fn try_as_bytes(&self) -> Result<&[u8], Utf8Error>;
 }
+
+pub trait AsRawObject {
+    fn as_raw_object(&self) -> RawObject;
+}

@@ -1,7 +1,8 @@
 use super::{LockError, LockableRead, LockableWrite, UtilRead, UtilWrite};
-use std::io::{BufRead, BufReader, BufWriter, Empty, Sink, Write};
+use std::fs::File;
+use std::io::{self, BufRead, BufReader, BufWriter, Empty, Sink, Write};
 use std::result::Result as StdResult;
-use util::{RawObject, RawObjectWrapper, ReadableVec, UtilReadDyn, UtilWriteDyn};
+use util::{AsRawObject, RawObject, RawObjectWrapper, ReadableVec, UtilReadDyn, UtilWriteDyn};
 
 impl<'a, 'b, T: UtilRead<'a>> UtilRead<'a> for &'b mut T {
     type Lock = T::Lock;
@@ -126,5 +127,65 @@ impl<'a> UtilWrite<'a> for Sink {
 
     fn lock_writer<'b: 'a>(&'b mut self) -> StdResult<Self::Lock, LockError> {
         Ok(self)
+    }
+}
+
+impl<'a> UtilRead<'a> for File {
+    type Lock = BufReader<&'a mut Self>;
+
+    fn lock_reader<'b: 'a>(&'b mut self) -> Result<Self::Lock, LockError> {
+        Ok(BufReader::new(self))
+    }
+
+    fn raw_object(&self) -> Option<RawObject> {
+        Some(self.as_raw_object())
+    }
+}
+
+impl<'a> UtilRead<'a> for io::Stdin {
+    type Lock = io::StdinLock<'a>;
+
+    fn lock_reader<'b: 'a>(&'b mut self) -> Result<Self::Lock, LockError> {
+        Ok(self.lock())
+    }
+
+    fn raw_object(&self) -> Option<RawObject> {
+        Some(self.as_raw_object())
+    }
+}
+
+impl<'a> UtilWrite<'a> for File {
+    type Lock = BufWriter<&'a mut Self>;
+
+    fn lock_writer<'b: 'a>(&'b mut self) -> Result<Self::Lock, LockError> {
+        Ok(BufWriter::new(self))
+    }
+
+    fn raw_object(&self) -> Option<RawObject> {
+        Some(self.as_raw_object())
+    }
+}
+
+impl<'a> UtilWrite<'a> for io::Stdout {
+    type Lock = io::StdoutLock<'a>;
+
+    fn lock_writer<'b: 'a>(&'b mut self) -> Result<Self::Lock, LockError> {
+        Ok(self.lock())
+    }
+
+    fn raw_object(&self) -> Option<RawObject> {
+        Some(self.as_raw_object())
+    }
+}
+
+impl<'a> UtilWrite<'a> for io::Stderr {
+    type Lock = io::StderrLock<'a>;
+
+    fn lock_writer<'b: 'a>(&'b mut self) -> Result<Self::Lock, LockError> {
+        Ok(self.lock())
+    }
+
+    fn raw_object(&self) -> Option<RawObject> {
+        Some(self.as_raw_object())
     }
 }

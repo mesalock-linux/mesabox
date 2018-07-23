@@ -24,6 +24,16 @@ impl super::OsStrExt for OsStr {
 #[derive(Copy, Clone, Debug)]
 pub struct RawObject(RawHandle);
 
+impl RawObject {
+    pub fn new(handle: RawHandle) -> Self {
+        RawObject(handle)
+    }
+
+    pub fn raw_value(&self) -> RawHandle {
+        self.0
+    }
+}
+
 unsafe impl Send for RawObject { }
 unsafe impl Sync for RawObject { }
 
@@ -56,6 +66,11 @@ impl RawObjectWrapper {
         unimplemented!()
     }
 
+    /// Duplicate a file descriptor such that its new value is `val`.  This is equivalent to `dup2`.
+    pub fn dup_as(&self, val: RawObject) -> io::Result<RawObject> {
+        unimplemented!()
+    }
+
     /// Duplicate a file descriptor such that it is greater than or equal to `min`.
     pub fn dup_above(&self, min: RawObject) -> io::Result<RawObject> {
         // FIXME: dunno how to do this atm
@@ -65,7 +80,8 @@ impl RawObjectWrapper {
     /// Duplicate a file descriptor such that it is greater than or equal to 10.
     #[cfg(feature = "sh")]
     pub fn dup_sh(&self) -> io::Result<RawObject> {
-        self.dup_above(::posix::sh::option::FD_COUNT as RawObject + 1)
+        unimplemented!()
+        //self.dup_above(::posix::sh::option::FD_COUNT as RawObject + 1)
     }
 
     pub fn dup(&self) -> io::Result<RawObject> {

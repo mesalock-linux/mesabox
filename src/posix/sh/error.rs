@@ -47,10 +47,7 @@ pub enum CommandError {
     InvalidFd(u8),
 
     #[fail(display = "{}", _0)]
-    Pipe(#[cause] nix::Error),
-
-    #[fail(display = "{}", _0)]
-    PipeIo(#[cause] io::Error),
+    Pipe(#[cause] io::Error),
 
     #[fail(display = "could not fork: {}", _0)]
     Fork(#[cause] nix::Error),

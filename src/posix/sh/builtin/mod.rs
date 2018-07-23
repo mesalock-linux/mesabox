@@ -101,6 +101,7 @@ impl Builtin {
         match env.get_fd(1).current_val().try_clone()? {
             File(file) => self.execute_stdout(env, data, input, file),
             Fd(fd) | ChildStdout(fd) => self.execute_stdout(env, data, input, fd),
+            Pipe(pipe) => self.execute_stdout(env, data, input, pipe.raw_object_wrapper()),
             // FIXME: this won't work correctly
             Piped(piped) => self.execute_stdout(env, data, input, piped),
             Null => self.execute_stdout(env, data, input, io::sink()),
@@ -118,6 +119,7 @@ impl Builtin {
         match env.get_fd(2).current_val().try_clone()? {
             File(file) => self.execute_stderr(env, data, input, output, file),
             Fd(fd) | ChildStdout(fd) => self.execute_stderr(env, data, input, output, fd),
+            Pipe(pipe) => self.execute_stderr(env, data, input, output, pipe.raw_object_wrapper()),
             // FIXME: this won't work correctly
             Piped(piped) => self.execute_stderr(env, data, input, output, piped),
             Null => self.execute_stderr(env, data, input, output, io::sink()),
@@ -189,6 +191,7 @@ impl InProcessCommand for Builtin {
         let res = match rt_data.env.get_fd(0).current_val().try_clone()? {
             File(file) => self.execute_stdin(rt_data.env, data, file),
             Fd(fd) | ChildStdout(fd) => self.execute_stdin(rt_data.env, data, fd),
+            Pipe(pipe) => self.execute_stdin(rt_data.env, data, pipe.raw_object_wrapper()),
             Piped(piped) => self.execute_stdin(rt_data.env, data, ReadableVec(piped)),
             Null => self.execute_stdin(rt_data.env, data, io::empty()),
             _ => unimplemented!(),

@@ -4,7 +4,7 @@ use std::ffi::{OsString, OsStr};
 use std::fs::File;
 use std::hash::Hash;
 use std::process::Stdio;
-use std::os::unix::io::{AsRawFd, FromRawFd};
+use std::os::unix::io::FromRawFd;
 use std::iter::{FromIterator, FusedIterator};
 use std::mem;
 use std::rc::Rc;
@@ -14,7 +14,7 @@ use super::error::CommandError;
 use super::ast::{ExitCode, FunctionBody};
 use super::builtin::{Builtin, BuiltinSet};
 use super::option::FD_COUNT;
-use util::RawObjectWrapper;
+use util::{AsRawObject, RawObjectWrapper, Pipe};
 
 pub trait TryClone: Sized {
     fn try_clone(&self) -> Result<Self, CommandError>;
@@ -33,6 +33,7 @@ pub enum EnvFd {
     Piped(Vec<u8>),
     File(File),
     Fd(RawObjectWrapper),
+    Pipe(Pipe),
     Pipeline,
     ChildStdout(RawObjectWrapper),
 }
@@ -47,9 +48,10 @@ impl EnvFd {
             File(file) => file.into(),
             Fd(fd) | ChildStdout(fd) => {
                 // XXX: make sure this is right with the stdlib and such
-                let new_fd = fd.dup_sh().map_err(|e| CommandError::DupFd { fd: fd.fd, err: e })?;
-                unsafe { Stdio::from_raw_fd(new_fd) }
+                let new_fd = fd.dup_sh().map_err(|e| CommandError::DupFd { fd: fd.fd.raw_value(), err: e })?;
+                unsafe { Stdio::from_raw_fd(new_fd.raw_value()) }
             }
+            Pipe(pipe) => pipe.into(),
             Pipeline => Stdio::piped(),
         })
     }
@@ -61,22 +63,19 @@ impl TryClone for EnvFd {
             EnvFd::Fd(fd) => EnvFd::Fd(fd.clone()),
             EnvFd::File(file) => {
                 // XXX: maybe just convert into Fd?
-                let fd = file.as_raw_fd();
-                let new_fd = RawObjectWrapper::new(fd, false, false).dup_sh().map_err(|e| CommandError::DupFd { fd: fd, err: e })?;
-                let new_file = unsafe { File::from_raw_fd(new_fd) };
+                let obj = file.as_raw_object();
+                let new_fd = RawObjectWrapper::new(obj, false, false).dup_sh().map_err(|e| CommandError::DupFd { fd: obj.raw_value(), err: e })?;
+                let new_file = unsafe { File::from_raw_fd(new_fd.raw_value()) };
                 EnvFd::File(new_file)
             }
             EnvFd::Piped(data) => EnvFd::Piped(data.clone()),
             EnvFd::Null => EnvFd::Null,
             EnvFd::Pipeline => EnvFd::Pipeline,
+            // FIXME: don't like this as it means we have to call dup()
+            EnvFd::Pipe(pipe) => EnvFd::Pipe(pipe.try_clone().map_err(|e| CommandError::Pipe(e))?),
             EnvFd::ChildStdout(fd) => EnvFd::ChildStdout(fd.clone())
         })
     }
-
-    /*pub fn create_pipe() -> Result<Self, CommandError> {
-        let (read, write) = unistd::pipe().map_err(|e| CommandError::Pipe(e))?;
-        Ok(EnvFd::Pipeline(RawObjectWrapper::new(read, true, false), RawObjectWrapper::new(write, false, true)))
-    }*/
 }
 
 impl Default for EnvFd {

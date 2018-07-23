@@ -1,10 +1,9 @@
-use nix::unistd;
-
 use std::process::{Command, Stdio};
 use std::os::unix::io::FromRawFd;
 use std::os::unix::process::CommandExt;
 
 use super::{BuiltinSetup, UtilSetup, UtilRead, UtilWrite, Environment, ExecData, ExitCode, Result};
+use util::RawObjectWrapper;
 
 #[derive(Clone, Copy)]
 pub struct ExecBuiltin;
@@ -35,16 +34,16 @@ impl BuiltinSetup for ExecBuiltin {
             // TODO: this needs to duplicate all the fds (3-9 because stdin/stdout/stderr are done
             //       already below) like in command.rs
             if let Some(fd) = setup.input().raw_object() {
-                let fd = unistd::dup(fd)?;
-                cmd.stdin(unsafe { Stdio::from_raw_fd(fd) });
+                let fd = RawObjectWrapper::new(fd, true, false).dup()?;
+                cmd.stdin(unsafe { Stdio::from_raw_fd(fd.raw_value()) });
             }
             if let Some(fd) = setup.output().raw_object() {
-                let fd = unistd::dup(fd)?;
-                cmd.stdout(unsafe { Stdio::from_raw_fd(fd) });
+                let fd = RawObjectWrapper::new(fd, false, true).dup()?;
+                cmd.stdout(unsafe { Stdio::from_raw_fd(fd.raw_value()) });
             }
             if let Some(fd) = setup.error().raw_object() {
-                let fd = unistd::dup(fd)?;
-                cmd.stderr(unsafe { Stdio::from_raw_fd(fd) });
+                let fd = RawObjectWrapper::new(fd, false, true).dup()?;
+                cmd.stderr(unsafe { Stdio::from_raw_fd(fd.raw_value()) });
             }
 
             // if this actually returns an error the process failed to start

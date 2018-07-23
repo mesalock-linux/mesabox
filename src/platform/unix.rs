@@ -2,12 +2,12 @@ use libc;
 use nix::{fcntl, unistd};
 
 use std::ffi::OsStr;
-use std::fs::File;
-use std::io::{self, BufReader, BufWriter, Read, Write};
+use std::io::{self, Read, Write};
 use std::os::unix::ffi::OsStrExt;
-use std::os::unix::io::{AsRawFd, RawFd};
+use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
+use std::process::Stdio;
 
-use {UtilRead, UtilWrite, LockError};
+use super::AsRawObject;
 
 impl super::OsStrExt for OsStr {
     fn try_as_bytes(&self) -> Result<&[u8], super::Utf8Error> {
@@ -15,7 +15,18 @@ impl super::OsStrExt for OsStr {
     }
 }
 
-pub type RawObject = RawFd;
+#[derive(Copy, Clone, Debug)]
+pub struct RawObject(RawFd);
+
+impl RawObject {
+    pub fn new(fd: RawFd) -> Self {
+        RawObject(fd)
+    }
+
+    pub fn raw_value(&self) -> RawFd {
+        self.0
+    }
+}
 
 /// A wrapper around a raw file descriptor that enables reading and writing using the standard
 /// traits.  Take note that this wrapper does *NOT* close the file descriptor when dropping.
@@ -44,7 +55,7 @@ impl RawObjectWrapper {
     pub fn try_from(fd: RawObject) -> io::Result<Self> {
         use nix::fcntl::OFlag;
 
-        let res = fcntl::fcntl(fd, fcntl::F_GETFL).map_err(|_| io::Error::last_os_error())?;
+        let res = fcntl::fcntl(fd.raw_value(), fcntl::F_GETFL).map_err(|_| io::Error::last_os_error())?;
         let mode = OFlag::from_bits(res & OFlag::O_ACCMODE.bits()).unwrap();
 
         Ok(RawObjectWrapper::new(
@@ -54,27 +65,43 @@ impl RawObjectWrapper {
         ))
     }
 
+    /// Duplicate a file descriptor.  This is equivalent to `dup`.
+    pub fn dup(&self) -> io::Result<RawObject> {
+        unistd::dup(self.fd.raw_value())
+            .map(|fd| RawObject(fd))
+            .map_err(|_| io::Error::last_os_error())
+    }
+
+    /// Duplicate a file descriptor such that its new value is `val`.  This is equivalent to `dup2`.
+    pub fn dup_as(&self, val: RawObject) -> io::Result<RawObject> {
+        unistd::dup2(self.fd.raw_value(), val.raw_value())
+            .map(|fd| RawObject(fd))
+            .map_err(|_| io::Error::last_os_error())
+    }
+
     /// Duplicate a file descriptor such that it is greater than or equal to `min`.
     pub fn dup_above(&self, min: RawObject) -> io::Result<RawObject> {
-        fcntl::fcntl(self.fd, fcntl::F_DUPFD(min)).map_err(|_| io::Error::last_os_error())
+        fcntl::fcntl(self.fd.raw_value(), fcntl::F_DUPFD(min.raw_value()))
+            .map(|fd| RawObject(fd))
+            .map_err(|_| io::Error::last_os_error())
     }
 
     /// Duplicate a file descriptor such that it is greater than or equal to 10.
     #[cfg(feature = "sh")]
     pub fn dup_sh(&self) -> io::Result<RawObject> {
-        self.dup_above(::posix::sh::option::FD_COUNT as RawObject + 1)
+        self.dup_above(RawObject(::posix::sh::option::FD_COUNT as RawFd + 1))
     }
 }
 
 impl Read for RawObjectWrapper {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        unistd::read(self.fd, buf).map_err(|_| io::Error::last_os_error())
+        unistd::read(self.fd.raw_value(), buf).map_err(|_| io::Error::last_os_error())
     }
 }
 
 impl Write for RawObjectWrapper {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        unistd::write(self.fd, buf).map_err(|_| io::Error::last_os_error())
+        unistd::write(self.fd.raw_value(), buf).map_err(|_| io::Error::last_os_error())
     }
 
     fn flush(&mut self) -> io::Result<()> {
@@ -83,70 +110,116 @@ impl Write for RawObjectWrapper {
     }
 }
 
+#[derive(Copy, Clone, Debug, PartialEq)]
+enum PipeKind {
+    Read,
+    Write,
+}
+
+/// An platform-independent abstraction for pipes that automatically closes the pipe on drop.
+#[derive(Debug)]
+pub struct Pipe {
+    fd: RawFd,
+    kind: PipeKind,
+}
+
+impl Pipe {
+    pub fn create() -> io::Result<(Self, Self)> {
+        let (read, write) = unistd::pipe().map_err(|_| io::Error::last_os_error())?;
+        Ok((Pipe::new_read(read), Pipe::new_write(write)))
+    }
+
+    pub fn readable(&self) -> bool {
+        self.kind == PipeKind::Read
+    }
+
+    pub fn writable(&self) -> bool {
+        self.kind == PipeKind::Write
+    }
+
+    // XXX: might be better to only allow conversion to RawObjectWrapper
+    pub fn raw_object(&self) -> RawObject {
+        RawObject(self.fd)
+    }
+
+    pub fn raw_object_wrapper(&self) -> RawObjectWrapper {
+        RawObjectWrapper::new(RawObject(self.fd), self.readable(), self.writable())
+    }
+
+    // FIXME: not sure if we really want to dup here
+    #[cfg(feature = "sh")]
+    pub fn try_clone(&self) -> io::Result<Self> {
+        let obj = RawObjectWrapper::new(RawObject(self.fd), true, true).dup_sh()?;
+        Ok(Pipe { fd: obj.raw_value(), kind: self.kind })
+    }
+
+    fn new_read(fd: RawFd) -> Self {
+        Self {
+            fd,
+            kind: PipeKind::Read,
+        }
+    }
+
+    fn new_write(fd: RawFd) -> Self {
+        Self {
+            fd,
+            kind: PipeKind::Write,
+        }
+    }
+}
+
+impl Read for Pipe {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        RawObjectWrapper::new(RawObject::new(self.fd), true, false).read(buf)
+    }
+}
+
+impl Write for Pipe {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        RawObjectWrapper::new(RawObject::new(self.fd), false, true).write(buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        RawObjectWrapper::new(RawObject::new(self.fd), false, true).flush()
+    }
+}
+
+impl AsRawObject for Pipe {
+    fn as_raw_object(&self) -> RawObject {
+        RawObject(self.fd)
+    }
+}
+
+impl Drop for Pipe {
+    fn drop(&mut self) {
+        // XXX: ignore error?
+        unistd::close(self.fd);
+    }
+}
+
+impl From<Pipe> for Stdio {
+    fn from(pipe: Pipe) -> Self {
+        use std::mem;
+
+        let obj = pipe.as_raw_object();
+        let stdio = unsafe { Stdio::from_raw_fd(obj.raw_value()) };
+
+        // prevent drop from closing the file descriptor as Stdio takes ownership
+        mem::forget(pipe);
+
+        stdio
+    }
+}
+
 /// Determine whether the given file descriptor is a TTY.
 pub(crate) fn is_tty(stream: Option<RawObject>) -> bool {
     stream
-        .map(|fd| unsafe { libc::isatty(fd) == 1 })
+        .map(|fd| unsafe { libc::isatty(fd.raw_value()) == 1 })
         .unwrap_or(false)
 }
 
-impl<'a> UtilRead<'a> for File {
-    type Lock = BufReader<&'a mut Self>;
-
-    fn lock_reader<'b: 'a>(&'b mut self) -> Result<Self::Lock, LockError> {
-        Ok(BufReader::new(self))
-    }
-
-    fn raw_object(&self) -> Option<RawObject> {
-        Some(self.as_raw_fd())
+impl<T: AsRawFd> AsRawObject for T {
+    fn as_raw_object(&self) -> RawObject {
+        RawObject(self.as_raw_fd())
     }
 }
-
-impl<'a> UtilRead<'a> for io::Stdin {
-    type Lock = io::StdinLock<'a>;
-
-    fn lock_reader<'b: 'a>(&'b mut self) -> Result<Self::Lock, LockError> {
-        Ok(self.lock())
-    }
-
-    fn raw_object(&self) -> Option<RawObject> {
-        Some(self.as_raw_fd())
-    }
-}
-
-impl<'a> UtilWrite<'a> for File {
-    type Lock = BufWriter<&'a mut Self>;
-
-    fn lock_writer<'b: 'a>(&'b mut self) -> Result<Self::Lock, LockError> {
-        Ok(BufWriter::new(self))
-    }
-
-    fn raw_object(&self) -> Option<RawObject> {
-        Some(self.as_raw_fd())
-    }
-}
-
-impl<'a> UtilWrite<'a> for io::Stdout {
-    type Lock = io::StdoutLock<'a>;
-
-    fn lock_writer<'b: 'a>(&'b mut self) -> Result<Self::Lock, LockError> {
-        Ok(self.lock())
-    }
-
-    fn raw_object(&self) -> Option<RawObject> {
-        Some(self.as_raw_fd())
-    }
-}
-
-impl<'a> UtilWrite<'a> for io::Stderr {
-    type Lock = io::StderrLock<'a>;
-
-    fn lock_writer<'b: 'a>(&'b mut self) -> Result<Self::Lock, LockError> {
-        Ok(self.lock())
-    }
-
-    fn raw_object(&self) -> Option<RawObject> {
-        Some(self.as_raw_fd())
-    }
-}
-
