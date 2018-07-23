@@ -8,9 +8,10 @@ use util::{ReadableVec, UtilReadDyn, UtilWriteDyn};
 use super::UtilSetup;
 use super::ast::{ExitCode, RuntimeData};
 use super::command::{ExecData, InProcessChild, InProcessCommand, ShellChild};
-use super::env::{CheckBreak, EnvFd, Environment, TryClone};
+use super::env::{CheckBreak, EnvFd, Environment};
 use super::error::{CmdResult, BuiltinError, CommandError};
 use super::option::ShellOption;
+use super::types::TryClone;
 
 use self::break_builtin::BreakBuiltin;
 use self::cd::CdBuiltin;
@@ -98,7 +99,7 @@ impl Builtin {
     {
         use self::EnvFd::*;
 
-        match env.get_fd(1).current_val().try_clone()? {
+        match env.get_fd(1).try_clone()? {
             File(file) => self.execute_stdout(env, data, input, file),
             Fd(fd) | ChildStdout(fd) => self.execute_stdout(env, data, input, fd),
             Pipe(pipe) => self.execute_stdout(env, data, input, pipe.raw_object_wrapper()),
@@ -116,7 +117,7 @@ impl Builtin {
     {
         use self::EnvFd::*;
 
-        match env.get_fd(2).current_val().try_clone()? {
+        match env.get_fd(2).try_clone()? {
             File(file) => self.execute_stderr(env, data, input, output, file),
             Fd(fd) | ChildStdout(fd) => self.execute_stderr(env, data, input, output, fd),
             Pipe(pipe) => self.execute_stderr(env, data, input, output, pipe.raw_object_wrapper()),
@@ -188,7 +189,7 @@ impl InProcessCommand for Builtin {
     fn execute<'a: 'b, 'b, S: UtilSetup + 'a>(&self, rt_data: &mut RuntimeData<'a, 'b, S>, data: ExecData) -> CmdResult<ExitCode> {
         use self::EnvFd::*;
 
-        let res = match rt_data.env.get_fd(0).current_val().try_clone()? {
+        let res = match rt_data.env.get_fd(0).try_clone()? {
             File(file) => self.execute_stdin(rt_data.env, data, file),
             Fd(fd) | ChildStdout(fd) => self.execute_stdin(rt_data.env, data, fd),
             Pipe(pipe) => self.execute_stdin(rt_data.env, data, pipe.raw_object_wrapper()),

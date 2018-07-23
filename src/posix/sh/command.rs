@@ -13,8 +13,9 @@ use std::rc::Rc;
 use super::UtilSetup;
 use super::ast::{ExitCode, FunctionBody, RuntimeData};
 use super::builtin::Builtin;
-use super::env::{EnvFd, Environment, TryClone};
+use super::env::{EnvFd, Environment};
 use super::error::{CmdResult, CommandError};
+use super::types::TryClone;
 use util::{AsRawObject, RawObject, RawObjectWrapper, Pipe};
 
 /// A command executed within the current shell process (e.g. a function or builtin)
@@ -314,7 +315,7 @@ impl InProcessChild {
         F: FnOnce(&mut RuntimeData<S>) -> CmdResult<ExitCode>,
     {
         let mut write = None;
-        let stdout = match data.env.get_fd(1).current_val() {
+        let stdout = match data.env.get_fd(1) {
             EnvFd::Pipeline => {
                 let (read_pipe, write_pipe) = Pipe::create().map_err(|e| CommandError::Pipe(e))?;
                 write = Some(write_pipe);
@@ -323,7 +324,7 @@ impl InProcessChild {
             other => other.try_clone()?
         };
         let set_write = if let Some(write) = write {
-            data.env.set_local_fd(1, EnvFd::Pipe(write));
+            data.env.set_fd(1, EnvFd::Pipe(write));
             true
         } else {
             false
@@ -337,7 +338,7 @@ impl InProcessChild {
             unistd::ForkResult::Parent { child } => {
                 if set_write {
                     // drop write pipe
-                    data.env.set_local_fd(1, EnvFd::Null);
+                    data.env.set_fd(1, EnvFd::Null);
                 }
                 Ok(InProcessChild::new(child, stdout))
             }

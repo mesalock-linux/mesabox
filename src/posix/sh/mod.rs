@@ -18,6 +18,7 @@ mod env;
 mod error;
 pub mod option;
 mod parser;
+mod types;
 
 pub const NAME: &str = "sh";
 pub const DESCRIPTION: &str = "Minimal POSIX shell";
@@ -244,9 +245,9 @@ where
     // although HOME and PATH and stuff are used, we shouldn't set them explicitly
 
     // FIXME: what to do if can't create fd? (such as in testing framework)
-    env.set_global_fd(0, EnvFd::Fd(RawObjectWrapper::try_from(setup.input().raw_object().unwrap())?));
-    env.set_global_fd(1, EnvFd::Fd(RawObjectWrapper::try_from(setup.output().raw_object().unwrap())?));
-    env.set_global_fd(2, EnvFd::Fd(RawObjectWrapper::try_from(setup.error().raw_object().unwrap())?));
+    env.set_fd(0, EnvFd::Fd(RawObjectWrapper::try_from(setup.input().raw_object().unwrap())?));
+    env.set_fd(1, EnvFd::Fd(RawObjectWrapper::try_from(setup.output().raw_object().unwrap())?));
+    env.set_fd(2, EnvFd::Fd(RawObjectWrapper::try_from(setup.error().raw_object().unwrap())?));
 
     Ok(())
 }

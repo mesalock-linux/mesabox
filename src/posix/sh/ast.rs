@@ -20,8 +20,9 @@ use std::result::Result as StdResult;
 use util::Pipe;
 use super::{NAME, UtilSetup};
 use super::command::{CommandEnv, CommandEnvContainer, CommandWrapper, ExecData, ExecEnv, InProcessCommand, InProcessChild, ShellChild};
-use super::env::{CheckBreak, EnvFd, Environment, TryClone};
+use super::env::{CheckBreak, EnvFd, Environment};
 use super::error::{Result, CmdResult, CommandError, ShellError};
+use super::types::{Scoped, TryClone};
 
 pub type ExitCode = libc::c_int;
 
@@ -348,7 +349,7 @@ impl Pipeline {
 
             let code = fake_subshell(data, |data| {
                 if let Some(child) = children.last_mut() {
-                    data.env.set_local_fd(0, child.output());
+                    data.env.set_fd(0, child.output());
                 }
                 last_cmd.execute(data)
             });
@@ -914,9 +915,9 @@ impl SimpleCommand {
             if let Some(child) = prev_child {
                 // FIXME: should probably be passing Option<Option<&mut ShellChild>>, so we can set stdin to EnvFd::Null if
                 //        the previous command failed or something
-                env.set_local_fd(0, child.output());
+                env.set_fd(0, child.output());
             }
-            env.set_local_fd(1, EnvFd::Pipeline);
+            env.set_fd(1, EnvFd::Pipeline);
             Ok(())
         }, move |cmd, data| {
             cmd.spawn(data)
@@ -1062,7 +1063,7 @@ impl IoRedirect {
                 let heredoc = doc.borrow();
                 let heredoc_data = heredoc.data.clone();
 
-                data.env.set_local_fd(fd as _, EnvFd::Piped(heredoc_data));
+                data.env.set_fd(fd as _, EnvFd::Piped(heredoc_data));
             }
         }
 
@@ -1105,7 +1106,7 @@ impl IoRedirectFile {
             let new_fd = EnvFd::File(file);
             // FIXME: this really shouldn't be at risk of failing as we can directly create the
             //        RawObjectWrapper (we know the read/write status)
-            data.env.set_local_fd(fd as _, new_fd.try_clone()?);
+            data.env.set_fd(fd as _, new_fd.try_clone()?);
             new_fds.push(new_fd);
             Ok(())
         };
@@ -1158,8 +1159,8 @@ impl IoRedirectFile {
                         let digit = (ch as char).to_digit(10).unwrap();
                         //cmd.fd_alias(fd.unwrap_or(0), digit as RawFd)
                         let fd = fd.unwrap_or(0) as _;
-                        let value = data.env.get_fd(digit as _).current_val().try_clone()?;
-                        data.env.set_local_fd(fd, value)
+                        let value = data.env.get_fd(digit as _).try_clone()?;
+                        data.env.set_fd(fd, value)
                     }
                     ch => {
                         Err(CommandError::InvalidFd(ch))?
@@ -1177,8 +1178,8 @@ impl IoRedirectFile {
                         // unwrap here is fine as we verified that ch is valid above
                         let digit = (ch as char).to_digit(10).unwrap();
                         let fd = fd.unwrap_or(1) as _;
-                        let value = data.env.get_fd(digit as _).current_val().try_clone()?;
-                        data.env.set_local_fd(fd, value)
+                        let value = data.env.get_fd(digit as _).try_clone()?;
+                        data.env.set_fd(fd, value)
                     }
                     ch => {
                         Err(CommandError::InvalidFd(ch))?
@@ -1251,7 +1252,7 @@ impl CommandSubst {
         };
 
         let code = fake_subshell(data, |data| {
-            data.env.set_local_fd(1, EnvFd::Pipe(write));
+            data.env.set_fd(1, EnvFd::Pipe(write));
             self.command.execute(data)
         });
         data.env.special_vars().set_last_exitcode(code);

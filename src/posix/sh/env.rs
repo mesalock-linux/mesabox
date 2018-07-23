@@ -1,5 +1,4 @@
 use std::borrow::{Borrow, Cow};
-use std::collections::HashMap;
 use std::ffi::{OsString, OsStr};
 use std::fs::File;
 use std::hash::Hash;
@@ -8,17 +7,13 @@ use std::os::unix::io::FromRawFd;
 use std::iter::{FromIterator, FusedIterator};
 use std::mem;
 use std::rc::Rc;
-use std::slice;
 
 use super::error::CommandError;
 use super::ast::{ExitCode, FunctionBody};
 use super::builtin::{Builtin, BuiltinSet};
-use super::option::FD_COUNT;
+use super::types::{Scoped, Locality, TryClone, FdArray, ScopedMap};
+use super::types::scoped_array::ScopedArrayIter;
 use util::{AsRawObject, RawObjectWrapper, Pipe};
-
-pub trait TryClone: Sized {
-    fn try_clone(&self) -> Result<Self, CommandError>;
-}
 
 // XXX: not exactly happy that we need to clone the data for Piped, but due to issues with
 //      lifetimes in SimpleCommand::run_command() and IoRedirect::setup() the only alternative
@@ -48,6 +43,8 @@ impl EnvFd {
             File(file) => file.into(),
             Fd(fd) | ChildStdout(fd) => {
                 // XXX: make sure this is right with the stdlib and such
+                // NOTE: the reason we dup here is that these file descriptor/objects are *NOT*
+                //       guaranteed to be owned (in fact, they most likely are not)
                 let new_fd = fd.dup_sh().map_err(|e| CommandError::DupFd { fd: fd.fd.raw_value(), err: e })?;
                 unsafe { Stdio::from_raw_fd(new_fd.raw_value()) }
             }
@@ -84,102 +81,6 @@ impl TryClone for EnvFd {
 impl Default for EnvFd {
     fn default() -> Self {
         EnvFd::Null
-    }
-}
-
-#[derive(Debug)]
-pub enum Locality<T> {
-    Local(T, usize, Option<Box<Locality<T>>>),
-    Global(T),
-}
-
-impl<T> Locality<T> {
-    pub fn enter_scope(&mut self) {
-        if let Locality::Local(_, ref mut count, _) = self {
-            *count += 1;
-        }
-    }
-
-    pub fn exit_scope(&mut self) {
-        use self::Locality::*;
-
-        let prev = match self {
-            Local(_, 0, ref mut prev) => mem::replace(prev, None),
-            Local(_, ref mut count, _) => {
-                *count -= 1;
-                return
-            }
-            Global(_) => return,
-        };
-
-        // NOTE: this should be fine as exit_scope() should not be called in the base scope
-        mem::replace(self, *prev.unwrap());
-    }
-
-    pub fn set_val(&mut self, value: T) {
-        match self {
-            Locality::Local(ref mut cur_value, 0, _) => *cur_value = value,
-            Locality::Local(ref mut cur_value, ref mut count, ref mut prev) => {
-                let cur_value = mem::replace(cur_value, value);
-                let count = mem::replace(count, 0);
-                let prev_val = mem::replace(prev, None);
-                *prev = Some(Box::new(Locality::Local(cur_value, count - 1, prev_val)));
-            }
-            Locality::Global(_) => {
-                let old_self = mem::replace(self, Locality::Local(value, 0, None));
-                if let Locality::Local(_, _, ref mut prev) = self {
-                    *prev = Some(Box::new(old_self));
-                }
-            }
-        }
-    }
-
-    pub fn current_val(&self) -> &T {
-        use self::Locality::*;
-
-        match self {
-            Local(val, _, _) => val,
-            Global(val) => val,
-        }
-    }
-
-    pub fn current_val_mut(&mut self) -> &mut T {
-        use self::Locality::*;
-
-        match self {
-            Local(val, _, _) => val,
-            Global(val) => val,
-        }
-    }
-}
-
-impl<T: Default> Default for Locality<T> {
-    fn default() -> Self {
-        Locality::Global(T::default())
-    }
-}
-
-impl<T: Clone> Clone for Locality<T> {
-    fn clone(&self) -> Self {
-        match self {
-            Locality::Local(item, count, prev) => Locality::Local(item.clone(), *count, prev.clone()),
-            Locality::Global(item) => Locality::Global(item.clone()),
-        }
-    }
-}
-
-impl<T: TryClone> TryClone for Locality<T> {
-    fn try_clone(&self) -> Result<Self, CommandError> {
-        Ok(match self {
-            Locality::Local(item, count, prev) => {
-                let prev = match prev {
-                    Some(v) => Some(Box::new(v.try_clone()?)),
-                    None => None,
-                };
-                Locality::Local(item.try_clone()?, *count, prev)
-            }
-            Locality::Global(item) => Locality::Global(item.try_clone()?),
-        })
     }
 }
 
@@ -225,12 +126,14 @@ impl SpecialVars {
         //      implement a pop command
         self.args.current_val_mut().remove(0);
     }
+}
 
-    pub fn enter_scope(&mut self) {
+impl Scoped for SpecialVars {
+    fn enter_scope(&mut self) {
         self.args.enter_scope();
     }
 
-    pub fn exit_scope(&mut self) {
+    fn exit_scope(&mut self) {
         self.args.exit_scope();
     }
 }
@@ -240,18 +143,18 @@ pub struct Environment {
     special_vars: SpecialVars,
 
     // variables local to the current shell
-    vars: HashMap<OsString, OsString>,
+    vars: ScopedMap<OsString, OsString>,
 
     // exportable variables (NOTE: may want to make the value an Arc for this and vars to allow the
     // lock to release as soon as possible)
-    export_vars: HashMap<OsString, Option<OsString>>,
+    export_vars: ScopedMap<OsString, Option<OsString>>,
 
     // functions
-    funcs: HashMap<OsString, Rc<FunctionBody>>,
+    funcs: ScopedMap<OsString, Rc<FunctionBody>>,
 
     // FIXME: figure out how to make multi-threaded (this might be small enough to just clone rather
     //        than use an Arc)
-    fds: [Locality<EnvFd>; FD_COUNT],
+    fds: FdArray,
 
     // BuiltinSet is designed so that by enabling options the set of builtins can be changed
     builtins: BuiltinSet,
@@ -271,9 +174,9 @@ impl Environment {
         Self {
             special_vars: SpecialVars::new(),
 
-            vars: HashMap::new(),
-            export_vars: HashMap::new(),
-            funcs: HashMap::new(),
+            vars: ScopedMap::new(),
+            export_vars: ScopedMap::new(),
+            funcs: ScopedMap::new(),
 
             fds: Default::default(),
 
@@ -377,59 +280,24 @@ impl Environment {
         self.vars.remove(name).or_else(|| self.export_vars.remove(name).and_then(|var| var))
     }
 
-    fn set_fd(&mut self, fd: usize, value: Locality<EnvFd>) {
-        mem::replace(&mut self.fds[fd], value);
+    pub fn set_fd(&mut self, fd: usize, value: EnvFd) {
+        self.fds.set_val(fd, value);
     }
 
-    pub fn set_global_fd(&mut self, fd: usize, value: EnvFd) {
-        self.set_fd(fd, Locality::Global(value));
-    }
-
-    pub fn set_local_fd(&mut self, fd: usize, value: EnvFd) {
-        self.fds[fd].set_val(value);
-    }
-
-    pub fn get_fd(&self, fd: usize) -> &Locality<EnvFd> {
+    pub fn get_fd(&self, fd: usize) -> &EnvFd {
         &self.fds[fd]
     }
 
-    pub fn get_fd_mut(&mut self, fd: usize) -> &mut Locality<EnvFd> {
+    pub fn get_fd_mut(&mut self, fd: usize) -> &mut EnvFd {
         &mut self.fds[fd]
     }
 
-    pub fn fds(&self) -> &[Locality<EnvFd>; FD_COUNT] {
+    pub fn fds(&self) -> &FdArray {
         &self.fds
     }
 
-    pub fn current_fds(&mut self) -> CurrentFdIter {
-        CurrentFdIter { fd_iter: self.fds.iter_mut() }
-    }
-
-    // XXX: may want to split into enter_scope_vars() and enter_scope_fds(), and then create an
-    //      enter_scope() method that runs them both.  adding locality to the {export_,}vars will
-    //      mean either making the hashmaps themselves local or making the variables inside the
-    //      hashmaps local.  with many variables and few scopes, i imagine the latter would be
-    //      slower than the former (as you would need to enter_scope() every variable within the
-    //      hashmaps), but if you have many scopes accessing a variable in the outermost scope
-    //      hashmap would be very slow if using the former method (as you would need to hash the
-    //      value many times (unless there's a way to retrieve the hash and search the hashmap
-    //      using the hash rather than the actual key?))
-    //      am just considering writing a custom hashmap that lets us compute the hash once and use
-    //      it to check all inner hashmaps because of the latter issue (probably should just make
-    //      it a unique structure storing both vars and export_vars in such a case to improve the
-    //      performance of setting variables)
-    pub fn enter_scope(&mut self) {
-        for fd in &mut self.fds {
-            fd.enter_scope();
-        }
-        self.special_vars.enter_scope();
-    }
-
-    pub fn exit_scope(&mut self) {
-        for fd in &mut self.fds {
-            fd.exit_scope();
-        }
-        self.special_vars.exit_scope();
+    pub fn current_fds(&mut self) -> ScopedArrayIter<EnvFd> {
+        self.fds.iter_mut()
     }
 
     pub fn set_func<Q: ?Sized>(&mut self, name: &Q, new_val: Rc<FunctionBody>) -> Option<Rc<FunctionBody>>
@@ -494,9 +362,9 @@ impl<T: Iterator<Item = (OsString, OsString)>> From<T> for Environment {
     fn from(iter: T) -> Self {
         Self {
             special_vars: SpecialVars::new(),
-            vars: HashMap::new(),
+            vars: ScopedMap::new(),
             export_vars: iter.map(|(key, value)| (key, Some(value))).collect(),
-            funcs: HashMap::new(),
+            funcs: ScopedMap::new(),
 
             fds: Default::default(),
 
@@ -509,43 +377,28 @@ impl<T: Iterator<Item = (OsString, OsString)>> From<T> for Environment {
     }
 }
 
-impl TryClone for Environment {
-    fn try_clone(&self) -> Result<Self, CommandError> {
-        let mut fds: [Locality<EnvFd>; FD_COUNT] = Default::default();
-
-        for (new_fd, fd) in fds.iter_mut().zip(self.fds.iter()) {
-            *new_fd = fd.try_clone()?;
-        }
-        Ok(Self {
-            special_vars: self.special_vars.clone(),
-            vars: self.vars.clone(),
-            export_vars: self.export_vars.clone(),
-            funcs: self.funcs.clone(),
-
-            fds: fds,
-
-            builtins: self.builtins.clone(),
-
-            break_counter: self.break_counter,
-            break_type: self.break_type.clone(),
-            loop_depth: self.loop_depth,
-        })
-    }
-}
-
-pub struct CurrentFdIter<'a> {
-    fd_iter: slice::IterMut<'a, Locality<EnvFd>>,
-}
-
-impl<'a> Iterator for CurrentFdIter<'a> {
-    type Item = &'a mut EnvFd;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.fd_iter.next().map(|value| value.current_val_mut())
+impl Scoped for Environment {
+    // XXX: may want to split into enter_scope_vars() and enter_scope_fds(), and then create an
+    //      enter_scope() method that runs them both.  adding locality to the {export_,}vars will
+    //      mean either making the hashmaps themselves local or making the variables inside the
+    //      hashmaps local.  with many variables and few scopes, i imagine the latter would be
+    //      slower than the former (as you would need to enter_scope() every variable within the
+    //      hashmaps), but if you have many scopes accessing a variable in the outermost scope
+    //      hashmap would be very slow if using the former method (as you would need to hash the
+    //      value many times (unless there's a way to retrieve the hash and search the hashmap
+    //      using the hash rather than the actual key?))
+    //      am just considering writing a custom hashmap that lets us compute the hash once and use
+    //      it to check all inner hashmaps because of the latter issue (probably should just make
+    //      it a unique structure storing both vars and export_vars in such a case to improve the
+    //      performance of setting variables)
+    fn enter_scope(&mut self) {
+        self.fds.enter_scope();
+        self.special_vars.enter_scope();
     }
 
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.fd_iter.size_hint()
+    fn exit_scope(&mut self) {
+        self.fds.exit_scope();
+        self.special_vars.exit_scope();
     }
 }
 
