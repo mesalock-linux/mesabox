@@ -1,6 +1,7 @@
 use super::{LockError, LockableRead, LockableWrite, UtilRead, UtilWrite};
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, BufWriter, Empty, Sink, Write};
+use std::net::TcpStream;
 use std::result::Result as StdResult;
 use util::{AsRawObject, RawObject, RawObjectWrapper, ReadableVec, UtilReadDyn, UtilWriteDyn};
 
@@ -183,6 +184,30 @@ impl<'a> UtilWrite<'a> for io::Stderr {
 
     fn lock_writer<'b: 'a>(&'b mut self) -> Result<Self::Lock, LockError> {
         Ok(self.lock())
+    }
+
+    fn raw_object(&self) -> Option<RawObject> {
+        Some(self.as_raw_object())
+    }
+}
+
+impl<'a> UtilRead<'a> for TcpStream {
+    type Lock = BufReader<&'a mut Self>;
+
+    fn lock_reader<'b: 'a>(&'b mut self) -> Result<Self::Lock, LockError> {
+        Ok(BufReader::new(self))
+    }
+
+    fn raw_object(&self) -> Option<RawObject> {
+        Some(self.as_raw_object())
+    }
+}
+
+impl<'a> UtilWrite<'a> for TcpStream {
+    type Lock = BufWriter<&'a mut Self>;
+
+    fn lock_writer<'b: 'a>(&'b mut self) -> Result<Self::Lock, LockError> {
+        Ok(BufWriter::new(self))
     }
 
     fn raw_object(&self) -> Option<RawObject> {
