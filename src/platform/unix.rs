@@ -55,7 +55,8 @@ impl RawObjectWrapper {
     pub fn try_from(fd: RawObject) -> io::Result<Self> {
         use nix::fcntl::OFlag;
 
-        let res = fcntl::fcntl(fd.raw_value(), fcntl::F_GETFL).map_err(|_| io::Error::last_os_error())?;
+        let res =
+            fcntl::fcntl(fd.raw_value(), fcntl::F_GETFL).map_err(|_| io::Error::last_os_error())?;
         let mode = OFlag::from_bits(res & OFlag::O_ACCMODE.bits()).unwrap();
 
         Ok(RawObjectWrapper::new(
@@ -150,7 +151,10 @@ impl Pipe {
     #[cfg(feature = "sh")]
     pub fn try_clone(&self) -> io::Result<Self> {
         let obj = RawObjectWrapper::new(RawObject(self.fd), true, true).dup_sh()?;
-        Ok(Pipe { fd: obj.raw_value(), kind: self.kind })
+        Ok(Pipe {
+            fd: obj.raw_value(),
+            kind: self.kind,
+        })
     }
 
     fn new_read(fd: RawFd) -> Self {

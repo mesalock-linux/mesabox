@@ -18,7 +18,8 @@ fn main() {
         let mut stderr = stream.try_clone().unwrap();
 
         let res = {
-            let mut setup = UtilData::new(&mut stream, &mut stdout, &mut stderr, iter::empty(), None);
+            let mut setup =
+                UtilData::new(&mut stream, &mut stdout, &mut stderr, iter::empty(), None);
 
             mesabox::execute(&mut setup, &mut ["head", "-n", "4"].into_iter())
         };

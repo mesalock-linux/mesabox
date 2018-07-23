@@ -1,7 +1,7 @@
 use kernel32;
+use winapi::shared::{minwindef, ntdef};
 use winapi::um::winnt::DUPLICATE_SAME_ACCESS;
 use winapi::um::{consoleapi, fileapi};
-use winapi::shared::{ntdef, minwindef};
 
 use std::ffi::OsStr;
 use std::fs::File;
@@ -9,7 +9,7 @@ use std::io::{self, BufReader, BufWriter, Read, Write};
 use std::os::windows::io::{AsRawHandle, RawHandle};
 use std::ptr;
 
-use {UtilRead, UtilWrite, LockError};
+use {LockError, UtilRead, UtilWrite};
 
 impl super::OsStrExt for OsStr {
     fn try_as_bytes(&self) -> Result<&[u8], super::Utf8Error> {
@@ -34,8 +34,8 @@ impl RawObject {
     }
 }
 
-unsafe impl Send for RawObject { }
-unsafe impl Sync for RawObject { }
+unsafe impl Send for RawObject {}
+unsafe impl Sync for RawObject {}
 
 /// A wrapper around a raw handle that enables reading and writing using the standard traits.  Take
 /// note that this wrapper does *NOT* close the file descriptor when dropping.
@@ -94,7 +94,7 @@ impl RawObjectWrapper {
                 &mut duplicate,
                 0,
                 minwindef::FALSE,
-                DUPLICATE_SAME_ACCESS
+                DUPLICATE_SAME_ACCESS,
             )
         };
         // == 0 is correct
@@ -109,7 +109,15 @@ impl RawObjectWrapper {
 impl Read for RawObjectWrapper {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let mut bytes_read = 0;
-        let res = unsafe { fileapi::ReadFile(self.object.0, buf.as_mut_ptr() as _, buf.len() as _, &mut bytes_read, ntdef::NULL as _) };
+        let res = unsafe {
+            fileapi::ReadFile(
+                self.object.0,
+                buf.as_mut_ptr() as _,
+                buf.len() as _,
+                &mut bytes_read,
+                ntdef::NULL as _,
+            )
+        };
         if res == 0 {
             Err(io::Error::last_os_error())
         } else {
@@ -121,7 +129,15 @@ impl Read for RawObjectWrapper {
 impl Write for RawObjectWrapper {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let mut bytes_written = 0;
-        let res = unsafe { fileapi::WriteFile(self.object.0, buf.as_ptr() as _, buf.len() as _, &mut bytes_written, ntdef::NULL as _) };
+        let res = unsafe {
+            fileapi::WriteFile(
+                self.object.0,
+                buf.as_ptr() as _,
+                buf.len() as _,
+                &mut bytes_written,
+                ntdef::NULL as _,
+            )
+        };
         if res == 0 {
             Err(io::Error::last_os_error())
         } else {
@@ -142,7 +158,8 @@ pub(crate) fn is_tty(stream: Option<RawObject>) -> bool {
             let mut out = 0;
             let res = unsafe { consoleapi::GetConsoleMode(obj.0, &mut out) };
             res != 0
-        }).unwrap_or(false)
+        })
+        .unwrap_or(false)
 }
 
 impl<'a> UtilRead<'a> for File {

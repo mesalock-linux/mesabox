@@ -6,7 +6,7 @@
 // For a copy, see the LICENSE file.
 //
 
-pub(crate) use super::{AsRawObject, RawObject, RawObjectWrapper, Pipe, OsStrExt, is_tty};
+pub(crate) use super::{is_tty, AsRawObject, OsStrExt, Pipe, RawObject, RawObjectWrapper};
 use super::{LockableRead, LockableWrite, MesaError, Result};
 
 use failure;

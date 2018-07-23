@@ -13,10 +13,10 @@ extern crate failure;
 extern crate failure_derive;
 extern crate libc;
 
-#[cfg(unix)]
-extern crate nix;
 #[cfg(windows)]
 extern crate kernel32;
+#[cfg(unix)]
+extern crate nix;
 #[cfg(windows)]
 extern crate winapi;
 
