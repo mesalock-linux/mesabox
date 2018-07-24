@@ -11,9 +11,10 @@ use super::{LockableRead, LockableWrite, MesaError, Result};
 
 use failure;
 use libc;
+use std::borrow::Cow;
 use std::error::Error as StdError;
 use std::io::{self, Read, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::result::Result as StdResult;
 use std::str::FromStr;
 
@@ -120,14 +121,14 @@ where
 /// Get the actual path of a file or directory assuming `current_dir` is the current working
 /// directory.  If `current_dir` is `None` or `path` is an absolute path, the returned path will
 /// be `path`.
-pub fn actual_path<D, P>(current_dir: &Option<D>, path: &P) -> PathBuf
+pub fn actual_path<'a, D, P>(current_dir: &Option<D>, path: &'a P) -> Cow<'a, Path>
 where
     D: AsRef<Path>,
     P: AsRef<Path> + ?Sized,
 {
     match current_dir {
-        Some(dir) if !Path::new(path.as_ref()).is_absolute() => dir.as_ref().join(path),
-        _ => PathBuf::from(path.as_ref()),
+        Some(dir) if !Path::new(path.as_ref()).is_absolute() => Cow::from(dir.as_ref().join(path)),
+        _ => Cow::from(path.as_ref()),
     }
 }
 

@@ -14,9 +14,10 @@ use util;
 use clap::{Arg, ArgGroup, OsValues};
 use globset::{GlobSetBuilder, Glob};
 //use regex::bytes::RegexSet;
+use std::borrow::Cow;
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Read, Write};
-use std::path::PathBuf;
+use std::path::Path;
 
 pub(crate) const NAME: &str = "tar";
 pub(crate) const DESCRIPTION: &str = "Manage archives using the tar format";
@@ -74,7 +75,7 @@ struct Options<'a> {
     pub mode: Mode,
     pub compression: Compression,
     pub format: ArchiveFormat,
-    pub file: Option<PathBuf>,
+    pub file: Option<Cow<'a, Path>>,
 
     // extra parameters passed to the command
     pub values: Option<OsValues<'a>>,

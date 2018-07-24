@@ -1,4 +1,3 @@
-use either::Either;
 use failure::Fail;
 use libc;
 use glob::{self, MatchOptions};
@@ -988,7 +987,7 @@ impl SimpleCommand {
             for act in actions.iter() {
                 // XXX: i believe we are just supposed to ignore redirects here, but not certain
                 //      (this is not correct as the user could be trying to close file descriptors)
-                if let Either::Right(ref assign) = act {
+                if let PreAction::VarAssign(ref assign) = act {
                     assign.execute(data);
                 }
             }
@@ -1007,10 +1006,10 @@ impl SimpleCommand {
         if let Some(ref actions) = self.pre_actions {
             for act in actions.iter() {
                 match act {
-                    Either::Left(ref redirect) => {
+                    PreAction::IoRedirect(ref redirect) => {
                         redirect.setup(data, new_fds)?;
                     }
-                    Either::Right(ref assign) => {
+                    PreAction::VarAssign(ref assign) => {
                         let (k, v) = assign.eval(data);
                         cmd.env(Cow::Borrowed(k), Cow::Owned(v));
                     }
@@ -1020,10 +1019,10 @@ impl SimpleCommand {
         if let Some(ref actions) = self.post_actions {
             for act in actions.iter() {
                 match act {
-                    Either::Left(ref redirect) => {
+                    PostAction::IoRedirect(ref redirect) => {
                         redirect.setup(data, new_fds)?;
                     }
-                    Either::Right(ref word) => {
+                    PostAction::Word(ref word) => {
                         match word.eval_glob_fs(data) {
                             WordEval::Text(text) => cmd.arg(Cow::Owned(text)),
                             WordEval::Globbed(glob) => cmd.args(glob.into_iter().map(|v| Cow::Owned(v))),
@@ -1037,8 +1036,17 @@ impl SimpleCommand {
     }
 }
 
-pub type PreAction = Either<IoRedirect, VarAssign>;
-pub type PostAction = Either<IoRedirect, Word>;
+#[derive(Debug)]
+pub enum PreAction {
+    IoRedirect(IoRedirect),
+    VarAssign(VarAssign),
+}
+
+#[derive(Debug)]
+pub enum PostAction {
+    IoRedirect(IoRedirect),
+    Word(Word),
+}
 
 #[derive(Debug)]
 pub enum IoRedirect {
@@ -1326,10 +1334,7 @@ pub enum Param {
 }
 
 impl Param {
-    pub fn eval<'a: 'b, 'b, S>(&self, _setup: &mut S, env: &'a mut Environment) -> Option<Cow<'b, OsStr>>
-    where
-        S: UtilSetup,
-    {
+    pub fn eval<'a: 'b, 'b>(&self, env: &'a mut Environment) -> Option<Cow<'b, OsStr>> {
         use self::Param::*;
 
         match self {
@@ -1364,18 +1369,18 @@ impl Param {
         }
     }
 
-    pub fn to_os_string(&self) -> OsString {
+    pub fn to_os_string(&self) -> Cow<OsStr> {
         use self::Param::*;
 
         match self {
-            Var(ref s) => s.clone(),
-            Star => OsString::from("*"),
-            Question => OsString::from("?"),
-            At => OsString::from("@"),
-            NumParams => OsString::from("#"),
-            ShellPid => OsString::from("$"),
-            BackgroundPid => OsString::from("!"),
-            Positional(num) => OsString::from(format!("{}", num)),
+            Var(ref s) => Cow::Borrowed(s),
+            Star => Cow::Borrowed(OsStr::new("*")),
+            Question => Cow::Borrowed(OsStr::new("?")),
+            At => Cow::Borrowed(OsStr::new("@")),
+            NumParams => Cow::Borrowed(OsStr::new("#")),
+            ShellPid => Cow::Borrowed(OsStr::new("$")),
+            BackgroundPid => Cow::Borrowed(OsStr::new("!")),
+            Positional(num) => Cow::Owned(OsString::from(format!("{}", num))),
         }
     }
 }
@@ -1431,7 +1436,7 @@ impl ParamExpr {
 
         // NOTE: this entire setup is to get around the borrow checker
         loop {
-            let pval = self.param.eval(data.setup, data.env);
+            let pval = self.param.eval(data.env);
             pval_valid = pval.is_some();
             not_null = pval.as_ref().map(|v| v.len() > 0).unwrap_or(false);
             return match self.kind {

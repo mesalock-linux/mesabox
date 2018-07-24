@@ -26,8 +26,6 @@ extern crate byteorder;
 extern crate chrono;
 #[cfg(feature = "crossbeam")]
 extern crate crossbeam;
-#[cfg(feature = "either")]
-extern crate either;
 #[cfg(feature = "fnv")]
 extern crate fnv;
 #[cfg(feature = "globset")]
@@ -36,8 +34,6 @@ extern crate globset;
 extern crate mio;
 #[cfg(feature = "pnet")]
 extern crate pnet;
-#[cfg(feature = "regex")]
-extern crate regex;
 #[cfg(feature = "socket2")]
 extern crate socket2;
 #[cfg(feature = "trust-dns-resolver")]

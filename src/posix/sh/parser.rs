@@ -1,4 +1,3 @@
-use either::Either;
 use nom::{self, alpha1, alphanumeric1, digit1, space0, space1, newline};
 
 use std::cell::RefCell;
@@ -726,8 +725,8 @@ fn cmd_word<'a>(input: &'a [u8], parser: &mut Parser) -> IResult<'a, CommandName
 fn cmd_prefix<'a>(input: &'a [u8], parser: &mut Parser) -> IResult<'a, Vec<PreAction>> {
     many1!(input,
         alt!(
-            call!(io_redirect, parser) => { |redir| Either::Left(redir) } |
-            call!(var_assign, parser) => { |assign| Either::Right(assign) }
+            call!(io_redirect, parser) => { |redir| PreAction::IoRedirect(redir) } |
+            call!(var_assign, parser) => { |assign| PreAction::VarAssign(assign) }
         )
     )
 }
@@ -735,8 +734,8 @@ fn cmd_prefix<'a>(input: &'a [u8], parser: &mut Parser) -> IResult<'a, Vec<PreAc
 fn cmd_suffix<'a>(input: &'a [u8], parser: &mut Parser) -> IResult<'a, Vec<PostAction>> {
     many1!(input,
         alt!(
-            call!(io_redirect, parser) => { |redir| Either::Left(redir) } |
-            call!(word, parser) => { |word| Either::Right(word) }
+            call!(io_redirect, parser) => { |redir| PostAction::IoRedirect(redir) } |
+            call!(word, parser) => { |word| PostAction::Word(word) }
         )
     )
 }
