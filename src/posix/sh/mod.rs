@@ -1,13 +1,17 @@
+use clap::{App, Arg, OsValues};
 use nom;
 use rustyline::error::ReadlineError;
 use rustyline::{CompletionType, Config, Editor};
 
 use std::borrow::Cow;
 use std::ffi::{OsStr, OsString};
+use std::fs::File;
+use std::io::{Read, Write};
 
 use util::RawObjectWrapper;
 use {ArgsIter, Result, UtilRead, UtilSetup, UtilWrite};
 
+use self::ast::ExitCode;
 use self::env::{EnvFd, Environment};
 use self::parser::Parser;
 
@@ -49,49 +53,87 @@ where
     S: UtilSetup,
     T: ArgsIter,
 {
-    use std::io::Read;
+    let matches = create_app().get_matches_from_safe(args)?;
+    if matches.is_present("command-string") {
+        // TODO: read command string stuff
+        unimplemented!()
+    } else if matches.is_present("command-stdin") || !matches.is_present("ARGUMENTS") {
+        // TODO: also need to check if stdin is a terminal if -i was not specified
+        if matches.is_present("interactive") {
+            start_repl(setup)
+        } else {
+            // TODO: read commands from stdin and exit
+            unimplemented!()
+        }
+    } else {
+        // we have arguments and nothing was specified, so assume it's a script
+        let mut args = matches.values_of_os("ARGUMENTS").unwrap();
+        let script = args.next().unwrap();
 
-    start_repl(setup)?;
+        // FIXME: dunno what to do with exitcode (guess do the chmod trick where we set exitcode in
+        //        MesaError?  maybe execute() should return Result<i32>)
+        let code = run_script(setup, script, args)?;
+        Ok(())
+    }
+}
 
-    let mut input = ::std::fs::File::open("input.sh").unwrap();
-    let mut data = Vec::new();
-    input.read_to_end(&mut data).unwrap();
+fn create_app() -> App<'static, 'static> {
+    // TODO: support all the options that can be given to `set` as well
+    util_app!(NAME)
+        .arg(Arg::with_name("command-string")
+            .short("c")
+            .help("read commands from the given command string")
+            .requires("ARGUMENTS"))
+        .arg(Arg::with_name("interactive")
+            .short("i")
+            .help("specify that the shell is interactive"))
+        .arg(Arg::with_name("command-stdin")
+            .short("s")
+            .help("read commands from the standard input"))
+        .arg(Arg::with_name("ARGUMENTS")
+            .index(1)
+            .multiple(true))
+}
+
+fn run_script<S>(setup: &mut S, name: &OsStr, args: OsValues) -> Result<ExitCode>
+where
+    S: UtilSetup,
+{
+    // TODO: handle errors using custom error type
+    let mut input = File::open(name)?;
+    let mut data = vec![];
+    input.read_to_end(&mut data)?;
 
     let mut parser = Parser::new();
     let res = complete!(data.as_slice(), call_m!(parser.complete_command));
+
+    // FIXME: clearly gross
     match res {
         Ok(m) => {
-            println!("{:#?}", m);
             let mut env = setup.env().into();
             setup_default_env(setup, &mut env)?;
-
-            //println!("{:#?}", m);
-            //println!();
 
             let mut data = ast::RuntimeData {
                 setup: setup,
                 env: &mut env,
             };
 
-            println!("status: {}", m.1.execute(&mut data));
-
-            Ok(())
+            Ok(m.1.execute(&mut data))
         }
         Err(nom::Err::Failure(ctx)) | Err(nom::Err::Error(ctx)) => {
-            //println!("{}", f.into_error_kind())
             match ctx {
                 nom::Context::List(ref vec) => {
                     for (_, err) in vec {
                         match err {
                             nom::ErrorKind::Custom(s) => {
-                                println!("{}", s);
+                                writeln!(setup.error(), "{}", s)?;
                             }
                             other => {
-                                println!("{:#?}", other);
+                                writeln!(setup.error(), "{:#?}", other)?;
                             }
                         }
                     }
-                    Ok(())
+                    Ok(1)
                 }
                 _ => unimplemented!(),
             }
