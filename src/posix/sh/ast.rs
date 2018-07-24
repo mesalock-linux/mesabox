@@ -1,27 +1,30 @@
 use failure::Fail;
-use libc;
-use glob::{self, MatchOptions};
 use glob::Pattern as GlobPattern;
+use glob::{self, MatchOptions};
+use libc;
 
 use std::borrow::Cow;
 use std::cell::RefCell;
-use std::ffi::{OsString, OsStr};
+use std::ffi::{OsStr, OsString};
 use std::fmt;
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
 use std::iter::FromIterator;
-use std::os::unix::ffi::{OsStringExt, OsStrExt};
+use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::os::unix::io::RawFd;
 use std::process;
 use std::rc::Rc;
 use std::result::Result as StdResult;
 
-use util::Pipe;
-use super::{NAME, UtilSetup};
-use super::command::{CommandEnv, CommandEnvContainer, CommandWrapper, ExecData, ExecEnv, InProcessCommand, InProcessChild, ShellChild};
+use super::command::{
+    CommandEnv, CommandEnvContainer, CommandWrapper, ExecData, ExecEnv, InProcessChild,
+    InProcessCommand, ShellChild,
+};
 use super::env::{CheckBreak, EnvFd, Environment};
-use super::error::{Result, CmdResult, CommandError, ShellError};
+use super::error::{CmdResult, CommandError, Result, ShellError};
 use super::types::{Scoped, TryClone};
+use super::{UtilSetup, NAME};
+use util::Pipe;
 
 pub type ExitCode = libc::c_int;
 
@@ -32,14 +35,12 @@ pub struct RuntimeData<'a: 'b, 'b, S: UtilSetup + 'a> {
 
 #[derive(Debug)]
 pub struct Script {
-    commands: Vec<CompleteCommand>
+    commands: Vec<CompleteCommand>,
 }
 
 impl Script {
     pub fn new(commands: Vec<CompleteCommand>) -> Self {
-        Self {
-            commands: commands
-        }
+        Self { commands: commands }
     }
 }
 
@@ -50,9 +51,7 @@ pub struct CompleteCommand {
 
 impl CompleteCommand {
     pub fn new(lists: Vec<Vec<Vec<AndOr>>>) -> Self {
-        Self {
-            lists: lists
-        }
+        Self { lists: lists }
     }
 
     pub fn execute<'a: 'b, 'b, S>(&self, data: &mut RuntimeData<'a, 'b, S>) -> ExitCode
@@ -105,16 +104,18 @@ impl Word {
             SingleQuote(ref quote) => quote.clone(),
             DoubleQuote(ref quote) => quote.eval(data),
             Simple(ref s) => s.clone(),
-            Complex(ref parts) => {
-                parts.iter().fold(OsString::new(), |mut acc, item| {
-                    acc.push(&item.eval(data));
-                    acc
-                })
-            }
+            Complex(ref parts) => parts.iter().fold(OsString::new(), |mut acc, item| {
+                acc.push(&item.eval(data));
+                acc
+            }),
         }
     }
 
-    pub fn matches_glob<'a: 'b, 'b, S>(&self, data: &mut RuntimeData<'a, 'b, S>, value: &OsStr) -> bool
+    pub fn matches_glob<'a: 'b, 'b, S>(
+        &self,
+        data: &mut RuntimeData<'a, 'b, S>,
+        value: &OsStr,
+    ) -> bool
     where
         S: UtilSetup + 'a,
     {
@@ -129,7 +130,7 @@ impl Word {
         // FIXME: what to do here, error out?
         let matcher = match GlobPattern::new(&text) {
             Ok(m) => m,
-            _ => return false
+            _ => return false,
         };
 
         if matcher.matches_with(value, &options) {
@@ -154,7 +155,7 @@ impl Word {
                         result.push(OsStr::from_bytes(&s.as_bytes()[2..]));
                         result
                     }
-                    _ => s.to_owned()
+                    _ => s.to_owned(),
                 }
             } else {
                 s.to_owned()
@@ -264,7 +265,11 @@ impl AndOr {
         }
     }
 
-    pub fn execute<'a: 'b, 'b, S>(&self, data: &mut RuntimeData<'a, 'b, S>, prev_res: ExitCode) -> ExitCode
+    pub fn execute<'a: 'b, 'b, S>(
+        &self,
+        data: &mut RuntimeData<'a, 'b, S>,
+        prev_res: ExitCode,
+    ) -> ExitCode
     where
         S: UtilSetup + 'a,
     {
@@ -300,7 +305,10 @@ impl VarAssign {
     where
         S: UtilSetup + 'a,
     {
-        let value = self.value.as_ref().map(|w| w.eval(data)).unwrap_or_default();
+        let value = self.value
+            .as_ref()
+            .map(|w| w.eval(data))
+            .unwrap_or_default();
         data.env.set_var(Cow::Borrowed(&self.varname), value);
     }
 
@@ -308,7 +316,13 @@ impl VarAssign {
     where
         S: UtilSetup + 'a,
     {
-        (&self.varname, self.value.as_ref().map(|w| w.eval(data)).unwrap_or_default())
+        (
+            &self.varname,
+            self.value
+                .as_ref()
+                .map(|w| w.eval(data))
+                .unwrap_or_default(),
+        )
     }
 }
 
@@ -396,7 +410,7 @@ impl Command {
     pub fn with_inner(inner: CommandInner) -> Self {
         Self {
             inner: inner,
-            redirect_list: None
+            redirect_list: None,
         }
     }
 
@@ -416,7 +430,11 @@ impl Command {
         }
     }
 
-    pub fn spawn<'a: 'b, 'b, S>(&self, data: &mut RuntimeData<'a, 'b, S>, prev_child: Option<&mut ShellChild>) -> Option<ShellChild>
+    pub fn spawn<'a: 'b, 'b, S>(
+        &self,
+        data: &mut RuntimeData<'a, 'b, S>,
+        prev_child: Option<&mut ShellChild>,
+    ) -> Option<ShellChild>
     where
         S: UtilSetup + 'a,
     {
@@ -460,8 +478,7 @@ impl CommandInner {
             SubShell(_) => {
                 // XXX: this would be a use case for variable locality, but for now fork
                 // FIXME: need to set up so that it dumps to stdout (currently will just make a pipe to nowhere)
-                self
-                    .spawn(data, None)
+                self.spawn(data, None)
                     .and_then(|mut child| child.wait().map_err(|e| ShellError::SubShell(e)))
                     .map(|status| status.code())
             }
@@ -469,7 +486,11 @@ impl CommandInner {
         }
     }
 
-    pub fn spawn<'a: 'b, 'b, S>(&self, data: &mut RuntimeData<'a, 'b, S>, prev_child: Option<&mut ShellChild>) -> Result<ShellChild>
+    pub fn spawn<'a: 'b, 'b, S>(
+        &self,
+        data: &mut RuntimeData<'a, 'b, S>,
+        prev_child: Option<&mut ShellChild>,
+    ) -> Result<ShellChild>
     where
         S: UtilSetup + 'a,
     {
@@ -479,16 +500,16 @@ impl CommandInner {
         match self {
             SubShell(ref and_ors) => {
                 // XXX: maybe make a Block node to share code between SubShell, AndOr (in Command, so compound_list) and FunctionBody?
-                InProcessChild::spawn(data, |data| {
-                    Ok(exec_list(data, and_ors))
-                }).map(|child| ShellChild::InProcess(child)).map_err(|e| ShellError::Spawn(e))
+                InProcessChild::spawn(data, |data| Ok(exec_list(data, and_ors)))
+                    .map(|child| ShellChild::InProcess(child))
+                    .map_err(|e| ShellError::Spawn(e))
             }
             Simple(ref cmd) => cmd.spawn(data, prev_child),
-            _ => {
-                InProcessChild::spawn(data, |data| {
-                    self.execute(data).map_err(|e| CommandError::Shell(Box::new(e.compat())))
-                }).map(|child| ShellChild::InProcess(child)).map_err(|e| ShellError::Spawn(e))
-            }
+            _ => InProcessChild::spawn(data, |data| {
+                self.execute(data)
+                    .map_err(|e| CommandError::Shell(Box::new(e.compat())))
+            }).map(|child| ShellChild::InProcess(child))
+                .map_err(|e| ShellError::Spawn(e)),
         }
     }
 }
@@ -589,7 +610,7 @@ impl ElseClause {
             if cmd.execute(data) != 0 {
                 return match self.else_stmt {
                     Some(ref clause) => clause.execute(data),
-                    None => 0
+                    None => 0,
                 };
             } else if check_break(data) {
                 return 0;
@@ -611,7 +632,7 @@ impl WhileClause {
         Self {
             cond: cond,
             desired: desired,
-            body: body
+            body: body,
         }
     }
 
@@ -664,7 +685,7 @@ impl ForClause {
         Self {
             name: name,
             words: words,
-            body: body
+            body: body,
         }
     }
 
@@ -678,7 +699,7 @@ impl ForClause {
         // TODO: when self.words is None it should act as if it were the value in $@ (retrieve from env)
         let words = match self.words {
             Some(ref words) => &words[..],
-            None => unimplemented!()
+            None => unimplemented!(),
         };
 
         let mut code = 0;
@@ -701,14 +722,14 @@ impl ForClause {
 #[derive(Debug)]
 pub struct CaseClause {
     word: Word,
-    case_list: CaseList
+    case_list: CaseList,
 }
 
 impl CaseClause {
     pub fn new(word: Word, case_list: CaseList) -> Self {
         Self {
             word: word,
-            case_list: case_list
+            case_list: case_list,
         }
     }
 
@@ -728,9 +749,7 @@ pub struct CaseList {
 
 impl CaseList {
     pub fn new(items: Vec<CaseItem>) -> Self {
-        Self {
-            items: items
-        }
+        Self { items: items }
     }
 
     pub fn execute<'a: 'b, 'b, S>(&self, data: &mut RuntimeData<'a, 'b, S>, word: &Word) -> ExitCode
@@ -750,18 +769,22 @@ impl CaseList {
 #[derive(Debug)]
 pub struct CaseItem {
     pattern: Pattern,
-    actions: Option<Command>
+    actions: Option<Command>,
 }
 
 impl CaseItem {
     pub fn new(pattern: Pattern, actions: Option<Command>) -> Self {
         Self {
             pattern: pattern,
-            actions: actions
+            actions: actions,
         }
     }
 
-    pub fn execute<'a: 'b, 'b, S>(&self, data: &mut RuntimeData<'a, 'b, S>, word: &OsStr) -> Option<ExitCode>
+    pub fn execute<'a: 'b, 'b, S>(
+        &self,
+        data: &mut RuntimeData<'a, 'b, S>,
+        word: &OsStr,
+    ) -> Option<ExitCode>
     where
         S: UtilSetup + 'a,
     {
@@ -784,9 +807,7 @@ pub struct Pattern {
 
 impl Pattern {
     pub fn new(items: Vec<Word>) -> Self {
-        Self {
-            items: items
-        }
+        Self { items: items }
     }
 
     pub fn matches<'a: 'b, 'b, S>(&self, data: &mut RuntimeData<'a, 'b, S>, word: &OsStr) -> bool
@@ -805,14 +826,14 @@ impl Pattern {
 #[derive(Debug)]
 pub struct FunctionDef {
     name: Name,
-    body: Rc<FunctionBody>
+    body: Rc<FunctionBody>,
 }
 
 impl FunctionDef {
     pub fn new(name: Name, body: Rc<FunctionBody>) -> Self {
         Self {
             name: name,
-            body: body
+            body: body,
         }
     }
 
@@ -838,13 +859,17 @@ impl FunctionBody {
     pub fn new(command: Command, redirect_list: Option<Vec<IoRedirect>>) -> Self {
         Self {
             command: command,
-            redirect_list: redirect_list
+            redirect_list: redirect_list,
         }
     }
 }
 
 impl InProcessCommand for FunctionBody {
-    fn execute<'a: 'b, 'b, S>(&self, rt_data: &mut RuntimeData<'a, 'b, S>, data: ExecData) -> CmdResult<ExitCode>
+    fn execute<'a: 'b, 'b, S>(
+        &self,
+        rt_data: &mut RuntimeData<'a, 'b, S>,
+        data: ExecData,
+    ) -> CmdResult<ExitCode>
     where
         S: UtilSetup + 'a,
     {
@@ -864,13 +889,15 @@ impl InProcessCommand for FunctionBody {
         Ok(self.command.execute(rt_data))
     }
 
-    fn spawn<'a: 'b, 'b, S>(&self, rt_data: &mut RuntimeData<'a, 'b, S>, data: ExecData) -> CmdResult<ShellChild>
+    fn spawn<'a: 'b, 'b, S>(
+        &self,
+        rt_data: &mut RuntimeData<'a, 'b, S>,
+        data: ExecData,
+    ) -> CmdResult<ShellChild>
     where
         S: UtilSetup + 'a,
     {
-        let child = InProcessChild::spawn(rt_data, |rt_data| {
-            self.execute(rt_data, data)
-        })?;
+        let child = InProcessChild::spawn(rt_data, |rt_data| self.execute(rt_data, data))?;
         Ok(ShellChild::InProcess(child))
     }
 }
@@ -883,11 +910,15 @@ pub struct SimpleCommand {
 }
 
 impl SimpleCommand {
-    pub fn new(name: Option<Word>, pre_actions: Option<Vec<PreAction>>, post_actions: Option<Vec<PostAction>>) -> Self {
+    pub fn new(
+        name: Option<Word>,
+        pre_actions: Option<Vec<PreAction>>,
+        post_actions: Option<Vec<PostAction>>,
+    ) -> Self {
         Self {
             name: name,
             pre_actions: pre_actions,
-            post_actions: post_actions
+            post_actions: post_actions,
         }
     }
 
@@ -895,32 +926,31 @@ impl SimpleCommand {
     where
         S: UtilSetup + 'a,
     {
-        self.perform_action(data, |_env| Ok(()), move |cmd, data| {
-            cmd.status(data)
-        }).map(|res| {
-            if let Some(code) = res {
-                code
-            } else {
-                0
-            }
-        })
+        self.perform_action(data, |_env| Ok(()), move |cmd, data| cmd.status(data))
+            .map(|res| if let Some(code) = res { code } else { 0 })
     }
 
-    pub fn spawn<'a: 'b, 'b, S>(&self, data: &mut RuntimeData<'a, 'b, S>, prev_child: Option<&mut ShellChild>) -> Result<ShellChild>
+    pub fn spawn<'a: 'b, 'b, S>(
+        &self,
+        data: &mut RuntimeData<'a, 'b, S>,
+        prev_child: Option<&mut ShellChild>,
+    ) -> Result<ShellChild>
     where
         S: UtilSetup + 'a,
     {
-        self.perform_action(data, |env| {
-            if let Some(child) = prev_child {
-                // FIXME: should probably be passing Option<Option<&mut ShellChild>>, so we can set stdin to EnvFd::Null if
-                //        the previous command failed or something
-                env.set_fd(0, child.output());
-            }
-            env.set_fd(1, EnvFd::Pipeline);
-            Ok(())
-        }, move |cmd, data| {
-            cmd.spawn(data)
-        }).map(|res| {
+        self.perform_action(
+            data,
+            |env| {
+                if let Some(child) = prev_child {
+                    // FIXME: should probably be passing Option<Option<&mut ShellChild>>, so we can set stdin to EnvFd::Null if
+                    //        the previous command failed or something
+                    env.set_fd(0, child.output());
+                }
+                env.set_fd(1, EnvFd::Pipeline);
+                Ok(())
+            },
+            move |cmd, data| cmd.spawn(data),
+        ).map(|res| {
             if let Some(child) = res {
                 child
             } else {
@@ -929,7 +959,12 @@ impl SimpleCommand {
         })
     }
 
-    fn perform_action<'a: 'b, 'b, S, I, F, R>(&self, data: &mut RuntimeData<'a, 'b, S>, init_fn: I, func: F) -> Result<Option<R>>
+    fn perform_action<'a: 'b, 'b, S, I, F, R>(
+        &self,
+        data: &mut RuntimeData<'a, 'b, S>,
+        init_fn: I,
+        func: F,
+    ) -> Result<Option<R>>
     where
         S: UtilSetup + 'a,
         I: FnOnce(&mut Environment) -> CmdResult<()>,
@@ -953,7 +988,10 @@ impl SimpleCommand {
             //       EnvFd::Fd, we'd need to do two enter_scope() here instead of one to ensure
             //       any and all EnvFds created by init_fn() remain valid
             data.env.enter_scope();
-            init_fn(data.env).map_err(|e| ShellError::Command { cmdname: cmdname.to_string_lossy().into_owned(), err: e })?;
+            init_fn(data.env).map_err(|e| ShellError::Command {
+                cmdname: cmdname.to_string_lossy().into_owned(),
+                err: e,
+            })?;
             let (cmdenv, res) = {
                 // NOTE: needed to make functions return Rcs rather than borrowed
                 //       pointers for this to work (it is possible that an execution of a
@@ -977,10 +1015,16 @@ impl SimpleCommand {
             if let Err(f) = res {
                 // make sure the scope is destroyed on error
                 data.env.exit_scope();
-                return Err(ShellError::Command { cmdname: cmdname.to_string_lossy().into_owned(), err: f });
+                return Err(ShellError::Command {
+                    cmdname: cmdname.to_string_lossy().into_owned(),
+                    err: f,
+                });
             }
 
-            let res = func(cmdenv, data).map_err(|e| ShellError::Command { cmdname: cmdname.to_string_lossy().into_owned(), err: e });
+            let res = func(cmdenv, data).map_err(|e| ShellError::Command {
+                cmdname: cmdname.to_string_lossy().into_owned(),
+                err: e,
+            });
             data.env.exit_scope();
             return res.map(|v| Some(v));
         } else if let Some(ref actions) = self.pre_actions {
@@ -996,12 +1040,21 @@ impl SimpleCommand {
         Ok(None)
     }
 
-    fn setup_command<'a: 'b, 'b, S, E>(&self, data: &mut RuntimeData<'a, 'b, S>, cmd: &mut E, new_fds: &mut Vec<EnvFd>) -> CmdResult<()>
+    fn setup_command<'a: 'b, 'b, S, E>(
+        &self,
+        data: &mut RuntimeData<'a, 'b, S>,
+        cmd: &mut E,
+        new_fds: &mut Vec<EnvFd>,
+    ) -> CmdResult<()>
     where
         S: UtilSetup + 'a,
         E: CommandEnv,
     {
-        cmd.envs(data.env.export_iter().map(|(k, v)| (Cow::Borrowed(k), Cow::Borrowed(v))));
+        cmd.envs(
+            data.env
+                .export_iter()
+                .map(|(k, v)| (Cow::Borrowed(k), Cow::Borrowed(v))),
+        );
 
         if let Some(ref actions) = self.pre_actions {
             for act in actions.iter() {
@@ -1025,7 +1078,9 @@ impl SimpleCommand {
                     PostAction::Word(ref word) => {
                         match word.eval_glob_fs(data) {
                             WordEval::Text(text) => cmd.arg(Cow::Owned(text)),
-                            WordEval::Globbed(glob) => cmd.args(glob.into_iter().map(|v| Cow::Owned(v))),
+                            WordEval::Globbed(glob) => {
+                                cmd.args(glob.into_iter().map(|v| Cow::Owned(v)))
+                            }
                         };
                     }
                 }
@@ -1051,11 +1106,15 @@ pub enum PostAction {
 #[derive(Debug)]
 pub enum IoRedirect {
     File(Option<RawFd>, IoRedirectFile),
-    Heredoc(Option<RawFd>, Rc<RefCell<HereDoc>>)
+    Heredoc(Option<RawFd>, Rc<RefCell<HereDoc>>),
 }
 
 impl IoRedirect {
-    pub fn setup<'a: 'b, 'b, S>(&self, data: &mut RuntimeData<'a, 'b, S>, new_fds: &mut Vec<EnvFd>) -> CmdResult<()>
+    pub fn setup<'a: 'b, 'b, S>(
+        &self,
+        data: &mut RuntimeData<'a, 'b, S>,
+        new_fds: &mut Vec<EnvFd>,
+    ) -> CmdResult<()>
     where
         S: UtilSetup + 'a,
     {
@@ -1082,7 +1141,7 @@ impl IoRedirect {
 #[derive(Debug)]
 pub struct IoRedirectFile {
     filename: Word,
-    kind: IoRedirectKind
+    kind: IoRedirectKind,
 }
 
 impl IoRedirectFile {
@@ -1097,17 +1156,24 @@ impl IoRedirectFile {
     //        stderr (fd 2) will be set to whatever stdout (fd 1) is and then stdout will be set to
     //        whatever fd 4 is, but stderr will still be whatever value stdout was (unless this is
     //        the correct behavior, need to verify)
-    pub fn setup<'a: 'b, 'b, S>(&self, data: &mut RuntimeData<'a, 'b, S>, fd: Option<RawFd>, new_fds: &mut Vec<EnvFd>) -> CmdResult<()>
+    pub fn setup<'a: 'b, 'b, S>(
+        &self,
+        data: &mut RuntimeData<'a, 'b, S>,
+        fd: Option<RawFd>,
+        new_fds: &mut Vec<EnvFd>,
+    ) -> CmdResult<()>
     where
         S: UtilSetup + 'a,
     {
-        use std::io;
         use self::IoRedirectKind::*;
+        use std::io;
 
         let name = self.filename.eval(data);
 
-        let file_err = |fd: RawFd, filename: OsString, err: io::Error| {
-            CommandError::FdAsFile { fd: fd, filename: filename.to_string_lossy().into_owned(), err: err }
+        let file_err = |fd: RawFd, filename: OsString, err: io::Error| CommandError::FdAsFile {
+            fd: fd,
+            filename: filename.to_string_lossy().into_owned(),
+            err: err,
         };
 
         let mut create_file_fd = |data: &mut RuntimeData<'a, 'b, S>, fd, file| {
@@ -1142,13 +1208,22 @@ impl IoRedirectFile {
             }
             ReadWrite => {
                 let fd = fd.unwrap_or(0);
-                let file = OpenOptions::new().create(true).read(true).write(true).open(&name).map_err(|e| file_err(fd, name, e))?;
+                let file = OpenOptions::new()
+                    .create(true)
+                    .read(true)
+                    .write(true)
+                    .open(&name)
+                    .map_err(|e| file_err(fd, name, e))?;
 
                 create_file_fd(data, fd, file)?;
             }
             Append => {
                 let fd = fd.unwrap_or(1);
-                let file = OpenOptions::new().create(true).append(true).open(&name).map_err(|e| file_err(fd, name, e))?;
+                let file = OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&name)
+                    .map_err(|e| file_err(fd, name, e))?;
 
                 create_file_fd(data, fd, file)?;
             }
@@ -1170,9 +1245,7 @@ impl IoRedirectFile {
                         let value = data.env.get_fd(digit as _).try_clone()?;
                         data.env.set_fd(fd, value)
                     }
-                    ch => {
-                        Err(CommandError::InvalidFd(ch))?
-                    }
+                    ch => Err(CommandError::InvalidFd(ch))?,
                 }
             }
             DupOutput if name.len() == 1 => {
@@ -1189,9 +1262,7 @@ impl IoRedirectFile {
                         let value = data.env.get_fd(digit as _).try_clone()?;
                         data.env.set_fd(fd, value)
                     }
-                    ch => {
-                        Err(CommandError::InvalidFd(ch))?
-                    }
+                    ch => Err(CommandError::InvalidFd(ch))?,
                 }
             }
             _ => {
@@ -1212,7 +1283,7 @@ pub enum IoRedirectKind {
     DupOutput,
     ReadWrite,
     Append,
-    Clobber
+    Clobber,
 }
 
 #[derive(Debug)]
@@ -1222,9 +1293,7 @@ pub struct HereDoc {
 
 impl HereDoc {
     pub fn new(data: Vec<u8>) -> Self {
-        Self {
-            data: data
-        }
+        Self { data: data }
     }
 }
 
@@ -1241,9 +1310,7 @@ pub struct CommandSubst {
 
 impl CommandSubst {
     pub fn new(cmd: Box<Command>) -> Self {
-        Self {
-            command: cmd,
-        }
+        Self { command: cmd }
     }
 
     pub fn eval<'a: 'b, 'b, S>(&self, data: &mut RuntimeData<'a, 'b, S>) -> OsString
@@ -1286,7 +1353,12 @@ impl CommandSubst {
         OsString::from_vec(output)
     }
 
-    fn write_error<S, T, U>(&self, setup: &mut S, env: &mut Environment, res: StdResult<T, U>) -> StdResult<T, OsString>
+    fn write_error<S, T, U>(
+        &self,
+        setup: &mut S,
+        env: &mut Environment,
+        res: StdResult<T, U>,
+    ) -> StdResult<T, OsString>
     where
         S: UtilSetup,
         U: fmt::Display,
@@ -1305,9 +1377,7 @@ pub struct DoubleQuote {
 
 impl DoubleQuote {
     pub fn new(items: Vec<Word>) -> Self {
-        Self {
-            items: items,
-        }
+        Self { items: items }
     }
 
     pub fn eval<'a: 'b, 'b, S>(&self, data: &mut RuntimeData<'a, 'b, S>) -> OsString
@@ -1339,33 +1409,48 @@ impl Param {
 
         match self {
             Var(ref s) => env.get_var(s).map(|v| Cow::Borrowed(v.as_os_str())),
-            Question => Some(Cow::Owned(OsString::from(format!("{}", env.special_vars().get_last_exitcode())))),
+            Question => Some(Cow::Owned(OsString::from(format!(
+                "{}",
+                env.special_vars().get_last_exitcode()
+            )))),
             // TODO: expand/split according to IFS (this may need to return a word)
             Star => {
                 // FIXME: this is wrong (shouldn't be combining into one field here)
-                let mut res = env.special_vars().get_positionals().iter().fold(OsString::new(), |mut acc, item| {
-                    acc.push(item);
-                    acc.push(" ");
-                    acc
-                });
+                let mut res = env.special_vars().get_positionals().iter().fold(
+                    OsString::new(),
+                    |mut acc, item| {
+                        acc.push(item);
+                        acc.push(" ");
+                        acc
+                    },
+                );
                 Some(Cow::Owned(res))
             }
             At => {
                 // FIXME: same issue as above
-                let mut res = env.special_vars().get_positionals().iter().fold(OsString::new(), |mut acc, item| {
-                    acc.push(item);
-                    acc.push(" ");
-                    acc
-                });
+                let mut res = env.special_vars().get_positionals().iter().fold(
+                    OsString::new(),
+                    |mut acc, item| {
+                        acc.push(item);
+                        acc.push(" ");
+                        acc
+                    },
+                );
                 Some(Cow::Owned(res))
             }
-            NumParams => Some(Cow::Owned(OsString::from(format!("{}", env.special_vars().get_positionals().len())))),
+            NumParams => Some(Cow::Owned(OsString::from(format!(
+                "{}",
+                env.special_vars().get_positionals().len()
+            )))),
             ShellPid => Some(Cow::Owned(OsString::from(format!("{}", process::id())))),
             // TODO: should print out name of shell binary
-            Positional(0) => { unimplemented!() }
-            Positional(num) => env.special_vars().get_positionals().get(*num - 1).map(|item| Cow::Borrowed(item.as_os_str())),
+            Positional(0) => unimplemented!(),
+            Positional(num) => env.special_vars()
+                .get_positionals()
+                .get(*num - 1)
+                .map(|item| Cow::Borrowed(item.as_os_str())),
             // TODO (background pid)
-            _ => unimplemented!()
+            _ => unimplemented!(),
         }
     }
 
@@ -1441,9 +1526,12 @@ impl ParamExpr {
             not_null = pval.as_ref().map(|v| v.len() > 0).unwrap_or(false);
             return match self.kind {
                 Assign(_) | Use(_) | Error(_) if not_null => pval.unwrap().into_owned(),
-                AssignNull(_) | UseNull(_) | ErrorNull(_) if pval_valid => pval.unwrap().into_owned(),
+                AssignNull(_) | UseNull(_) | ErrorNull(_) if pval_valid => {
+                    pval.unwrap().into_owned()
+                }
 
-                Length => pval.map(|v| OsString::from(v.len().to_string())).unwrap_or_else(|| OsString::from("0")),
+                Length => pval.map(|v| OsString::from(v.len().to_string()))
+                    .unwrap_or_else(|| OsString::from("0")),
                 Value => pval.map(|v| v.into_owned()).unwrap_or_default(),
 
                 _ => break,
@@ -1464,9 +1552,7 @@ impl ParamExpr {
                 new_val
             }
 
-            Use(ref word) | UseNull(ref word) => {
-                word.eval(data)
-            }
+            Use(ref word) | UseNull(ref word) => word.eval(data),
 
             Error(ref word) | ErrorNull(ref word) => {
                 // TODO: figure out how to cleanly exit for scripts
@@ -1477,20 +1563,24 @@ impl ParamExpr {
                     data.setup.error(),
                     "{}: {}",
                     self.param.to_os_string().to_string_lossy(),
-                    msg.as_ref().map(|m| m.to_string_lossy()).unwrap_or(Cow::from("parameter not set"))
+                    msg.as_ref()
+                        .map(|m| m.to_string_lossy())
+                        .unwrap_or(Cow::from("parameter not set"))
                 );
                 // TODO: i assume this is where the result would go
                 unimplemented!()
             }
 
             // TODO: prefixes and suffixes
-
-            _ => unimplemented!()
+            _ => unimplemented!(),
         }
     }
 }
 
-fn exec_andor_chain<'a: 'b, 'b, 'c, S>(data: &mut RuntimeData<'a, 'b, S>, chain: &'c [AndOr]) -> ExitCode
+fn exec_andor_chain<'a: 'b, 'b, 'c, S>(
+    data: &mut RuntimeData<'a, 'b, S>,
+    chain: &'c [AndOr],
+) -> ExitCode
 where
     S: UtilSetup + 'a,
 {
@@ -1504,7 +1594,10 @@ where
     code
 }
 
-fn exec_list<'a: 'b, 'b, 'c, S>(data: &mut RuntimeData<'a, 'b, S>, list: &'c [Vec<AndOr>]) -> ExitCode
+fn exec_list<'a: 'b, 'b, 'c, S>(
+    data: &mut RuntimeData<'a, 'b, S>,
+    list: &'c [Vec<AndOr>],
+) -> ExitCode
 where
     S: UtilSetup + 'a,
 {

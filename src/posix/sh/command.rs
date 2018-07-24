@@ -10,36 +10,60 @@ use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::process::{self, Child, Command, ExitStatus, Stdio};
 use std::rc::Rc;
 
-use super::UtilSetup;
 use super::ast::{ExitCode, FunctionBody, RuntimeData};
 use super::builtin::Builtin;
 use super::env::{EnvFd, Environment};
 use super::error::{CmdResult, CommandError};
 use super::types::TryClone;
-use util::{AsRawObject, RawObject, RawObjectWrapper, Pipe};
+use super::UtilSetup;
+use util::{AsRawObject, Pipe, RawObject, RawObjectWrapper};
 
 /// A command executed within the current shell process (e.g. a function or builtin)
 pub trait InProcessCommand {
-    fn execute<'a: 'b, 'b, S: UtilSetup + 'a>(&self, rt_data: &mut RuntimeData<'a, 'b, S>, data: ExecData) -> CmdResult<ExitCode>;
-    fn spawn<'a: 'b, 'b, S: UtilSetup + 'a>(&self, rt_data: &mut RuntimeData<'a, 'b, S>, data: ExecData) -> CmdResult<ShellChild>;
+    fn execute<'a: 'b, 'b, S: UtilSetup + 'a>(
+        &self,
+        rt_data: &mut RuntimeData<'a, 'b, S>,
+        data: ExecData,
+    ) -> CmdResult<ExitCode>;
+    fn spawn<'a: 'b, 'b, S: UtilSetup + 'a>(
+        &self,
+        rt_data: &mut RuntimeData<'a, 'b, S>,
+        data: ExecData,
+    ) -> CmdResult<ShellChild>;
 }
 
 impl<'a, T: InProcessCommand> InProcessCommand for &'a T {
-    fn execute<'b: 'c, 'c, S: UtilSetup + 'b>(&self, rt_data: &mut RuntimeData<'b, 'c, S>, data: ExecData) -> CmdResult<ExitCode> {
+    fn execute<'b: 'c, 'c, S: UtilSetup + 'b>(
+        &self,
+        rt_data: &mut RuntimeData<'b, 'c, S>,
+        data: ExecData,
+    ) -> CmdResult<ExitCode> {
         (**self).execute(rt_data, data)
     }
 
-    fn spawn<'b: 'c, 'c, S: UtilSetup + 'b>(&self, rt_data: &mut RuntimeData<'b, 'c, S>, data: ExecData) -> CmdResult<ShellChild> {
+    fn spawn<'b: 'c, 'c, S: UtilSetup + 'b>(
+        &self,
+        rt_data: &mut RuntimeData<'b, 'c, S>,
+        data: ExecData,
+    ) -> CmdResult<ShellChild> {
         (**self).spawn(rt_data, data)
     }
 }
 
 impl<T: InProcessCommand> InProcessCommand for Rc<T> {
-    fn execute<'a: 'b, 'b, S: UtilSetup + 'a>(&self, rt_data: &mut RuntimeData<'a, 'b, S>, data: ExecData) -> CmdResult<ExitCode> {
+    fn execute<'a: 'b, 'b, S: UtilSetup + 'a>(
+        &self,
+        rt_data: &mut RuntimeData<'a, 'b, S>,
+        data: ExecData,
+    ) -> CmdResult<ExitCode> {
         (**self).execute(rt_data, data)
     }
 
-    fn spawn<'a: 'b, 'b, S: UtilSetup + 'a>(&self, rt_data: &mut RuntimeData<'a, 'b, S>, data: ExecData) -> CmdResult<ShellChild> {
+    fn spawn<'a: 'b, 'b, S: UtilSetup + 'a>(
+        &self,
+        rt_data: &mut RuntimeData<'a, 'b, S>,
+        data: ExecData,
+    ) -> CmdResult<ShellChild> {
         (**self).spawn(rt_data, data)
     }
 }
@@ -73,9 +97,7 @@ pub struct CommandWrapper {
 impl CommandWrapper {
     pub fn new(mut cmd: Command) -> Self {
         cmd.env_clear();
-        Self {
-            cmd: cmd,
-        }
+        Self { cmd: cmd }
     }
 
     fn setup_child(&mut self, env: &mut Environment) -> CmdResult<ShellChild> {
@@ -98,9 +120,12 @@ impl CommandWrapper {
                 }
             };
 
-            self.cmd.stdin(convert_stdio(fd_iter.next().unwrap(), &mut stdin_pipe)?);
-            self.cmd.stdout(convert_stdio(fd_iter.next().unwrap(), &mut stdout_pipe)?);
-            self.cmd.stderr(convert_stdio(fd_iter.next().unwrap(), &mut stderr_pipe)?);
+            self.cmd
+                .stdin(convert_stdio(fd_iter.next().unwrap(), &mut stdin_pipe)?);
+            self.cmd
+                .stdout(convert_stdio(fd_iter.next().unwrap(), &mut stdout_pipe)?);
+            self.cmd
+                .stderr(convert_stdio(fd_iter.next().unwrap(), &mut stderr_pipe)?);
         }
 
         let mut fds = Vec::with_capacity(0);
@@ -132,14 +157,24 @@ impl CommandWrapper {
             }
             Ok(())
         });
-        let mut child = self.cmd.spawn().map_err(|e| CommandError::StartRealCommand(e))?;
+        let mut child = self.cmd
+            .spawn()
+            .map_err(|e| CommandError::StartRealCommand(e))?;
 
         if let Some(data) = stdin_pipe {
-            child.stdin.as_mut().expect("Could not open stdin pipe").write_all(&data).map_err(|e| CommandError::Pipe(e))?;
+            child
+                .stdin
+                .as_mut()
+                .expect("Could not open stdin pipe")
+                .write_all(&data)
+                .map_err(|e| CommandError::Pipe(e))?;
         }
         // TODO: stdout/stderr (and any other pipes that are piped into other commands)
 
-        Ok(ShellChild::RealChild(ChildWrapper { child: child, _pipes: other_pipes }))
+        Ok(ShellChild::RealChild(ChildWrapper {
+            child: child,
+            _pipes: other_pipes,
+        }))
     }
 }
 
@@ -223,7 +258,13 @@ impl<C: InProcessCommand> CommandEnv for ExecEnv<C> {
     {
         // XXX: maybe we should treat env vars the same way as fds?  it would make things simpler,
         //      but not sure of the effect on execution speed
-        self.cmd.execute(data, ExecData { args: self.args, env: self.env })
+        self.cmd.execute(
+            data,
+            ExecData {
+                args: self.args,
+                env: self.env,
+            },
+        )
     }
 
     fn spawn<'a: 'b, 'b, S>(self, data: &mut RuntimeData<'a, 'b, S>) -> CmdResult<ShellChild>
@@ -231,7 +272,13 @@ impl<C: InProcessCommand> CommandEnv for ExecEnv<C> {
         S: UtilSetup + 'a,
     {
         // XXX: see if there's an easy way to implement this for all ExecEnvs
-        self.cmd.spawn(data, ExecData { args: self.args, env: self.env })
+        self.cmd.spawn(
+            data,
+            ExecData {
+                args: self.args,
+                env: self.env,
+            },
+        )
     }
 }
 
@@ -248,9 +295,15 @@ impl CommandEnv for CommandEnvContainer {
         use self::CommandEnvContainer::*;
 
         match self {
-            RealCommand(cmd) => { cmd.env(key, val); }
-            Builtin(builtin) => { builtin.env(key, val); }
-            Function(func) => { func.env(key, val); }
+            RealCommand(cmd) => {
+                cmd.env(key, val);
+            }
+            Builtin(builtin) => {
+                builtin.env(key, val);
+            }
+            Function(func) => {
+                func.env(key, val);
+            }
         }
         self
     }
@@ -259,9 +312,15 @@ impl CommandEnv for CommandEnvContainer {
         use self::CommandEnvContainer::*;
 
         match self {
-            RealCommand(cmd) => { cmd.arg(arg); }
-            Builtin(builtin) => { builtin.arg(arg); }
-            Function(func) => { func.arg(arg); }
+            RealCommand(cmd) => {
+                cmd.arg(arg);
+            }
+            Builtin(builtin) => {
+                builtin.arg(arg);
+            }
+            Function(func) => {
+                func.arg(arg);
+            }
         }
         self
     }
@@ -318,7 +377,7 @@ impl InProcessChild {
                 write = Some(write_pipe);
                 EnvFd::Pipe(read_pipe)
             }
-            other => other.try_clone()?
+            other => other.try_clone()?,
         };
         let set_write = if let Some(write) = write {
             data.env.set_fd(1, EnvFd::Pipe(write));
@@ -361,7 +420,11 @@ impl ShellChild {
         use self::ShellChild::*;
 
         match self {
-            RealChild(wrapper) => wrapper.child.wait().map(|stat| ChildExitStatus::RealChild(stat)).map_err(|e| CommandError::RealCommandStatus(e)),
+            RealChild(wrapper) => wrapper
+                .child
+                .wait()
+                .map(|stat| ChildExitStatus::RealChild(stat))
+                .map_err(|e| CommandError::RealCommandStatus(e)),
             InProcess(child) => child.wait().map(|code| ChildExitStatus::InProcess(code)),
             Empty => Ok(ChildExitStatus::Empty),
         }
@@ -371,7 +434,11 @@ impl ShellChild {
         use self::ShellChild::*;
 
         match self {
-            RealChild(wrapper) => wrapper.child.try_wait().map(|stat| stat.map(|stat| ChildExitStatus::RealChild(stat))).map_err(|e| CommandError::RealCommandStatus(e)),
+            RealChild(wrapper) => wrapper
+                .child
+                .try_wait()
+                .map(|stat| stat.map(|stat| ChildExitStatus::RealChild(stat)))
+                .map_err(|e| CommandError::RealCommandStatus(e)),
             InProcess(child) => unimplemented!(),
             Empty => Ok(Some(ChildExitStatus::Empty)),
         }
@@ -381,7 +448,14 @@ impl ShellChild {
         use self::ShellChild::*;
 
         match self {
-            RealChild(wrapper) => wrapper.child.stdout.as_ref().map(|out| EnvFd::ChildStdout(RawObjectWrapper::new(out.as_raw_object(), true, false))).unwrap_or(EnvFd::Null),
+            RealChild(wrapper) => wrapper
+                .child
+                .stdout
+                .as_ref()
+                .map(|out| {
+                    EnvFd::ChildStdout(RawObjectWrapper::new(out.as_raw_object(), true, false))
+                })
+                .unwrap_or(EnvFd::Null),
             // FIXME: don't unwrap
             InProcess(child) => child.stdout.try_clone().unwrap(),
             Empty => EnvFd::Null,

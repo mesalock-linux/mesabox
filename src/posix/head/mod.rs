@@ -1,23 +1,23 @@
 //
 // Copyright (c) 2018, The MesaLock Linux Project Contributors
 // All rights reserved.
-// 
+//
 // This work is licensed under the terms of the BSD 3-Clause License.
 // For a copy, see the LICENSE file.
 //
 
-use {ArgsIter, Result, UtilRead, UtilWrite, UtilSetup};
 use util;
+use {ArgsIter, Result, UtilRead, UtilSetup, UtilWrite};
 
-use clap::{Arg, ArgGroup, AppSettings};
+use clap::{AppSettings, Arg, ArgGroup};
 use std::collections::VecDeque;
-use std::ffi::{OsString, OsStr};
+use std::ffi::{OsStr, OsString};
 use std::fs::File;
-use std::io::{self, BufReader, BufRead, Read, Write};
+use std::io::{self, BufRead, BufReader, Read, Write};
 use std::iter;
 use std::mem;
-use std::result::Result as StdResult;
 use std::path::Path;
+use std::result::Result as StdResult;
 
 pub const NAME: &str = "head";
 pub const DESCRIPTION: &str = "Print the first N bytes or lines from a file";
@@ -86,16 +86,14 @@ where
                     .arg(Arg::with_name("FILES")
                             .index(1)
                             .multiple(true));
-    
+
         let res = check_obsolete(&mut args);
         match res {
             Ok((progname, num)) => {
                 default_lines = num;
                 app.get_matches_from_safe(iter::once(progname).chain(args))?
             }
-            Err(already_found) => {
-                app.get_matches_from_safe(already_found.into_iter().chain(args))?
-            }
+            Err(already_found) => app.get_matches_from_safe(already_found.into_iter().chain(args))?,
         }
     };
 
@@ -162,7 +160,12 @@ where
     }
 }
 
-fn handle_stdin<I, O>(output: O, stdin: &mut I, filename: Option<&OsStr>, options: &mut Options) -> Result<()>
+fn handle_stdin<I, O>(
+    output: O,
+    stdin: &mut I,
+    filename: Option<&OsStr>,
+    options: &mut Options,
+) -> Result<()>
 where
     I: for<'a> UtilRead<'a>,
     O: Write,
@@ -171,13 +174,23 @@ where
     handle_data(output, stdin, filename, options)
 }
 
-fn handle_file<O: Write>(output: O, filename: &Path, disp_filename: Option<&OsStr>, options: &mut Options) -> Result<()> {
+fn handle_file<O: Write>(
+    output: O,
+    filename: &Path,
+    disp_filename: Option<&OsStr>,
+    options: &mut Options,
+) -> Result<()> {
     let file = File::open(filename)?;
     let reader = BufReader::new(file);
     handle_data(output, reader, disp_filename, options)
 }
 
-fn handle_data<W, R>(mut output: W, input: R, filename: Option<&OsStr>, options: &mut Options) -> Result<()>
+fn handle_data<W, R>(
+    mut output: W,
+    input: R,
+    filename: Option<&OsStr>,
+    options: &mut Options,
+) -> Result<()>
 where
     W: Write,
     R: BufRead,
@@ -275,7 +288,7 @@ where
     R: BufRead,
 {
     const BUF_SIZE: usize = 32 * 1024;
-    
+
     // FIXME: if the user provides a byte count greater than the amount of memory available and
     //        the file size is also greater than the amount of memory available, this will
     //        currently exhaust memory and abort.  not sure what the best way to fix this is other
@@ -340,7 +353,10 @@ fn is_valid_num(val: &OsStr) -> StdResult<(), OsString> {
     if res.is_some() {
         Ok(())
     } else {
-        Err(OsString::from(format!("'{}' is not a number or is too large", val.to_string_lossy())))
+        Err(OsString::from(format!(
+            "'{}' is not a number or is too large",
+            val.to_string_lossy()
+        )))
     }
 }
 
@@ -366,7 +382,7 @@ where
                 let _ = numstr.next();
                 let numstr = numstr.as_str();
                 if let Some(num) = util::parse_obsolete_num(numstr) {
-                    return Ok((progname, num))
+                    return Ok((progname, num));
                 }
             }
         }

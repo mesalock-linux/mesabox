@@ -1,7 +1,7 @@
 //
 // Copyright (c) 2018, The MesaLock Linux Project Contributors
 // All rights reserved.
-// 
+//
 // This work is licensed under the terms of the BSD 3-Clause License.
 // For a copy, see the LICENSE file.
 //
@@ -33,17 +33,17 @@
 //     SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 //
 
-use {ArgsIter, Result, UtilRead, UtilWrite, UtilSetup};
 use util;
+use {ArgsIter, Result, UtilRead, UtilSetup, UtilWrite};
 
 use clap::Arg;
 use uucore::encoding::{self, Data, Format};
 
-use std::str::FromStr;
 use std::ffi::{OsStr, OsString};
 use std::fs::File;
 use std::io::{BufReader, Read, Write};
 use std::result::Result as StdResult;
+use std::str::FromStr;
 
 struct Options {
     line_wrap: usize,
@@ -52,7 +52,13 @@ struct Options {
     format: Format,
 }
 
-pub(crate) fn execute_base<S, T>(setup: &mut S, args: T, name: &str, desc: &str, format: Format) -> Result<()>
+pub(crate) fn execute_base<S, T>(
+    setup: &mut S,
+    args: T,
+    name: &str,
+    desc: &str,
+    format: Format,
+) -> Result<()>
 where
     S: UtilSetup,
     T: ArgsIter,
@@ -137,6 +143,9 @@ fn is_valid_wrap(val: &OsStr) -> StdResult<(), OsString> {
     if val.to_str().and_then(|s| usize::from_str(s).ok()).is_some() {
         Ok(())
     } else {
-        Err(OsString::from(format!("'{}' is not a number", val.to_string_lossy())))
+        Err(OsString::from(format!(
+            "'{}' is not a number",
+            val.to_string_lossy()
+        )))
     }
 }

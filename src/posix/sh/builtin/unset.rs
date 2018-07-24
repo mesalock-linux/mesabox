@@ -1,6 +1,6 @@
 use clap::{App, AppSettings, Arg};
 
-use super::{BuiltinSetup, UtilSetup, Environment, ExecData, ExitCode, Result};
+use super::{BuiltinSetup, Environment, ExecData, ExitCode, Result, UtilSetup};
 
 #[derive(Clone, Copy)]
 pub struct UnsetBuiltin;
@@ -18,14 +18,13 @@ fn actual_run(env: &mut Environment, data: ExecData) -> Result<ExitCode> {
     // TODO: suppress --help/--version (non-POSIX, although they could perhaps serve as an extension)
     let matches = App::new("unset")
         .setting(AppSettings::NoBinaryName)
-        .arg(Arg::with_name("function")
-            .short("f")
-            .overrides_with("variable"))
-        .arg(Arg::with_name("variable")
-            .short("v"))
-        .arg(Arg::with_name("NAMES")
-            .index(1)
-            .multiple(true))
+        .arg(
+            Arg::with_name("function")
+                .short("f")
+                .overrides_with("variable"),
+        )
+        .arg(Arg::with_name("variable").short("v"))
+        .arg(Arg::with_name("NAMES").index(1).multiple(true))
         .get_matches_from_safe(data.args)?;
 
     let func = matches.is_present("function");

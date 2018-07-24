@@ -5,7 +5,7 @@ use std::ffi::OsString;
 use std::io::BufRead;
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 
-use super::{BuiltinSetup, UtilSetup, UtilRead, Environment, ExecData, ExitCode, Result};
+use super::{BuiltinSetup, Environment, ExecData, ExitCode, Result, UtilRead, UtilSetup};
 
 #[derive(Clone, Copy)]
 pub struct ReadBuiltin;
@@ -41,7 +41,12 @@ impl BuiltinSetup for ReadBuiltin {
                     }
                     Some(b'\\') => {
                         // need to make sure this byte isn't escaped
-                        buffer.iter().rev().skip(1).take_while(|&&byte| byte == b'\\').count() % 2 == 1
+                        buffer
+                            .iter()
+                            .rev()
+                            .skip(1)
+                            .take_while(|&&byte| byte == b'\\')
+                            .count() % 2 == 1
                     }
                     _ => true,
                 };
@@ -68,16 +73,21 @@ impl BuiltinSetup for ReadBuiltin {
     }
 }
 
-fn setup_vars(env: &mut Environment, vars: OsValues, buffer: &[u8], ignore_backslash: bool) -> Result<ExitCode> {
+fn setup_vars(
+    env: &mut Environment,
+    vars: OsValues,
+    buffer: &[u8],
+    ignore_backslash: bool,
+) -> Result<ExitCode> {
     let var_count = vars.clone().count();
 
     let field_iter = {
         // XXX: maybe this should be extracted into a separate function (i feel like this will be used
         //      to split fields normally too)
-        let ifs = env.get_var("IFS").map(|v| v.clone()).unwrap_or_else(|| OsString::from(" \t\n"));
-        buffer.splitn(var_count, move |byte| {
-            ifs.as_bytes().contains(byte)
-        })
+        let ifs = env.get_var("IFS")
+            .map(|v| v.clone())
+            .unwrap_or_else(|| OsString::from(" \t\n"));
+        buffer.splitn(var_count, move |byte| ifs.as_bytes().contains(byte))
     };
     for (var, value) in vars.zip(field_iter) {
         let value = if ignore_backslash {

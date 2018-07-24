@@ -1,6 +1,8 @@
 use std::ffi::OsString;
 
-use super::{BuiltinSetup, BuiltinError, UtilSetup, Environment, ExecData, ExitCode, Result, arg_to_usize};
+use super::{
+    arg_to_usize, BuiltinError, BuiltinSetup, Environment, ExecData, ExitCode, Result, UtilSetup,
+};
 
 #[derive(Clone, Copy)]
 pub struct ShiftBuiltin;

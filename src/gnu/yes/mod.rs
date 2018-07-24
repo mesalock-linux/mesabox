@@ -1,7 +1,7 @@
 //
 // Copyright (c) 2018, The MesaLock Linux Project Contributors
 // All rights reserved.
-// 
+//
 // This work is licensed under the terms of the BSD 3-Clause License.
 // For a copy, see the LICENSE file.
 //
@@ -31,7 +31,7 @@
 //     SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 //
 
-use {UtilSetup, Result, ArgsIter, UtilWrite};
+use {ArgsIter, Result, UtilSetup, UtilWrite};
 
 use clap::Arg;
 use std::borrow::Cow;
@@ -41,7 +41,8 @@ use std::io::Write;
 use util::OsStrExt;
 
 pub(crate) const NAME: &str = "yes";
-pub(crate) const DESCRIPTION: &str = "Repeatedly print 'y' or a series of user-provided strings to stdout";
+pub(crate) const DESCRIPTION: &str =
+    "Repeatedly print 'y' or a series of user-provided strings to stdout";
 
 // it's possible that using a smaller or larger buffer might provide better performance on some
 // systems, but this is probably good enough
@@ -53,8 +54,7 @@ where
     T: ArgsIter,
 {
     let matches = {
-        let app = util_app!(NAME)
-                    .arg(Arg::with_name("STRING").index(1).multiple(true));
+        let app = util_app!(NAME).arg(Arg::with_name("STRING").index(1).multiple(true));
 
         app.get_matches_from_safe(args)?
     };

@@ -1,6 +1,6 @@
 use std::iter::IntoIterator;
-use std::slice;
 use std::ops::{Index, IndexMut};
+use std::slice;
 
 use super::{Locality, Scoped};
 
@@ -28,7 +28,9 @@ impl<T: FixedArray<Item = Locality<V>>, V> ScopedArray<T, V> {
 //      will end up ignoring Locality::set_val()
 impl<T: FixedArray<Item = Locality<V>>, V> ScopedArray<T, V> {
     pub fn iter_mut(&mut self) -> ScopedArrayIter<V> {
-        ScopedArrayIter { inner: self.inner.iter_mut() }
+        ScopedArrayIter {
+            inner: self.inner.iter_mut(),
+        }
     }
 }
 
@@ -94,10 +96,12 @@ pub trait FixedArray {
     fn as_mut(&mut self) -> &mut [Self::Item];
 
     fn iter<'a>(&'a self) -> Iter<'a, Self::Item> {
-        Iter { inner: self.as_slice().iter() }
+        Iter {
+            inner: self.as_slice().iter(),
+        }
     }
 
-    fn iter_mut<'a>(&'a mut self) -> IterMut<'a, Self::Item>;   
+    fn iter_mut<'a>(&'a mut self) -> IterMut<'a, Self::Item>;
 }
 
 pub struct Iter<'a, T: 'a> {
@@ -146,10 +150,12 @@ macro_rules! impl_fixed {
             }
 
             fn iter_mut<'a>(&'a mut self) -> IterMut<'a, Self::Item> {
-                IterMut { inner: (self as &mut [T]).as_mut().iter_mut() }
+                IterMut {
+                    inner: (self as &mut [T]).as_mut().iter_mut(),
+                }
             }
         }
-    }
+    };
 }
 
 impl_fixed!(FD_COUNT);

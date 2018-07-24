@@ -1,19 +1,19 @@
 use std::borrow::{Borrow, Cow};
-use std::ffi::{OsString, OsStr};
+use std::ffi::{OsStr, OsString};
 use std::fs::File;
 use std::hash::Hash;
-use std::process::Stdio;
-use std::os::unix::io::FromRawFd;
 use std::iter::{FromIterator, FusedIterator};
 use std::mem;
+use std::os::unix::io::FromRawFd;
+use std::process::Stdio;
 use std::rc::Rc;
 
-use super::error::CommandError;
 use super::ast::{ExitCode, FunctionBody};
 use super::builtin::{Builtin, BuiltinSet};
-use super::types::{Scoped, Locality, TryClone, FdArray, ScopedMap};
+use super::error::CommandError;
 use super::types::scoped_array::ScopedArrayIter;
-use util::{AsRawObject, RawObjectWrapper, Pipe};
+use super::types::{FdArray, Locality, Scoped, ScopedMap, TryClone};
+use util::{AsRawObject, Pipe, RawObjectWrapper};
 
 // XXX: not exactly happy that we need to clone the data for Piped, but due to issues with
 //      lifetimes in SimpleCommand::run_command() and IoRedirect::setup() the only alternative
@@ -45,7 +45,10 @@ impl EnvFd {
                 // XXX: make sure this is right with the stdlib and such
                 // NOTE: the reason we dup here is that these file descriptor/objects are *NOT*
                 //       guaranteed to be owned (in fact, they most likely are not)
-                let new_fd = fd.dup_sh().map_err(|e| CommandError::DupFd { fd: fd.fd.raw_value(), err: e })?;
+                let new_fd = fd.dup_sh().map_err(|e| CommandError::DupFd {
+                    fd: fd.fd.raw_value(),
+                    err: e,
+                })?;
                 unsafe { Stdio::from_raw_fd(new_fd.raw_value()) }
             }
             Pipe(pipe) => pipe.into(),
@@ -73,7 +76,7 @@ impl TryClone for EnvFd {
                 //      in situations that would be solved by NLL
                 EnvFd::Fd(pipe.raw_object_wrapper())
             }
-            EnvFd::ChildStdout(fd) => EnvFd::ChildStdout(fd.clone())
+            EnvFd::ChildStdout(fd) => EnvFd::ChildStdout(fd.clone()),
         })
     }
 }
@@ -241,7 +244,11 @@ impl Environment {
         self.vars.insert(name.into_owned(), new_val)
     }
 
-    pub fn set_export_var(&mut self, name: Cow<OsStr>, new_val: OsString) -> Option<Option<OsString>> {
+    pub fn set_export_var(
+        &mut self,
+        name: Cow<OsStr>,
+        new_val: OsString,
+    ) -> Option<Option<OsString>> {
         if let Some(value) = self.export_vars.get_mut::<OsStr>(name.as_ref()) {
             return Some(mem::replace(value, Some(new_val)));
         }
@@ -262,14 +269,17 @@ impl Environment {
     {
         let name = name.as_ref();
         // XXX: maybe the opposite order is better, not sure
-        self.vars.get(name).or_else(|| self.export_vars.get(name).and_then(|var| var.as_ref()))
+        self.vars
+            .get(name)
+            .or_else(|| self.export_vars.get(name).and_then(|var| var.as_ref()))
     }
 
     pub fn get_var_nonempty<Q: ?Sized>(&self, name: &Q) -> Option<&OsString>
     where
         Q: AsRef<OsStr>,
     {
-        self.get_var(name).and_then(|value| if value.is_empty() { None } else { Some(value) })
+        self.get_var(name)
+            .and_then(|value| if value.is_empty() { None } else { Some(value) })
     }
 
     pub fn remove_var<Q: ?Sized>(&mut self, name: &Q) -> Option<OsString>
@@ -277,7 +287,9 @@ impl Environment {
         Q: AsRef<OsStr>,
     {
         let name = name.as_ref();
-        self.vars.remove(name).or_else(|| self.export_vars.remove(name).and_then(|var| var))
+        self.vars
+            .remove(name)
+            .or_else(|| self.export_vars.remove(name).and_then(|var| var))
     }
 
     pub fn set_fd(&mut self, fd: usize, value: EnvFd) {
@@ -300,7 +312,11 @@ impl Environment {
         self.fds.iter_mut()
     }
 
-    pub fn set_func<Q: ?Sized>(&mut self, name: &Q, new_val: Rc<FunctionBody>) -> Option<Rc<FunctionBody>>
+    pub fn set_func<Q: ?Sized>(
+        &mut self,
+        name: &Q,
+        new_val: Rc<FunctionBody>,
+    ) -> Option<Rc<FunctionBody>>
     where
         OsString: Borrow<Q>,
         Q: Hash + Eq + Clone + Into<OsString>,
@@ -335,7 +351,10 @@ impl Environment {
 
     pub fn iter(&self) -> EnvIter<impl Iterator<Item = (&OsStr, &OsStr)>> {
         EnvIter {
-            inner: self.vars.iter().map(|(key, val)| (key.as_ref(), val.as_ref())).chain(self.export_iter()),
+            inner: self.vars
+                .iter()
+                .map(|(key, val)| (key.as_ref(), val.as_ref()))
+                .chain(self.export_iter()),
         }
     }
 
@@ -347,7 +366,7 @@ impl Environment {
                 } else {
                     None
                 }
-            })
+            }),
         }
     }
 }
@@ -419,5 +438,5 @@ impl<'a, I: Iterator<Item = (&'a OsStr, &'a OsStr)>> Iterator for EnvIter<'a, I>
     }
 }
 
-impl<'a, I: Iterator<Item = (&'a OsStr, &'a OsStr)>> ExactSizeIterator for EnvIter<'a, I> { }
-impl<'a, I: Iterator<Item = (&'a OsStr, &'a OsStr)>> FusedIterator for EnvIter<'a, I> { }
+impl<'a, I: Iterator<Item = (&'a OsStr, &'a OsStr)>> ExactSizeIterator for EnvIter<'a, I> {}
+impl<'a, I: Iterator<Item = (&'a OsStr, &'a OsStr)>> FusedIterator for EnvIter<'a, I> {}

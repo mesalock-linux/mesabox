@@ -3,7 +3,7 @@
 //
 // Copyright (c) 2018, The MesaLock Linux Project Contributors
 // All rights reserved.
-// 
+//
 // This work is licensed under the terms of the BSD 3-Clause License.
 // For a copy, see the LICENSE file.
 //
@@ -38,11 +38,11 @@
 use clap::{App, Arg};
 use std::ffi::OsStr;
 use std::fs::{metadata, File};
-use std::iter;
 use std::io::{self, BufRead, Read, Write};
+use std::iter;
 use std::path::Path;
-use {UtilSetup, ArgsIter, LockError, UtilRead, UtilWrite, Result};
 use util::{self, is_tty};
+use {ArgsIter, LockError, Result, UtilRead, UtilSetup, UtilWrite};
 
 /// Unix domain socket support
 #[cfg(unix)]
@@ -68,7 +68,8 @@ enum CatError {
     /// Wrapper for io::Error with path context
     #[fail(display = "{}: {}", path, err)]
     Input {
-        #[cause] err: io::Error,
+        #[cause]
+        err: io::Error,
         path: String,
     },
 
@@ -132,7 +133,10 @@ struct OutputOptions<'a> {
 
 impl<'a> OutputOptions<'a> {
     fn can_write_fast(&self) -> bool {
-        !(self.show_tabs || self.show_nonprint || self.show_ends || self.squeeze_blank
+        !(self.show_tabs
+            || self.show_nonprint
+            || self.show_ends
+            || self.squeeze_blank
             || self.number != NumberingMode::NumberNone)
     }
 }
@@ -205,7 +209,13 @@ where
     O: Write,
     E: Write,
 {
-    pub fn new(stdin: I, stdout: O, stderr: E, current_dir: Option<&'c Path>, interactive: bool) -> Self {
+    pub fn new(
+        stdin: I,
+        stdout: O,
+        stderr: E,
+        current_dir: Option<&'c Path>,
+        interactive: bool,
+    ) -> Self {
         Self {
             stdin: stdin,
             stdout: stdout,
@@ -232,12 +242,19 @@ where
         let writer = &mut self.stdout;
 
         for file in files {
-            let res = Self::open_and_exec(&file, &mut self.stdin, self.current_dir, self.interactive, |handle| {
-                io::copy(handle.reader, writer).map_err(|err| {
-                    CatError::Input { err: err, path: file.to_string_lossy().into_owned() }
-                })?;
-                Ok(())
-            });
+            let res = Self::open_and_exec(
+                &file,
+                &mut self.stdin,
+                self.current_dir,
+                self.interactive,
+                |handle| {
+                    io::copy(handle.reader, writer).map_err(|err| CatError::Input {
+                        err: err,
+                        path: file.to_string_lossy().into_owned(),
+                    })?;
+                    Ok(())
+                },
+            );
             if let Err(error) = res {
                 display_msg!(self.stderr, "{}", error)?;
                 error_count += 1;
@@ -285,69 +302,81 @@ where
 
     /// Outputs file contents to stdout in a linewise fashion,
     /// propagating any errors that might occur.
-    fn write_file_lines<'b>(&mut self, file: &OsStr, options: &OutputOptions<'b>, state: &mut OutputState) -> CatResult<()> {
+    fn write_file_lines<'b>(
+        &mut self,
+        file: &OsStr,
+        options: &OutputOptions<'b>,
+        state: &mut OutputState,
+    ) -> CatResult<()> {
         let mut in_buf = [0; 1024 * 31];
         // TODO: maybe pass the callback as well so it can become an FnMut and be reused?
         let writer = &mut self.stdout;
-        Self::open_and_exec(file, &mut self.stdin, self.current_dir, self.interactive, |handle| {
-            let mut one_blank_kept = false;
+        Self::open_and_exec(
+            file,
+            &mut self.stdin,
+            self.current_dir,
+            self.interactive,
+            |handle| {
+                let mut one_blank_kept = false;
 
-            // FIXME: ignores read errors
-            while let Ok(n) = handle.reader.read(&mut in_buf) {
-                if n == 0 {
-                    break;
-                }
-                let in_buf = &in_buf[..n];
-                let mut pos = 0;
-                while pos < n {
-                    // skip empty line_number enumerating them if needed
-                    if in_buf[pos] == b'\n' {
-                        if !state.at_line_start || !options.squeeze_blank || !one_blank_kept {
-                            one_blank_kept = true;
-                            if state.at_line_start && options.number == NumberingMode::NumberAll {
-                                write!(writer, "{0:6}\t", state.line_number)?;
-                                state.line_number += 1;
-                            }
-                            writer.write_all(options.end_of_line.as_bytes())?;
-                            if handle.is_interactive {
-                                writer.flush()?;
-                            }
-                        }
-                        state.at_line_start = true;
-                        pos += 1;
-                        continue;
-                    }
-                    one_blank_kept = false;
-                    if state.at_line_start && options.number != NumberingMode::NumberNone {
-                        write!(writer, "{0:6}\t", state.line_number)?;
-                        state.line_number += 1;
-                    }
-
-                    // print to end of line or end of buffer
-                    let offset = if options.show_nonprint {
-                        write_nonprint_to_end(&in_buf[pos..], writer, options.tab.as_bytes())
-                    } else if options.show_tabs {
-                        write_tab_to_end(&in_buf[pos..], writer)
-                    } else {
-                        write_to_end(&in_buf[pos..], writer)
-                    }?;
-                    // end of buffer?
-                    if offset == 0 {
-                        state.at_line_start = false;
+                // FIXME: ignores read errors
+                while let Ok(n) = handle.reader.read(&mut in_buf) {
+                    if n == 0 {
                         break;
                     }
-                    // print suitable end of line
-                    writer.write_all(options.end_of_line.as_bytes())?;
-                    if handle.is_interactive {
-                        writer.flush()?;
-                    }
-                    state.at_line_start = true;
-                    pos += offset;
-                }
-            }
+                    let in_buf = &in_buf[..n];
+                    let mut pos = 0;
+                    while pos < n {
+                        // skip empty line_number enumerating them if needed
+                        if in_buf[pos] == b'\n' {
+                            if !state.at_line_start || !options.squeeze_blank || !one_blank_kept {
+                                one_blank_kept = true;
+                                if state.at_line_start && options.number == NumberingMode::NumberAll
+                                {
+                                    write!(writer, "{0:6}\t", state.line_number)?;
+                                    state.line_number += 1;
+                                }
+                                writer.write_all(options.end_of_line.as_bytes())?;
+                                if handle.is_interactive {
+                                    writer.flush()?;
+                                }
+                            }
+                            state.at_line_start = true;
+                            pos += 1;
+                            continue;
+                        }
+                        one_blank_kept = false;
+                        if state.at_line_start && options.number != NumberingMode::NumberNone {
+                            write!(writer, "{0:6}\t", state.line_number)?;
+                            state.line_number += 1;
+                        }
 
-            Ok(())
-        })
+                        // print to end of line or end of buffer
+                        let offset = if options.show_nonprint {
+                            write_nonprint_to_end(&in_buf[pos..], writer, options.tab.as_bytes())
+                        } else if options.show_tabs {
+                            write_tab_to_end(&in_buf[pos..], writer)
+                        } else {
+                            write_to_end(&in_buf[pos..], writer)
+                        }?;
+                        // end of buffer?
+                        if offset == 0 {
+                            state.at_line_start = false;
+                            break;
+                        }
+                        // print suitable end of line
+                        writer.write_all(options.end_of_line.as_bytes())?;
+                        if handle.is_interactive {
+                            writer.flush()?;
+                        }
+                        state.at_line_start = true;
+                        pos += offset;
+                    }
+                }
+
+                Ok(())
+            },
+        )
     }
 
     /// Returns an InputHandle from which a Reader can be accessed or an
@@ -356,7 +385,13 @@ where
     /// # Arguments
     ///
     /// * `path` - `InputHandler` will wrap a reader from this file path
-    fn open_and_exec<T>(path: &OsStr, stdin: &mut I, current_dir: Option<&Path>, interactive: bool, func: T) -> CatResult<()>
+    fn open_and_exec<T>(
+        path: &OsStr,
+        stdin: &mut I,
+        current_dir: Option<&Path>,
+        interactive: bool,
+        func: T,
+    ) -> CatResult<()>
     where
         T: FnOnce(InputHandle<&mut Read>) -> CatResult<()>,
     {
@@ -375,19 +410,21 @@ where
             InputType::Directory => Err(CatError::IsDirectory(lossy_path.into_owned())),
             #[cfg(unix)]
             InputType::Socket => {
-                let mut socket = UnixStream::connect(path).and_then(|sock| {
-                    sock.shutdown(Shutdown::Write).map(|_| sock)
-                }).map_err(|err| {
-                    CatError::Input { err: err, path: lossy_path.into_owned() }
-                })?;
+                let mut socket = UnixStream::connect(path)
+                    .and_then(|sock| sock.shutdown(Shutdown::Write).map(|_| sock))
+                    .map_err(|err| CatError::Input {
+                        err: err,
+                        path: lossy_path.into_owned(),
+                    })?;
                 func(InputHandle {
                     reader: &mut socket as &mut Read,
                     is_interactive: false,
                 })
             }
             _ => {
-                let mut file = File::open(path).map_err(|err| {
-                    CatError::Input { err: err, path: lossy_path.into_owned() }
+                let mut file = File::open(path).map_err(|err| CatError::Input {
+                    err: err,
+                    path: lossy_path.into_owned(),
                 })?;
                 func(InputHandle {
                     reader: &mut file as &mut Read,
@@ -417,9 +454,16 @@ where
         NumberingMode::NumberNone
     };
 
-    options.show_nonprint = matches.is_present("show-all") || matches.is_present("show-nonprinting") || matches.is_present("e") || matches.is_present("t");
-    options.show_ends = matches.is_present("show-all") || matches.is_present("show-ends") || matches.is_present("e");
-    options.show_tabs = matches.is_present("show-all") || matches.is_present("show-tabs") || matches.is_present("t");
+    options.show_nonprint = matches.is_present("show-all")
+        || matches.is_present("show-nonprinting")
+        || matches.is_present("e")
+        || matches.is_present("t");
+    options.show_ends = matches.is_present("show-all")
+        || matches.is_present("show-ends")
+        || matches.is_present("e");
+    options.show_tabs = matches.is_present("show-all")
+        || matches.is_present("show-tabs")
+        || matches.is_present("t");
     options.squeeze_blank = matches.is_present("squeeze-blank");
 
     if let Some(files) = matches.values_of_os("FILES") {
@@ -431,44 +475,52 @@ where
 
 fn create_app() -> App<'static, 'static> {
     util_app!("cat")
-            .arg(Arg::with_name("show-all")
-                    .short("A")
-                    .long("show-all")
-                    .help("equivalent to -vET"))
-            .arg(Arg::with_name("number-nonblank")
-                    .short("b")
-                    .long("number-nonblank")
-                    .overrides_with("number")
-                    .help("number nonempty output lines, overrides -n"))
-            .arg(Arg::with_name("e")
-                    .short("e")
-                    .help("equivalent to -vE"))
-            .arg(Arg::with_name("show-ends")
-                    .short("E")
-                    .long("show-ends")
-                    .help("display $ at the end of each line"))
-            .arg(Arg::with_name("number")
-                    .short("n")
-                    .long("number")
-                    .help("number all output lines"))
-            .arg(Arg::with_name("squeeze-blank")
-                    .short("s")
-                    .long("squeeze-blank")
-                    .help("suppress repeated empty output lines"))
-            .arg(Arg::with_name("t")
-                    .short("t")
-                    .help("equivalent to -vT"))
-            .arg(Arg::with_name("show-tabs")
-                    .short("T")
-                    .long("show-tabs")
-                    .help("display TAB characters as ^I"))
-            .arg(Arg::with_name("show-nonprinting")
-                    .short("v")
-                    .long("show-nonprinting")
-                    .help("use ^ and M- notation, except for LF (\\n) and TAB (\\t)"))
-            .arg(Arg::with_name("FILES")
-                    .index(1)
-                    .multiple(true))
+        .arg(
+            Arg::with_name("show-all")
+                .short("A")
+                .long("show-all")
+                .help("equivalent to -vET"),
+        )
+        .arg(
+            Arg::with_name("number-nonblank")
+                .short("b")
+                .long("number-nonblank")
+                .overrides_with("number")
+                .help("number nonempty output lines, overrides -n"),
+        )
+        .arg(Arg::with_name("e").short("e").help("equivalent to -vE"))
+        .arg(
+            Arg::with_name("show-ends")
+                .short("E")
+                .long("show-ends")
+                .help("display $ at the end of each line"),
+        )
+        .arg(
+            Arg::with_name("number")
+                .short("n")
+                .long("number")
+                .help("number all output lines"),
+        )
+        .arg(
+            Arg::with_name("squeeze-blank")
+                .short("s")
+                .long("squeeze-blank")
+                .help("suppress repeated empty output lines"),
+        )
+        .arg(Arg::with_name("t").short("t").help("equivalent to -vT"))
+        .arg(
+            Arg::with_name("show-tabs")
+                .short("T")
+                .long("show-tabs")
+                .help("display TAB characters as ^I"),
+        )
+        .arg(
+            Arg::with_name("show-nonprinting")
+                .short("v")
+                .long("show-nonprinting")
+                .help("use ^ and M- notation, except for LF (\\n) and TAB (\\t)"),
+        )
+        .arg(Arg::with_name("FILES").index(1).multiple(true))
 }
 
 fn run<'a, 'b, S, T>(setup: &mut S, files: T, mut options: OutputOptions<'b>) -> Result<()>
@@ -477,7 +529,7 @@ where
     T: Iterator<Item = &'a OsStr>,
 {
     let can_write_fast = options.can_write_fast();
-    
+
     let interactive = is_tty(setup.input().raw_object());
     // XXX: should current_dir() just return Option<Rc<Path>> or something similar to avoid the cloning?
     let curdir = setup.current_dir().map(|p| p.to_path_buf());
@@ -486,7 +538,13 @@ where
     let stdout = output.lock()?;
     let stderr = error.lock()?;
 
-    let mut util = Cat::new(stdin, stdout, stderr, curdir.as_ref().map(|p| p.as_path()), interactive);
+    let mut util = Cat::new(
+        stdin,
+        stdout,
+        stderr,
+        curdir.as_ref().map(|p| p.as_path()),
+        interactive,
+    );
 
     if can_write_fast {
         util.write_fast(files)?;
@@ -513,7 +571,10 @@ fn get_input_type(path: &Path) -> CatResult<InputType> {
     let lossy_path = path.to_string_lossy();
     let info = metadata(path).map_err(|err| {
         // XXX: it should be fine to do .into_owned() but the compiler can't tell
-        CatError::Input { err: err, path: lossy_path.to_string() }
+        CatError::Input {
+            err: err,
+            path: lossy_path.to_string(),
+        }
     })?;
     match info.file_type() {
         #[cfg(unix)]

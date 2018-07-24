@@ -1,8 +1,10 @@
-use std::process::{Command, Stdio};
 use std::os::unix::io::FromRawFd;
 use std::os::unix::process::CommandExt;
+use std::process::{Command, Stdio};
 
-use super::{BuiltinSetup, UtilSetup, UtilRead, UtilWrite, Environment, ExecData, ExitCode, Result};
+use super::{
+    BuiltinSetup, Environment, ExecData, ExitCode, Result, UtilRead, UtilSetup, UtilWrite,
+};
 use util::RawObjectWrapper;
 
 #[derive(Clone, Copy)]

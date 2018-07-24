@@ -3,15 +3,15 @@ use std::io::{self, Write};
 use std::iter;
 use std::result::Result as StdResult;
 
-use ::{UtilData, UtilRead, UtilWrite, ArgsIter};
-use util::ReadableVec;
-use super::UtilSetup;
 use super::ast::{ExitCode, RuntimeData};
 use super::command::{ExecData, InProcessChild, InProcessCommand, ShellChild};
 use super::env::{CheckBreak, EnvFd, Environment};
-use super::error::{CmdResult, BuiltinError, CommandError};
+use super::error::{BuiltinError, CmdResult, CommandError};
 use super::option::ShellOption;
 use super::types::TryClone;
+use super::UtilSetup;
+use util::ReadableVec;
+use {ArgsIter, UtilData, UtilRead, UtilWrite};
 
 use self::break_builtin::BreakBuiltin;
 use self::cd::CdBuiltin;
@@ -64,14 +64,12 @@ type Result<T> = StdResult<T, BuiltinError>;
 
 #[derive(Clone, Debug)]
 pub struct BuiltinSet {
-    options: Vec<ShellOption>
+    options: Vec<ShellOption>,
 }
 
 impl BuiltinSet {
     pub fn new(options: Vec<ShellOption>) -> Self {
-        Self {
-            options: options,
-        }
+        Self { options: options }
     }
 
     // XXX: in the future this should check the list of options to figure out what to do
@@ -92,8 +90,8 @@ impl BuiltinSet {
 
                 // TODO: should prevent certain utils from being run here (e.g. init and sh)
                 other if util_exists(other) => break,
-                _ => return None
-            })
+                _ => return None,
+            });
         }
         Some(Builtin::Other(name.into_owned()))
     }
@@ -116,14 +114,25 @@ pub enum Builtin {
 }
 
 impl Builtin {
-    fn execute_stdin<I>(&self, env: &mut Environment, data: ExecData, input: I) -> CmdResult<ExitCode>
+    fn execute_stdin<I>(
+        &self,
+        env: &mut Environment,
+        data: ExecData,
+        input: I,
+    ) -> CmdResult<ExitCode>
     where
         I: for<'a> UtilRead<'a> + 'static,
     {
         generate_execute!(self, env, data, 1, execute_stdout, input)
     }
 
-    fn execute_stdout<I, O>(&self, env: &mut Environment, data: ExecData, input: I, output: O) -> CmdResult<ExitCode>
+    fn execute_stdout<I, O>(
+        &self,
+        env: &mut Environment,
+        data: ExecData,
+        input: I,
+        output: O,
+    ) -> CmdResult<ExitCode>
     where
         I: for<'a> UtilRead<'a> + 'static,
         O: for<'a> UtilWrite<'a> + 'static,
@@ -131,7 +140,14 @@ impl Builtin {
         generate_execute!(self, env, data, 2, execute_stderr, input, output)
     }
 
-    fn execute_stderr<I, O, E>(&self, env: &mut Environment, data: ExecData, mut input: I, mut output: O, mut error: E) -> CmdResult<ExitCode>
+    fn execute_stderr<I, O, E>(
+        &self,
+        env: &mut Environment,
+        data: ExecData,
+        mut input: I,
+        mut output: O,
+        mut error: E,
+    ) -> CmdResult<ExitCode>
     where
         I: for<'a> UtilRead<'a> + 'static,
         O: for<'a> UtilWrite<'a> + 'static,
@@ -143,7 +159,8 @@ impl Builtin {
 
         let utilname;
         loop {
-            let mut util_setup = UtilData::new(&mut input, &mut output, &mut error, iter::empty(), None);
+            let mut util_setup =
+                UtilData::new(&mut input, &mut output, &mut error, iter::empty(), None);
             let setup = &mut util_setup;
 
             return match self {
@@ -162,7 +179,7 @@ impl Builtin {
                     utilname = util;
                     break;
                 }
-            }.map_err(|e| CommandError::Builtin(e))
+            }.map_err(|e| CommandError::Builtin(e));
         }
 
         let (mut input, mut output, mut error) = {
@@ -192,17 +209,27 @@ impl Builtin {
                 (input, output, error)
             }
         };
-        let mut util_setup = UtilData::new(&mut input, &mut output, &mut error, iter::empty(), None);
+        let mut util_setup =
+            UtilData::new(&mut input, &mut output, &mut error, iter::empty(), None);
         let setup = &mut util_setup;
-        execute_util(setup, &OsStr::new(utilname), &mut iter::once(OsString::from(utilname)).chain(data.args.into_iter())).map(|_| 0).map_err(|e| {
-            env.special_vars().set_last_exitcode(e.exitcode);
-            CommandError::Builtin(BuiltinError::Other(e.err.unwrap().compat()))
-        })
+        execute_util(
+            setup,
+            &OsStr::new(utilname),
+            &mut iter::once(OsString::from(utilname)).chain(data.args.into_iter()),
+        ).map(|_| 0)
+            .map_err(|e| {
+                env.special_vars().set_last_exitcode(e.exitcode);
+                CommandError::Builtin(BuiltinError::Other(e.err.unwrap().compat()))
+            })
     }
 }
 
 impl InProcessCommand for Builtin {
-    fn execute<'a: 'b, 'b, S: UtilSetup + 'a>(&self, rt_data: &mut RuntimeData<'a, 'b, S>, data: ExecData) -> CmdResult<ExitCode> {
+    fn execute<'a: 'b, 'b, S: UtilSetup + 'a>(
+        &self,
+        rt_data: &mut RuntimeData<'a, 'b, S>,
+        data: ExecData,
+    ) -> CmdResult<ExitCode> {
         let res = generate_execute!(self, rt_data.env, data, 0, execute_stdin);
 
         Ok(match res {
@@ -217,16 +244,23 @@ impl InProcessCommand for Builtin {
         })
     }
 
-    fn spawn<'a: 'b, 'b, S: UtilSetup + 'a>(&self, rt_data: &mut RuntimeData<'a, 'b, S>, data: ExecData) -> CmdResult<ShellChild> {
-        let child = InProcessChild::spawn(rt_data, |rt_data| {
-            self.execute(rt_data, data)
-        })?;
+    fn spawn<'a: 'b, 'b, S: UtilSetup + 'a>(
+        &self,
+        rt_data: &mut RuntimeData<'a, 'b, S>,
+        data: ExecData,
+    ) -> CmdResult<ShellChild> {
+        let child = InProcessChild::spawn(rt_data, |rt_data| self.execute(rt_data, data))?;
         Ok(ShellChild::InProcess(child))
     }
 }
 
 trait BuiltinSetup {
-    fn run<S: UtilSetup>(&self, setup: &mut S, env: &mut Environment, data: ExecData) -> Result<ExitCode>;
+    fn run<S: UtilSetup>(
+        &self,
+        setup: &mut S,
+        env: &mut Environment,
+        data: ExecData,
+    ) -> Result<ExitCode>;
 }
 
 fn arg_to_usize<F: FnOnce(usize) -> bool>(arg: OsString, validator: F) -> Result<usize> {
@@ -244,7 +278,10 @@ fn arg_to_usize<F: FnOnce(usize) -> bool>(arg: OsString, validator: F) -> Result
                 Err(BuiltinError::InvalidNumber(arg))
             }
         }
-        Some(Err(f)) => Err(BuiltinError::ParseInt { err: f, string: arg }),
+        Some(Err(f)) => Err(BuiltinError::ParseInt {
+            err: f,
+            string: arg,
+        }),
         None => Err(BuiltinError::InvalidUtf8(arg)),
     }
 }

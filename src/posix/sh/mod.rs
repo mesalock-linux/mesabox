@@ -1,12 +1,12 @@
 use nom;
-use rustyline::{Config, Editor, CompletionType};
 use rustyline::error::ReadlineError;
+use rustyline::{CompletionType, Config, Editor};
 
 use std::borrow::Cow;
 use std::ffi::{OsStr, OsString};
 
-use {UtilRead, UtilWrite, UtilSetup, ArgsIter, Result};
 use util::RawObjectWrapper;
+use {ArgsIter, Result, UtilRead, UtilSetup, UtilWrite};
 
 use self::env::{EnvFd, Environment};
 use self::parser::Parser;
@@ -68,7 +68,10 @@ where
             //println!("{:#?}", m);
             //println!();
 
-            let mut data = ast::RuntimeData { setup: setup, env: &mut env };
+            let mut data = ast::RuntimeData {
+                setup: setup,
+                env: &mut env,
+            };
 
             println!("status: {}", m.1.execute(&mut data));
 
@@ -90,10 +93,10 @@ where
                     }
                     Ok(())
                 }
-                _ => unimplemented!()
+                _ => unimplemented!(),
             }
         }
-        _ => unreachable!()
+        _ => unreachable!(),
     }
 }
 
@@ -103,7 +106,9 @@ fn start_repl<S>(setup: &mut S) -> Result<()>
 where
     S: UtilSetup,
 {
-    let config = Config::builder().completion_type(CompletionType::List).build();
+    let config = Config::builder()
+        .completion_type(CompletionType::List)
+        .build();
 
     let mut rl = Editor::<()>::with_config(config);
 
@@ -112,7 +117,10 @@ where
     let mut env = setup.env().into();
     setup_default_env(setup, &mut env)?;
 
-    let mut setup_data = ast::RuntimeData { setup: setup, env: &mut env };
+    let mut setup_data = ast::RuntimeData {
+        setup: setup,
+        env: &mut env,
+    };
 
     let mut parser = Parser::new();
 
@@ -138,8 +146,14 @@ where
                             // FIXME: this is super wasteful (we build up part of the tree and then
                             //        just trash it when it's not complete)
                             Err(nom::Err::Incomplete(_))
-                            | Err(nom::Err::Error(nom::Context::Code(_, nom::ErrorKind::Complete)))
-                            | Err(nom::Err::Failure(nom::Context::Code(_, nom::ErrorKind::Complete))) => { }
+                            | Err(nom::Err::Error(nom::Context::Code(
+                                _,
+                                nom::ErrorKind::Complete,
+                            )))
+                            | Err(nom::Err::Failure(nom::Context::Code(
+                                _,
+                                nom::ErrorKind::Complete,
+                            ))) => {}
                             Err(nom::Err::Failure(ctx)) | Err(nom::Err::Error(ctx)) => {
                                 //println!("{}", f.into_error_kind())
                                 match ctx {
@@ -156,17 +170,15 @@ where
                                         }
                                         break;
                                     }
-                                    nom::Context::Code(_, err) => {
-                                        match err {
-                                            nom::ErrorKind::Custom(s) => {
-                                                println!("{}", s);
-                                            }
-                                            other => {
-                                                println!("{:#?}", other);
-                                            }
+                                    nom::Context::Code(_, err) => match err {
+                                        nom::ErrorKind::Custom(s) => {
+                                            println!("{}", s);
                                         }
-                                    }
-                                    _ => unimplemented!()
+                                        other => {
+                                            println!("{:#?}", other);
+                                        }
+                                    },
+                                    _ => unimplemented!(),
                                 }
                             }
                         }
@@ -185,22 +197,29 @@ where
                                 line.push_str(&data);
                                 line.push('\n');
 
-                                let res = complete!(line.as_bytes(), call_m!(parser.complete_command));
+                                let res =
+                                    complete!(line.as_bytes(), call_m!(parser.complete_command));
                                 match res {
                                     Ok(m) => {
                                         println!("status: {}", m.1.execute(&mut setup_data));
                                         break 'outer;
                                     }
                                     Err(nom::Err::Incomplete(_))
-                                    | Err(nom::Err::Error(nom::Context::Code(_, nom::ErrorKind::Complete)))
-                                    | Err(nom::Err::Failure(nom::Context::Code(_, nom::ErrorKind::Complete))) => { }
+                                    | Err(nom::Err::Error(nom::Context::Code(
+                                        _,
+                                        nom::ErrorKind::Complete,
+                                    )))
+                                    | Err(nom::Err::Failure(nom::Context::Code(
+                                        _,
+                                        nom::ErrorKind::Complete,
+                                    ))) => {}
                                     Err(f) => {
                                         println!("{}", f);
                                         break 'outer;
                                     }
                                 }
                             }
-                            _ => unimplemented!()
+                            _ => unimplemented!(),
                         }
                     }
                 }
@@ -245,9 +264,24 @@ where
     // although HOME and PATH and stuff are used, we shouldn't set them explicitly
 
     // FIXME: what to do if can't create fd? (such as in testing framework)
-    env.set_fd(0, EnvFd::Fd(RawObjectWrapper::try_from(setup.input().raw_object().unwrap())?));
-    env.set_fd(1, EnvFd::Fd(RawObjectWrapper::try_from(setup.output().raw_object().unwrap())?));
-    env.set_fd(2, EnvFd::Fd(RawObjectWrapper::try_from(setup.error().raw_object().unwrap())?));
+    env.set_fd(
+        0,
+        EnvFd::Fd(RawObjectWrapper::try_from(
+            setup.input().raw_object().unwrap(),
+        )?),
+    );
+    env.set_fd(
+        1,
+        EnvFd::Fd(RawObjectWrapper::try_from(
+            setup.output().raw_object().unwrap(),
+        )?),
+    );
+    env.set_fd(
+        2,
+        EnvFd::Fd(RawObjectWrapper::try_from(
+            setup.error().raw_object().unwrap(),
+        )?),
+    );
 
     Ok(())
 }

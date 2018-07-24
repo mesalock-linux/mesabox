@@ -1,7 +1,7 @@
 //
 // Copyright (c) 2018, The MesaLock Linux Project Contributors
 // All rights reserved.
-// 
+//
 // This work is licensed under the terms of the BSD 3-Clause License.
 // For a copy, see the LICENSE file.
 //
@@ -131,10 +131,12 @@ fn map_bytes(s: &[u8]) -> impl Iterator<Item = ByteResult> {
                     let num = if found > 0 {
                         // this is guaranteed to be valid, but it's unlikely the slight performance
                         // boost gained by using unsafe will make a difference
-                        str::from_utf8(&buffer[..found]).map_err(|e| {
-                            let err: MesaError = e.into();
-                            err
-                        }).and_then(|s| u8::from_str_radix(s, 8).map_err(|e| e.into()))
+                        str::from_utf8(&buffer[..found])
+                            .map_err(|e| {
+                                let err: MesaError = e.into();
+                                err
+                            })
+                            .and_then(|s| u8::from_str_radix(s, 8).map_err(|e| e.into()))
                     } else {
                         Ok(b'\0')
                     };

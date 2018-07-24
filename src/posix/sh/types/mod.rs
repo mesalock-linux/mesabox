@@ -2,11 +2,11 @@ use std::mem;
 
 use super::error::CommandError;
 
-pub use self::scoped_map::ScopedMap;
 pub use self::scoped_array::{FdArray, ScopedArray};
+pub use self::scoped_map::ScopedMap;
 
-pub mod scoped_map;
 pub mod scoped_array;
+pub mod scoped_map;
 
 pub trait TryClone: Sized {
     fn try_clone<'a>(&'a self) -> Result<Self, CommandError>;

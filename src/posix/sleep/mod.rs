@@ -1,7 +1,7 @@
 //
 // Copyright (c) 2018, The MesaLock Linux Project Contributors
 // All rights reserved.
-// 
+//
 // This work is licensed under the terms of the BSD 3-Clause License.
 // For a copy, see the LICENSE file.
 //
@@ -31,7 +31,7 @@
 //     SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 //
 
-use {ArgsIter, Result, UtilSetup, string_to_err};
+use {string_to_err, ArgsIter, Result, UtilSetup};
 
 use std::thread;
 use std::time::Duration;
@@ -47,7 +47,12 @@ where
     S: UtilSetup,
     T: ArgsIter,
 {
-    let app = util_app!(NAME).arg(Arg::with_name("NUMBER[SUFFIX]").index(1).multiple(true).required(true));
+    let app = util_app!(NAME).arg(
+        Arg::with_name("NUMBER[SUFFIX]")
+            .index(1)
+            .multiple(true)
+            .required(true),
+    );
 
     let matches = app.get_matches_from_safe(args)?;
 

@@ -9,7 +9,9 @@ use std::io::Write;
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
-use super::{BuiltinSetup, BuiltinError, UtilSetup, UtilWrite, Environment, ExecData, ExitCode, Result};
+use super::{
+    BuiltinError, BuiltinSetup, Environment, ExecData, ExitCode, Result, UtilSetup, UtilWrite,
+};
 
 #[derive(Clone, Copy)]
 pub struct CdBuiltin;
@@ -41,13 +43,13 @@ fn handle_data(env: &mut Environment, data: ExecData) -> Result<(bool, ExitCode)
     // TODO: suppress --help/--version
     let matches = App::new("cd")
         .setting(AppSettings::NoBinaryName)
-        .arg(Arg::with_name("logical")
-            .short("L")
-            .overrides_with("physical"))
-        .arg(Arg::with_name("physical")
-            .short("P"))
-        .arg(Arg::with_name("DIRECTORY")
-            .index(1))
+        .arg(
+            Arg::with_name("logical")
+                .short("L")
+                .overrides_with("physical"),
+        )
+        .arg(Arg::with_name("physical").short("P"))
+        .arg(Arg::with_name("DIRECTORY").index(1))
         .get_matches_from_safe(data.args)?;
 
     let mut should_print = false;
@@ -93,7 +95,12 @@ fn handle_data(env: &mut Environment, data: ExecData) -> Result<(bool, ExitCode)
     }.map(|code| (should_print, code))
 }
 
-fn resolve_dot(env: &mut Environment, curpath: Cow<Path>, physical: bool, dirlen: usize) -> Result<ExitCode> {
+fn resolve_dot(
+    env: &mut Environment,
+    curpath: Cow<Path>,
+    physical: bool,
+    dirlen: usize,
+) -> Result<ExitCode> {
     if physical {
         set_cwd(env, curpath, physical, dirlen)
     } else {
@@ -115,7 +122,12 @@ fn resolve_dot(env: &mut Environment, curpath: Cow<Path>, physical: bool, dirlen
     }
 }
 
-fn set_cwd(env: &mut Environment, curpath: Cow<Path>, physical: bool, dirlen: usize) -> Result<ExitCode> {
+fn set_cwd(
+    env: &mut Environment,
+    curpath: Cow<Path>,
+    physical: bool,
+    dirlen: usize,
+) -> Result<ExitCode> {
     if let Err(f) = env::set_current_dir(&curpath) {
         if !physical {
             let res = fixup_path(env, &curpath, dirlen)
@@ -124,7 +136,10 @@ fn set_cwd(env: &mut Environment, curpath: Cow<Path>, physical: bool, dirlen: us
                 return set_pwd_var(env, curpath);
             }
         }
-        Err(BuiltinError::SetCurrentDir { dir: curpath.into_owned().into_os_string(), err: f })
+        Err(BuiltinError::SetCurrentDir {
+            dir: curpath.into_owned().into_os_string(),
+            err: f,
+        })
     } else {
         set_pwd_var(env, curpath)
     }
@@ -149,7 +164,10 @@ fn fixup_path<'a>(env: &'a Environment, curpath: &'a Path, dirlen: usize) -> Opt
 }
 
 fn set_pwd_var(env: &mut Environment, curpath: Cow<Path>) -> Result<ExitCode> {
-    let oldpwd = env.set_export_var(Cow::Borrowed(OsStr::new("PWD")), curpath.into_owned().into_os_string());
+    let oldpwd = env.set_export_var(
+        Cow::Borrowed(OsStr::new("PWD")),
+        curpath.into_owned().into_os_string(),
+    );
     match oldpwd {
         Some(Some(dir)) => {
             env.set_export_var(Cow::Borrowed(OsStr::new("OLDPWD")), dir);

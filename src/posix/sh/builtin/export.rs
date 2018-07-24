@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-use super::{BuiltinSetup, UtilSetup, Environment, ExecData, ExitCode, Result};
+use super::{BuiltinSetup, Environment, ExecData, ExitCode, Result, UtilSetup};
 
 #[derive(Clone, Copy)]
 pub struct ExportBuiltin;

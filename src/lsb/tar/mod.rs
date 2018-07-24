@@ -1,18 +1,18 @@
 //
 // Copyright (c) 2018, The MesaLock Linux Project Contributors
 // All rights reserved.
-// 
+//
 // This work is licensed under the terms of the BSD 3-Clause License.
 // For a copy, see the LICENSE file.
 //
 
 extern crate tar;
 
-use {ArgsIter, UtilSetup, Result};
 use util;
+use {ArgsIter, Result, UtilSetup};
 
 use clap::{Arg, ArgGroup, OsValues};
-use globset::{GlobSetBuilder, Glob};
+use globset::{Glob, GlobSetBuilder};
 //use regex::bytes::RegexSet;
 use std::borrow::Cow;
 use std::fs::File;
@@ -112,7 +112,7 @@ where
             ArchiveFormat::V7 => tar::Header::new_old(),
             ArchiveFormat::Ustar => tar::Header::new_ustar(),
             // FIXME: somehow implement pax
-            _ => unimplemented!()
+            _ => unimplemented!(),
         };
 
         // FIXME: this should probably fail if self.options.values is None
@@ -136,7 +136,11 @@ where
             Some(ref filepath) => {
                 let file = File::open(filepath)?;
                 let archive = tar::Archive::new(BufReader::new(file));
-                Self::list_contents_helper(&mut *self.setup.output(), &mut self.options.values, archive)
+                Self::list_contents_helper(
+                    &mut *self.setup.output(),
+                    &mut self.options.values,
+                    archive,
+                )
             }
             _ => {
                 let (input, output, _) = self.setup.stdio();
@@ -146,7 +150,11 @@ where
         }
     }
 
-    fn list_contents_helper<O: Write, R: Read>(output: &mut O, values: &mut Option<OsValues<'b>>, mut archive: tar::Archive<R>) -> Result<()> {
+    fn list_contents_helper<O: Write, R: Read>(
+        output: &mut O,
+        values: &mut Option<OsValues<'b>>,
+        mut archive: tar::Archive<R>,
+    ) -> Result<()> {
         use std::os::unix::ffi::OsStrExt;
         use std::str;
         // XXX: this is not complete, need to handle options and such
@@ -159,7 +167,7 @@ where
                 }
                 Some(set.build()?)
             }
-            None => None
+            None => None,
         };
         for entry in archive.entries()? {
             let entry = entry?;
@@ -173,8 +181,6 @@ where
     }
 
     pub fn append_data(&mut self) -> Result<()> {
-
-
         Ok(())
     }
 }
@@ -281,7 +287,9 @@ where
 
     let mut options = Options::default();
 
-    options.file = matches.value_of_os("file").map(|name| util::actual_path(&setup.current_dir(), name));
+    options.file = matches
+        .value_of_os("file")
+        .map(|name| util::actual_path(&setup.current_dir(), name));
 
     options.mode = if matches.is_present("create") {
         Mode::Create
@@ -316,14 +324,17 @@ where
         Compression::None
     };
 
-    options.format = matches.value_of("format").map(|fmt| match fmt {
-        "gnu" => ArchiveFormat::Gnu,
-        "v7" => ArchiveFormat::V7,
-        "ustar" => ArchiveFormat::Ustar,
-        "posix" => ArchiveFormat::Posix,
-        // the above are the only possible values
-        _ => unreachable!()
-    }).unwrap_or(ArchiveFormat::Gnu);
+    options.format = matches
+        .value_of("format")
+        .map(|fmt| match fmt {
+            "gnu" => ArchiveFormat::Gnu,
+            "v7" => ArchiveFormat::V7,
+            "ustar" => ArchiveFormat::Ustar,
+            "posix" => ArchiveFormat::Posix,
+            // the above are the only possible values
+            _ => unreachable!(),
+        })
+        .unwrap_or(ArchiveFormat::Gnu);
 
     options.values = matches.values_of_os("FILES | PATTERNS");
 

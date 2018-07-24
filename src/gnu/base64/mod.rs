@@ -1,14 +1,14 @@
 //
 // Copyright (c) 2018, The MesaLock Linux Project Contributors
 // All rights reserved.
-// 
+//
 // This work is licensed under the terms of the BSD 3-Clause License.
 // For a copy, see the LICENSE file.
 //
 
-use {ArgsIter, Result, UtilSetup};
 use super::base32::common;
 use uucore::encoding::Format;
+use {ArgsIter, Result, UtilSetup};
 
 pub const DESCRIPTION: &str = "Encode or decode input data to standard output using Base64";
 

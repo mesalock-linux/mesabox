@@ -57,7 +57,10 @@ impl<K: Hash + Eq, V, S: BuildHasher + Default> ScopedMap<K, V, S> {
         K: Borrow<Q>,
         Q: Hash + Eq,
     {
-        self.maps.current_val_mut().get_mut(k).and_then(|v| v.as_mut())
+        self.maps
+            .current_val_mut()
+            .get_mut(k)
+            .and_then(|v| v.as_mut())
     }
 
     pub fn remove<'a, Q: ?Sized>(&mut self, k: &'a Q) -> Option<V>
@@ -80,12 +83,19 @@ impl<K: Hash + Eq, V, S: BuildHasher + Default> ScopedMap<K, V, S> {
         if self.maps.count > 0 {
             self.maps.set_val(HashMap::default());
         }
-        self.maps.current_val_mut().insert(key, Some(val)).unwrap_or(None)
+        self.maps
+            .current_val_mut()
+            .insert(key, Some(val))
+            .unwrap_or(None)
     }
 
     // FIXME: no idea how to do this quickly
     pub fn iter<'a>(&'a self) -> Iter<'a, K, V, S> {
-        Iter { maps: &self.maps, inner_iter: self.maps.current_val().iter(), found: vec![] }
+        Iter {
+            maps: &self.maps,
+            inner_iter: self.maps.current_val().iter(),
+            found: vec![],
+        }
     }
 }
 

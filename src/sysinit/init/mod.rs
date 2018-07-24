@@ -1,36 +1,39 @@
 //
 // Copyright (c) 2017-2018, The MesaLock Linux Contributors
 // All rights reserved.
-// 
+//
 // This work is licensed under the terms of the BSD 3-Clause License.
 // For a copy, see the LICENSE file.
 //
 
-use {ArgsIter, Result, MesaError, UtilSetup, UtilRead, UtilWrite};
+use {ArgsIter, MesaError, Result, UtilRead, UtilSetup, UtilWrite};
 
 use fnv::FnvHashMap as HashMap;
+use libc;
 use nix;
-use nix::unistd::{self, Pid};
 use nix::mount::{self, MsFlags};
 use nix::sys::reboot::{self, RebootMode};
-use nix::sys::signal::{self, Signal, SigSet, SigmaskHow};
+use nix::sys::signal::{self, SigSet, SigmaskHow, Signal};
 use nix::sys::wait::{self, WaitPidFlag, WaitStatus};
-use libc;
+use nix::unistd::{self, Pid};
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 use std::env;
+use std::ffi::OsStr;
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, Write};
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::process::CommandExt;
 use std::process::{Child, Command};
-use std::ffi::OsStr;
 use std::result::Result as StdResult;
 
 const NAME: &str = "init";
 pub(crate) const DESCRIPTION: &str = "initialize the system on startup";
 
-const SIGNALS: &[(Signal, fn(&mut HashMap<Pid, InittabEntry>) -> StdResult<(), InitError>)] = &[
+const SIGNALS: &[(
+    Signal,
+    fn(&mut HashMap<Pid, InittabEntry>) -> StdResult<(), InitError>,
+)] = &[
     (Signal::SIGUSR1, halt_handler),
     (Signal::SIGUSR2, poweroff_handler),
     (Signal::SIGTERM, reset_handler),
@@ -105,10 +108,15 @@ impl PartialEq for InittabEntry {
 impl Eq for InittabEntry {}
 
 impl InittabEntry {
-    pub fn start(self, runlevel: u8, respawn: &mut HashMap<Pid, InittabEntry>) -> StdResult<Option<Self>, (Vec<u8>, InitError)> {
+    pub fn start(
+        self,
+        runlevel: u8,
+        respawn: &mut HashMap<Pid, InittabEntry>,
+    ) -> StdResult<Option<Self>, (Vec<u8>, InitError)> {
         Ok(match self.action {
             BOOT | SYSINIT | BOOTWAIT => {
-                self.spawn_child(&[SYSINIT, BOOTWAIT]).map_err(|e| (self.id, e))?;
+                self.spawn_child(&[SYSINIT, BOOTWAIT])
+                    .map_err(|e| (self.id, e))?;
                 None
             }
             ONCE | WAIT => {
@@ -372,19 +380,43 @@ fn mount_fs() -> nix::Result<()> {
     // XXX: this should be done something started in /etc/inittab, but we have no mount binary
     //      currently and thus must be done in init
     // mount -n -t proc proc /proc
-    let proc_mount_flags = MsFlags::MS_NOSUID | MsFlags::MS_NODEV | MsFlags::MS_NOEXEC | MsFlags::MS_RELATIME;
-    let _ = mount::mount(Some("proc"), "/proc", Some("proc"), proc_mount_flags, Some("mode=0555"))?;
+    let proc_mount_flags =
+        MsFlags::MS_NOSUID | MsFlags::MS_NODEV | MsFlags::MS_NOEXEC | MsFlags::MS_RELATIME;
+    let _ = mount::mount(
+        Some("proc"),
+        "/proc",
+        Some("proc"),
+        proc_mount_flags,
+        Some("mode=0555"),
+    )?;
 
     // mount -n -t devtmpfs devtmpfs /dev
     let dev_mount_flags = MsFlags::MS_NOSUID | MsFlags::MS_RELATIME;
-    let _ = mount::mount(Some("dev"), "/dev", Some("devtmpfs"), dev_mount_flags, Some("mode=0755"))?;
+    let _ = mount::mount(
+        Some("dev"),
+        "/dev",
+        Some("devtmpfs"),
+        dev_mount_flags,
+        Some("mode=0755"),
+    )?;
 
     // mount -n -t sysfs sysfs /sys
-    let sys_mount_flags = MsFlags::MS_NOSUID | MsFlags::MS_NODEV | MsFlags::MS_NOEXEC | MsFlags::MS_RELATIME;
-    mount::mount(Some("sysfs"), "/sys", Some("sysfs"), sys_mount_flags, Some("mode=0555"))
+    let sys_mount_flags =
+        MsFlags::MS_NOSUID | MsFlags::MS_NODEV | MsFlags::MS_NOEXEC | MsFlags::MS_RELATIME;
+    mount::mount(
+        Some("sysfs"),
+        "/sys",
+        Some("sysfs"),
+        sys_mount_flags,
+        Some("mode=0555"),
+    )
 }
 
-fn start_entries<E>(inittab: &mut BinaryHeap<InittabEntry>, runlevel: u8, stderr: &mut E) -> io::Result<(HashMap<Pid, InittabEntry>, BinaryHeap<InittabEntry>)>
+fn start_entries<E>(
+    inittab: &mut BinaryHeap<InittabEntry>,
+    runlevel: u8,
+    stderr: &mut E,
+) -> io::Result<(HashMap<Pid, InittabEntry>, BinaryHeap<InittabEntry>)>
 where
     E: Write,
 {
@@ -408,42 +440,55 @@ where
     Ok((respawn, new_heap))
 }
 
-fn determine_runlevel<I, E>(inittab: &mut BinaryHeap<InittabEntry>, stdin: &mut I, stderr: &mut E) -> u8
+fn determine_runlevel<I, E>(
+    inittab: &mut BinaryHeap<InittabEntry>,
+    stdin: &mut I,
+    stderr: &mut E,
+) -> u8
 where
     I: BufRead,
     E: Write,
 {
-    inittab.pop().and_then(|entry| {
-        if entry.action == INITDEFAULT {
-            if entry.runlevels.len() == 1 {
-                Some(entry.runlevels[0])
+    inittab
+        .pop()
+        .and_then(|entry| {
+            if entry.action == INITDEFAULT {
+                if entry.runlevels.len() == 1 {
+                    Some(entry.runlevels[0])
+                } else {
+                    let _ = display_err!(
+                        stderr,
+                        "only one runlevel may be given to initdefault (found {})",
+                        entry.runlevels.len()
+                    );
+                    None
+                }
             } else {
-                let _ = display_err!(stderr, "only one runlevel may be given to initdefault (found {})", entry.runlevels.len());
+                inittab.push(entry);
                 None
             }
-        } else {
-            inittab.push(entry);
-            None
-        }
-    }).unwrap_or_else(|| {
-        // ask for runlevel because there was no default
-        let mut input = Vec::new();
-        loop {
-            match stdin.read_until(b'\n', &mut input) {
-                Ok(_) => {
-                    if (input.len() == 1 && input[0] != b'\n') || (input.len() == 2 && input[1] == b'\n') {
-                        return input[0];
-                    } else {
-                        let _ = display_err!(stderr, "need exactly one runlevel");
+        })
+        .unwrap_or_else(|| {
+            // ask for runlevel because there was no default
+            let mut input = Vec::new();
+            loop {
+                match stdin.read_until(b'\n', &mut input) {
+                    Ok(_) => {
+                        if (input.len() == 1 && input[0] != b'\n')
+                            || (input.len() == 2 && input[1] == b'\n')
+                        {
+                            return input[0];
+                        } else {
+                            let _ = display_err!(stderr, "need exactly one runlevel");
+                        }
+                    }
+                    Err(f) => {
+                        let _ = display_err!(stderr, "{}", f);
                     }
                 }
-                Err(f) => {
-                    let _ = display_err!(stderr, "{}", f);
-                }
+                input.clear();
             }
-            input.clear();
-        }
-    })
+        })
 }
 
 #[cfg(test)]
@@ -540,23 +585,61 @@ mod tests {
             (&b"l5"[..], &b"5"[..], WAIT, &b"/etc/init.d/rc 5"[..]),
             (&b"l6"[..], &b"6"[..], WAIT, &b"/etc/init.d/rc 6"[..]),
             (&b"~"[..], &b"S"[..], WAIT, &b"/sbin/sulogin"[..]),
-            (&b"1"[..], &b"23"[..], RESPAWN, &b"/sbin/getty tty1 VC linux"[..]),
-            (&b"2"[..], &b"23"[..], RESPAWN, &b"/sbin/getty tty2 VC linux"[..]),
-            (&b"3"[..], &b"23"[..], RESPAWN, &b"/sbin/getty tty3 VC linux"[..]),
-            (&b"4"[..], &b"23"[..], RESPAWN, &b"/sbin/getty tty4 VC linux"[..]),
-            (&b"S0"[..], &b"3"[..], RESPAWN, &b"/sbin/getty -L 9600 ttyS0 vt320"[..]),
-            (&b"S1"[..], &b"3"[..], RESPAWN, &b"/sbin/mgetty -x0 -D ttyS1"[..]),
-            (&b"ca"[..], &[], CTRLALTDEL, &b"/sbin/shutdown -t1 -h now"[..]),
+            (
+                &b"1"[..],
+                &b"23"[..],
+                RESPAWN,
+                &b"/sbin/getty tty1 VC linux"[..],
+            ),
+            (
+                &b"2"[..],
+                &b"23"[..],
+                RESPAWN,
+                &b"/sbin/getty tty2 VC linux"[..],
+            ),
+            (
+                &b"3"[..],
+                &b"23"[..],
+                RESPAWN,
+                &b"/sbin/getty tty3 VC linux"[..],
+            ),
+            (
+                &b"4"[..],
+                &b"23"[..],
+                RESPAWN,
+                &b"/sbin/getty tty4 VC linux"[..],
+            ),
+            (
+                &b"S0"[..],
+                &b"3"[..],
+                RESPAWN,
+                &b"/sbin/getty -L 9600 ttyS0 vt320"[..],
+            ),
+            (
+                &b"S1"[..],
+                &b"3"[..],
+                RESPAWN,
+                &b"/sbin/mgetty -x0 -D ttyS1"[..],
+            ),
+            (
+                &b"ca"[..],
+                &[],
+                CTRLALTDEL,
+                &b"/sbin/shutdown -t1 -h now"[..],
+            ),
         ];
 
         let result = parse_inittab(&mut &data[..]);
         compare_inittab(correct, result);
     }
 
-    fn compare_inittab(correct: &[(&[u8], &[u8], InittabAction, &[u8])], result: Result<BinaryHeap<InittabEntry>>) {
+    fn compare_inittab(
+        correct: &[(&[u8], &[u8], InittabAction, &[u8])],
+        result: Result<BinaryHeap<InittabEntry>>,
+    ) {
         assert!(result.is_ok());
         let mut result = result.unwrap();
-        
+
         for entry in correct {
             let found = result.pop().unwrap();
             assert_eq!(entry.0, &found.id[..]);

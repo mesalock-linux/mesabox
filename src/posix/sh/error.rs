@@ -8,7 +8,7 @@ use std::num::ParseIntError;
 use std::os::unix::io::RawFd;
 use std::result::Result as StdResult;
 
-use ::error::LockError;
+use error::LockError;
 
 pub type Result<T> = StdResult<T, ShellError>;
 pub type CmdResult<T> = StdResult<T, CommandError>;
@@ -18,7 +18,8 @@ pub enum ShellError {
     /// Indicate that a command failed to start
     #[fail(display = "{}: {}", cmdname, err)]
     Command {
-        #[cause] err: CommandError,
+        #[cause]
+        err: CommandError,
         cmdname: String,
     },
 
@@ -39,7 +40,8 @@ pub enum CommandError {
 
     #[fail(display = "could not duplicate fd {}: {}", fd, err)]
     DupFd {
-        #[cause] err: io::Error,
+        #[cause]
+        err: io::Error,
         fd: RawFd,
     },
 
@@ -54,7 +56,8 @@ pub enum CommandError {
 
     #[fail(display = "could not set up fd {} as file {}: {}", fd, filename, err)]
     FdAsFile {
-        #[cause] err: io::Error,
+        #[cause]
+        err: io::Error,
         fd: RawFd,
         filename: String,
     },
@@ -65,7 +68,6 @@ pub enum CommandError {
     // this should only occur when spawning a non-simple, non-subshell command
     #[fail(display = "{}", _0)]
     Shell(#[cause] Box<Compat<ShellError>>),
-
     // XXX: depending on any features we decide to add, this may expand to include functions
 }
 
@@ -89,7 +91,8 @@ pub enum BuiltinError {
 
     #[fail(display = "illegal number {:?}: {}", string, err)]
     ParseInt {
-        #[cause] err: ParseIntError,
+        #[cause]
+        err: ParseIntError,
         string: OsString,
     },
 
@@ -102,7 +105,8 @@ pub enum BuiltinError {
     #[fail(display = "could not set working directory {:?}: {}", dir, err)]
     SetCurrentDir {
         dir: OsString,
-        #[cause] err: io::Error,
+        #[cause]
+        err: io::Error,
     },
 
     #[fail(display = "{}", _0)]

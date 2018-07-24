@@ -1,35 +1,35 @@
 // Copyright (c) 2018, The MesaLock Linux Project Contributors
 // All rights reserved.
-// 
+//
 // This work is licensed under the terms of the BSD 3-Clause License.
 // For a copy, see the LICENSE file.
 
-use {ArgsIter, UtilSetup, UtilWrite, Result};
+use {ArgsIter, Result, UtilSetup, UtilWrite};
 
-use clap::Arg;
 use chrono::Local;
+use clap::Arg;
 use crossbeam;
 use failure;
-use std::ffi::{OsStr, OsString};
-use std::io::{self, Write};
 use libc::{self, AF_INET};
 use nix;
 use nix::errno::Errno;
-use nix::unistd;
-use nix::sys::signal::{self, Signal, SigSet};
+use nix::sys::signal::{self, SigSet, Signal};
 use nix::sys::socket;
 use nix::sys::uio::IoVec;
+use nix::unistd;
+use std::f64;
+use std::ffi::{OsStr, OsString};
+use std::io::{self, Write};
+use std::mem;
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::os::unix::io::RawFd;
-use std::str::FromStr;
-use std::f64;
-use std::u64;
 use std::result::Result as StdResult;
+use std::slice;
+use std::str::FromStr;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
-use std::mem;
-use std::slice;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::u64;
 
 pub(crate) const NAME: &str = "ping";
 pub(crate) const DESCRIPTION: &str = "Send ICMP ECHO_REQUEST packets to hosts on the network";
@@ -79,7 +79,7 @@ impl IcmpPacket {
                 checksum += 1;
             }
         }*/
-        
+
         //let checksum = ((kind as u16) << 8)
         let time = Local::now();
         let mut result = Self {
@@ -133,7 +133,12 @@ impl IcmpPacket {
     }
 
     pub fn as_bytes(&self) -> &[u8] {
-        unsafe { slice::from_raw_parts(self as *const Self as *const u8, mem::size_of::<IcmpPacket>()) }
+        unsafe {
+            slice::from_raw_parts(
+                self as *const Self as *const u8,
+                mem::size_of::<IcmpPacket>(),
+            )
+        }
     }
 }
 
@@ -167,19 +172,19 @@ impl IcmpSocket {
 
     // XXX: OsString?
     pub fn resolve_hostname(hostname: &str) -> io::Result<SocketAddr> {
-        let mut addrs = (hostname, /*8080*/0).to_socket_addrs()?;
+        let mut addrs = (hostname, /*8080*/ 0).to_socket_addrs()?;
 
         // XXX: which address?
         while let Some(addr) = addrs.next() {
             //if addr.is_ipv4() {
-                return Ok(addr);
+            return Ok(addr);
             //}
         }
         // FIXME: this stuff is wrong but need to test
         Err(io::Error::last_os_error())
         //Ok(addrs.next().unwrap())
 
-//        Ok("".to_string())
+        //        Ok("".to_string())
     }
 
     pub fn send(&self, addr: &socket::SockAddr, packet: &IcmpPacket) -> Result<usize> {
@@ -197,7 +202,13 @@ impl IcmpSocket {
         }
         let iov = IoVec::from_slice(&bytes);
         let iov_slice = &[iov];
-        let res = socket::sendmsg(self.fd, iov_slice, &[], socket::MsgFlags::empty(), Some(&addr))?;
+        let res = socket::sendmsg(
+            self.fd,
+            iov_slice,
+            &[],
+            socket::MsgFlags::empty(),
+            Some(&addr),
+        )?;
         // FIXME: not complete
         if res < size {
             println!("partial write");
@@ -229,35 +240,45 @@ where
 {
     let matches = {
         let app = util_app!(NAME)
-                    .arg(Arg::with_name("count")
-                                .short("c")
-                                .takes_value(true)
-                                .value_name("COUNT")
-                                .validator_os(is_number)
-                                .help("stop after sending and receiving COUNT ECHO_RESPONSE \
-                                        packets"))
-                     .arg(Arg::with_name("waittime")
-                                .short("W")
-                                .takes_value(true)
-                                .value_name("WAIT_TIME")
-                                .validator_os(is_number)
-                                .help("wait WAIT_TIME milliseconds for a reply after a packet is \
-                                         sent.  If a reply arrives later, it will not be printed \
-                                         but will be counted as received"))
-                     .arg(Arg::with_name("packet_wait")
-                                .short("i")
-                                .takes_value(true)
-                                .value_name("WAIT_TIME")
-                                .validator_os(is_valid_wait_time)
-                                .help("wait WAIT_TIME seconds between sending each packet (the \
-                                        default is 1 second)"))
-                     .arg(Arg::with_name("HOST")
-                                .index(1)
-                                .required(true));
-    
+            .arg(
+                Arg::with_name("count")
+                    .short("c")
+                    .takes_value(true)
+                    .value_name("COUNT")
+                    .validator_os(is_number)
+                    .help(
+                        "stop after sending and receiving COUNT ECHO_RESPONSE \
+                         packets",
+                    ),
+            )
+            .arg(
+                Arg::with_name("waittime")
+                    .short("W")
+                    .takes_value(true)
+                    .value_name("WAIT_TIME")
+                    .validator_os(is_number)
+                    .help(
+                        "wait WAIT_TIME milliseconds for a reply after a packet is \
+                         sent.  If a reply arrives later, it will not be printed \
+                         but will be counted as received",
+                    ),
+            )
+            .arg(
+                Arg::with_name("packet_wait")
+                    .short("i")
+                    .takes_value(true)
+                    .value_name("WAIT_TIME")
+                    .validator_os(is_valid_wait_time)
+                    .help(
+                        "wait WAIT_TIME seconds between sending each packet (the \
+                         default is 1 second)",
+                    ),
+            )
+            .arg(Arg::with_name("HOST").index(1).required(true));
+
         app.get_matches_from_safe(args)?
     };
-    
+
     let count = if matches.is_present("count") {
         // this is fine because of the validator
         Some(u64::from_str(matches.value_of("count").unwrap()).unwrap())
@@ -265,18 +286,23 @@ where
         None
     };
 
-    let wait_time = matches.value_of("waittime")
-                           .and_then(|v| libc::c_int::from_str(v).ok())
-                           .unwrap_or(1000);
-    
-    let between_packet_wait = matches.value_of("packet_wait")
-                                     .and_then(|v| f64::from_str(v).ok())
-                                     .unwrap_or(1.0);
+    let wait_time = matches
+        .value_of("waittime")
+        .and_then(|v| libc::c_int::from_str(v).ok())
+        .unwrap_or(1000);
+
+    let between_packet_wait = matches
+        .value_of("packet_wait")
+        .and_then(|v| f64::from_str(v).ok())
+        .unwrap_or(1.0);
 
     let hostname_os = matches.value_of_os("HOST").unwrap();
     let hostname = match hostname_os.to_str() {
         Some(s) => s,
-        None => Err(failure::err_msg(format!("invalid hostname: {}", hostname_os.to_string_lossy())).compat())?,
+        None => Err(failure::err_msg(format!(
+            "invalid hostname: {}",
+            hostname_os.to_string_lossy()
+        )).compat())?,
     };
     let resolved_ip = IcmpSocket::resolve_hostname(hostname)?;
 
@@ -285,14 +311,24 @@ where
         recv_wait: wait_time,
         between_wait: between_packet_wait,
         sock_addr: resolved_ip,
-        expected_size: 20 + mem::size_of::<IcmpPacket>(),  // "20" is the size of the IP header
+        expected_size: 20 + mem::size_of::<IcmpPacket>(), // "20" is the size of the IP header
     };
 
     let sock = IcmpSocket::new()?;
 
-    let mut stats = Stats { sent: 0, received: 0, roundtrips: vec![] };
+    let mut stats = Stats {
+        sent: 0,
+        received: 0,
+        roundtrips: vec![],
+    };
 
-    writeln!(setup.output(), "PING {} ({}): {} data bytes", hostname, resolved_ip.ip(), options.expected_size)?;
+    writeln!(
+        setup.output(),
+        "PING {} ({}): {} data bytes",
+        hostname,
+        resolved_ip.ip(),
+        options.expected_size
+    )?;
 
     let should_stop = AtomicBool::new(false);
     {
@@ -317,7 +353,7 @@ where
             set.wait()?;
 
             should_stop.store(true, Ordering::Release);
-        
+
             child.join()
         })?;
     }
@@ -325,16 +361,26 @@ where
     print_stats(setup, &hostname, &stats)
 }
 
-fn ping_socket<O>(sock: IcmpSocket, stats: &mut Stats, stdout: &mut O, should_stop: &AtomicBool, mut options: Options) -> Result<()>
+fn ping_socket<O>(
+    sock: IcmpSocket,
+    stats: &mut Stats,
+    stdout: &mut O,
+    should_stop: &AtomicBool,
+    mut options: Options,
+) -> Result<()>
 where
     O: for<'a> UtilWrite<'a>,
 {
     let pid: libc::pid_t = unistd::getpid().into();
     // there are probably better ways to do this, but the ident needs to be unique per call
-    let ident = (pid as u16).overflowing_add(Local::now().timestamp_millis() as u16).0;
+    let ident = (pid as u16)
+        .overflowing_add(Local::now().timestamp_millis() as u16)
+        .0;
     let mut seq_num = 0;
 
-    let millis = Duration::from_millis(((options.between_wait - (options.between_wait as u64 as f64)) * 1000.0) as u64);
+    let millis = Duration::from_millis(
+        ((options.between_wait - (options.between_wait as u64 as f64)) * 1000.0) as u64,
+    );
     let duration = Duration::from_secs(options.between_wait as u64) + millis;
 
     let icmp_kind = if options.sock_addr.is_ipv4() {
@@ -355,7 +401,13 @@ where
         // TODO: wait some time (1 second? or whatever wait time is specified)
         //thread::sleep(Duration::from_secs(1));
         // XXX: need to use specified time rather than 1
-        nix::poll::poll(&mut [nix::poll::PollFd::new(sock.fd, nix::poll::EventFlags::POLLIN)], options.recv_wait)?;
+        nix::poll::poll(
+            &mut [nix::poll::PollFd::new(
+                sock.fd,
+                nix::poll::EventFlags::POLLIN,
+            )],
+            options.recv_wait,
+        )?;
 
         // try to receive the ICMP reply
         let mut data = [0; 56];
@@ -369,12 +421,20 @@ where
                     // FIXME: not right so
                     if msg.bytes == options.expected_size {
                         // FIXME: need to check length and stuff
-                        let packet = unsafe { &*(iov_slice[0].as_slice()[20..].as_ptr() as *const IcmpPacket) };
+                        let packet = unsafe {
+                            &*(iov_slice[0].as_slice()[20..].as_ptr() as *const IcmpPacket)
+                        };
                         if packet.validate_checksum() {
                             let current_time = Local::now();
                             // TODO: if this returns None the packet has been tampered with and should probably be considered invalid
-                            let large_num = current_time.timestamp().checked_sub(packet.timestamp).unwrap();
-                            let small_num = current_time.timestamp_subsec_nanos().checked_sub(packet.nanos).unwrap();
+                            let large_num = current_time
+                                .timestamp()
+                                .checked_sub(packet.timestamp)
+                                .unwrap();
+                            let small_num = current_time
+                                .timestamp_subsec_nanos()
+                                .checked_sub(packet.nanos)
+                                .unwrap();
                             let time = (large_num * 1000) as f64 + small_num as f64 / 1_000_000.0;
                             // FIXME: "?" could probably just be the sent to address
                             // FIXME: ttl
@@ -384,7 +444,11 @@ where
                                 "?".to_owned()
                             };
                             let seq_num = packet.seq_num;
-                            writeln!(stdout, "{} bytes from {}: icmp_seq={} ttl={} time={:.3} ms", msg.bytes, ip, seq_num, 0, time)?;
+                            writeln!(
+                                stdout,
+                                "{} bytes from {}: icmp_seq={} ttl={} time={:.3} ms",
+                                msg.bytes, ip, seq_num, 0, time
+                            )?;
                             stats.roundtrips.push(time);
                             stats.received += 1;
                             break;
@@ -397,9 +461,7 @@ where
                     }
                 }
                 Err(nix::Error::Sys(Errno::EAGAIN)) => break,
-                Err(f) => {
-                    Err(f)?
-                }
+                Err(f) => Err(f)?,
             }
         }
 
@@ -420,10 +482,16 @@ where
 }
 
 fn is_number(val: &OsStr) -> StdResult<(), OsString> {
-    if val.to_str().and_then(|s| libc::c_int::from_str(s).ok()).is_some() {
+    if val.to_str()
+        .and_then(|s| libc::c_int::from_str(s).ok())
+        .is_some()
+    {
         Ok(())
     } else {
-        Err(OsString::from(format!("'{}' is not a number", val.to_string_lossy())))
+        Err(OsString::from(format!(
+            "'{}' is not a number",
+            val.to_string_lossy()
+        )))
     }
 }
 
@@ -431,12 +499,17 @@ fn is_valid_wait_time(val: &OsStr) -> StdResult<(), OsString> {
     if let Some(num) = val.to_str().and_then(|s| f64::from_str(s).ok()) {
         let (uid, euid) = (unistd::getuid(), unistd::geteuid());
         if uid == euid && num < 0.1 {
-            Err(OsString::from("only the super-user can use wait values < 0.1 s"))
+            Err(OsString::from(
+                "only the super-user can use wait values < 0.1 s",
+            ))
         } else {
             Ok(())
         }
     } else {
-        Err(OsString::from(format!("'{}' is not a number", val.to_string_lossy())))
+        Err(OsString::from(format!(
+            "'{}' is not a number",
+            val.to_string_lossy()
+        )))
     }
 }
 
@@ -454,7 +527,13 @@ where
     let mut stdout = stdout.lock()?;
 
     writeln!(stdout, "\n--- {} ping statistics ---", hostname)?;
-    writeln!(stdout, "{} packets transmitted, {} packets received, {}% packet loss", stats.sent, stats.received, stats.packet_loss())?;
+    writeln!(
+        stdout,
+        "{} packets transmitted, {} packets received, {}% packet loss",
+        stats.sent,
+        stats.received,
+        stats.packet_loss()
+    )?;
 
     if stats.received > 0 {
         let mut min = f64::MAX;
@@ -470,7 +549,11 @@ where
             variance += ((time - avg) * (time - avg)) / stats.roundtrips.len() as f64;
         }
         let stddev = variance.sqrt();
-        writeln!(stdout, "round-trip min/avg/max/stddev = {:.3}/{:.3}/{:.3}/{:.3} ms", min, avg, max, stddev)?;
+        writeln!(
+            stdout,
+            "round-trip min/avg/max/stddev = {:.3}/{:.3}/{:.3}/{:.3} ms",
+            min, avg, max, stddev
+        )?;
     }
 
     // restore the old signal mask for this thread

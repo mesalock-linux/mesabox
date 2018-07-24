@@ -1,8 +1,8 @@
 use kernel32;
 use winapi::shared::{minwindef, ntdef};
+use winapi::um::minwinbase::SECURITY_ATTRIBUTES;
 use winapi::um::winnt::DUPLICATE_SAME_ACCESS;
 use winapi::um::{consoleapi, fileapi, handleapi, namedpipeapi};
-use winapi::um::minwinbase::SECURITY_ATTRIBUTES;
 
 use std::ffi::OsStr;
 use std::fs::File;
@@ -216,14 +216,7 @@ impl Pipe {
             lpSecurityDescriptor: ptr::null_mut(),
             bInheritHandle: minwindef::TRUE,
         };
-        let res = unsafe {
-            namedpipeapi::CreatePipe(
-                &mut read,
-                &mut write,
-                &mut attributes,
-                0
-            )
-        };
+        let res = unsafe { namedpipeapi::CreatePipe(&mut read, &mut write, &mut attributes, 0) };
         if res == 0 {
             Err(io::Error::last_os_error())
         } else {
@@ -245,7 +238,11 @@ impl Pipe {
     }
 
     pub fn raw_object_wrapper(&self) -> RawObjectWrapper {
-        RawObjectWrapper::new(RawObject::Handle(self.handle), self.readable(), self.writable())
+        RawObjectWrapper::new(
+            RawObject::Handle(self.handle),
+            self.readable(),
+            self.writable(),
+        )
     }
 
     // FIXME: not sure if we really want to dup here
@@ -307,15 +304,13 @@ impl Drop for Pipe {
 /// Determine whether the given file descriptor is a TTY.
 pub fn is_tty(stream: Option<RawObject>) -> bool {
     stream
-        .map(|obj| {
-            match obj {
-                RawObject::Handle(handle) => {
-                    let mut out = 0;
-                    let res = unsafe { consoleapi::GetConsoleMode(handle, &mut out) };
-                    res != 0
-                }
-                _ => false,
+        .map(|obj| match obj {
+            RawObject::Handle(handle) => {
+                let mut out = 0;
+                let res = unsafe { consoleapi::GetConsoleMode(handle, &mut out) };
+                res != 0
             }
+            _ => false,
         })
         .unwrap_or(false)
 }

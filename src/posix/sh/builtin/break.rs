@@ -1,4 +1,6 @@
-use super::{BuiltinSetup, UtilSetup, Environment, ExecData, CheckBreak, ExitCode, Result, arg_to_usize};
+use super::{
+    arg_to_usize, BuiltinSetup, CheckBreak, Environment, ExecData, ExitCode, Result, UtilSetup,
+};
 
 #[derive(Clone, Copy)]
 pub struct BreakBuiltin;

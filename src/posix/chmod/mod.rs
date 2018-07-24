@@ -1,7 +1,7 @@
 //
 // Copyright (c) 2018, The MesaLock Linux Project Contributors
 // All rights reserved.
-// 
+//
 // This work is licensed under the terms of the BSD 3-Clause License.
 // For a copy, see the LICENSE file.
 //
@@ -31,19 +31,19 @@
 //     SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 //
 
-use {MesaError, UtilSetup, Result, ArgsIter, UtilWrite};
 use util;
+use {ArgsIter, MesaError, Result, UtilSetup, UtilWrite};
 
-use clap::{Arg, ArgGroup, AppSettings, OsValues};
+use clap::{AppSettings, Arg, ArgGroup, OsValues};
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io::{self, Write};
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::result::Result as StdResult;
-use walkdir::WalkDir;
-use uucore::mode;
 use uucore::fs::display_permissions_unix;
+use uucore::mode;
+use walkdir::WalkDir;
 
 const NAME: &str = "chmod";
 pub(crate) const DESCRIPTION: &str = "Change the file permissions of given files";
@@ -173,7 +173,9 @@ where
 
     let recursive = matches.is_present("recursive");
     let fmode = match matches.value_of_os("reference") {
-        Some(ref_file) => Some(fs::metadata(ref_file).map(|data| data.mode()).map_err(|e| ChmodError::Stat(ref_file.to_string_lossy().into(), e))?),
+        Some(ref_file) => Some(fs::metadata(ref_file)
+            .map(|data| data.mode())
+            .map_err(|e| ChmodError::Stat(ref_file.to_string_lossy().into(), e))?),
         None => None,
     };
 
@@ -213,8 +215,10 @@ fn validate_mode(arg: &OsStr) -> StdResult<(), OsString> {
         .ok_or_else(|| "mode was not a string (must be encoded using UTF-8)".into())
         .and_then(|s| {
             for mode in s.split(',') {
-                if mode::parse_numeric(0, mode).is_err() && mode::parse_symbolic(0, mode, false).is_err() {
-                    return Err("found invalid character in mode string".into())
+                if mode::parse_numeric(0, mode).is_err()
+                    && mode::parse_symbolic(0, mode, false).is_err()
+                {
+                    return Err("found invalid character in mode string".into());
                 }
             }
             Ok(())
@@ -254,7 +258,12 @@ where
         Ok(r)
     }
 
-    fn chmod_dir(&mut self, options: &Options, msgs: &mut [Option<Message>; 2], file: &Path) -> Result<i32> {
+    fn chmod_dir(
+        &mut self,
+        options: &Options,
+        msgs: &mut [Option<Message>; 2],
+        file: &Path,
+    ) -> Result<i32> {
         let mut r = 0;
 
         if !options.preserve_root || file != Path::new("/") {
@@ -269,7 +278,11 @@ where
                 }
             }
         } else {
-            display_msg!(self.stderr, "could not change permissions of directory '{}'", file.display())?;
+            display_msg!(
+                self.stderr,
+                "could not change permissions of directory '{}'",
+                file.display()
+            )?;
             r = 1;
         }
 
@@ -296,7 +309,11 @@ fn chmod_file(options: &Options, msgs: &mut [Option<Message>; 2], file: &Path) -
         Ok(meta) => meta.mode() & 0o7777,
         Err(err) => {
             if options.verbosity != Verbosity::Quiet {
-                msgs[0] = Some(Message::stderr(format!("could not stat '{}': {}", file.display(), err)));
+                msgs[0] = Some(Message::stderr(format!(
+                    "could not stat '{}': {}",
+                    file.display(),
+                    err
+                )));
             }
             return 1;
         }
@@ -332,30 +349,58 @@ fn chmod_file(options: &Options, msgs: &mut [Option<Message>; 2], file: &Path) -
 }
 
 #[cfg(unix)]
-fn change_file(options: &Options, msgs: &mut [Option<Message>; 2], fperm: u32, mode: u32, file: &Path) -> i32 {
+fn change_file(
+    options: &Options,
+    msgs: &mut [Option<Message>; 2],
+    fperm: u32,
+    mode: u32,
+    file: &Path,
+) -> i32 {
     if fperm == mode {
         if options.verbosity == Verbosity::Verbose {
-            msgs[0] = Some(Message::stdout(format!("mode of '{}' retained as {:o} ({})", file.display(), fperm, display_permissions_unix(fperm))));
+            msgs[0] = Some(Message::stdout(format!(
+                "mode of '{}' retained as {:o} ({})",
+                file.display(),
+                fperm,
+                display_permissions_unix(fperm)
+            )));
         }
         return 0;
     }
 
     let mut exitcode = 0;
-    
+
     let res = fs::set_permissions(file, fs::Permissions::from_mode(mode));
     if let Err(err) = res {
         let mut count = 0;
         if options.verbosity != Verbosity::Quiet {
-            msgs[0] = Some(Message::stderr(format!("could not set permissions: {}", err)));
+            msgs[0] = Some(Message::stderr(format!(
+                "could not set permissions: {}",
+                err
+            )));
             count += 1;
         }
         if options.verbosity == Verbosity::Verbose {
-            msgs[count] = Some(Message::stdout(format!("failed to change mode of file '{}' from {:o} ({}) to {:o} ({})", file.display(), fperm, display_permissions_unix(fperm), mode, display_permissions_unix(mode))));
+            msgs[count] = Some(Message::stdout(format!(
+                "failed to change mode of file '{}' from {:o} ({}) to {:o} ({})",
+                file.display(),
+                fperm,
+                display_permissions_unix(fperm),
+                mode,
+                display_permissions_unix(mode)
+            )));
         }
         exitcode = 1;
     } else {
         if options.verbosity == Verbosity::Verbose || options.verbosity == Verbosity::Changes {
-            msgs[0] = Some(Message::stdout(format!("mode of '{}' changed from {:o} ({}) to {:o} ({})", file.display(), fperm, display_permissions_unix(fperm), mode, display_permissions_unix(mode))));
+            msgs[0] = Some(Message::stdout(format!(
+                "mode of '{}' changed from {:o} ({}) to {:o} ({})",
+                file.display(),
+                fperm,
+                display_permissions_unix(fperm),
+                mode,
+                display_permissions_unix(mode)
+            )));
         }
     }
 
