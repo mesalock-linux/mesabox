@@ -210,7 +210,7 @@ impl From<Pipe> for Stdio {
 }
 
 /// Determine whether the given file descriptor is a TTY.
-pub(crate) fn is_tty(stream: Option<RawObject>) -> bool {
+pub fn is_tty(stream: Option<RawObject>) -> bool {
     stream
         .map(|fd| unsafe { libc::isatty(fd.raw_value()) == 1 })
         .unwrap_or(false)

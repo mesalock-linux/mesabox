@@ -6,10 +6,11 @@
 // For a copy, see the LICENSE file.
 //
 
-use {ArgsIter, Result, UtilSetup, UtilWrite};
+use {ArgsIter, MesaError, Result, UtilSetup, UtilWrite};
 
 use std::ffi::OsStr;
 use std::io::Write;
+use std::iter;
 use std::str;
 
 use util::OsStrExt;
@@ -57,52 +58,93 @@ where
 fn write_str<W: Write>(output: &mut W, s: &OsStr) -> Result<bool> {
     let mut found_c = false;
 
-    let mut iter = s.try_as_bytes()?.iter();
-    while let Some(&byte) = iter.next() {
-        let out_byte = match byte {
-            b'\\' => match iter.next() {
-                Some(b'a') => b'\x07',
-                Some(b'b') => b'\x08',
-                Some(b'c') => {
-                    found_c = true;
-                    break;
-                }
-                Some(b'f') => b'\x0c',
-                Some(b'n') => b'\n',
-                Some(b'r') => b'\r',
-                Some(b't') => b'\t',
-                Some(b'v') => b'\x0b',
-                Some(b'\\') => b'\\',
-                Some(b'0') => {
-                    let mut buffer = [0; 3];
-                    let mut found = 0;
-                    for num_byte in &mut buffer {
-                        match iter.clone().next() {
-                            Some(&byte @ b'0'...b'7') => *num_byte = byte,
-                            _ => break
-                        };
-                        found += 1;
-                        iter.next();
-                    }
-                    if found > 0 {
-                        // this is guaranteed to be valid, but it's unlikely the slight performance
-                        // boost gained by using unsafe will make a difference
-                        let num = u8::from_str_radix(str::from_utf8(&buffer[..found])?, 8)?;
-                        num
-                    } else {
-                        b'\0'
-                    }
-                }
-                Some(&other) => {
-                    output.write_all(&[b'\\', other])?;
-                    continue;
-                }
-                None => b'\\',
+    for res in map_bytes(s.try_as_bytes()?) {
+        match res {
+            ByteResult::Stop => {
+                // found \c
+                found_c = true;
+                break;
             }
-            _ => byte,
-        };
-        output.write_all(&[out_byte])?;
+            ByteResult::Slice(slice) => output.write_all(slice)?,
+            ByteResult::Escape(byte, slice) => {
+                output.write_all(&[byte])?;
+                output.write_all(slice)?
+            }
+            ByteResult::Num(num, slice) => {
+                output.write_all(&[num?])?;
+                output.write_all(slice)?
+            }
+            ByteResult::Backslash => output.write_all(&[b'\\'])?,
+            ByteResult::None => {}
+        }
     }
 
     Ok(found_c)
+}
+
+enum ByteResult<'a> {
+    None,
+    Escape(u8, &'a [u8]),
+    Num(Result<u8>, &'a [u8]),
+    Slice(&'a [u8]),
+    Backslash,
+    Stop,
+}
+
+fn map_bytes(s: &[u8]) -> impl Iterator<Item = ByteResult> {
+    let mut it = s.split(|&byte| byte == b'\\');
+    let first = it.next().unwrap();
+
+    let scanner = it.scan(false, |found_backslash, data| {
+        let res = if data.len() == 0 {
+            let res = if !*found_backslash {
+                ByteResult::Backslash
+            } else {
+                // XXX: might want to return None, but then we'd have to check None result twice in
+                //      write_str()
+                ByteResult::None
+            };
+            *found_backslash = !*found_backslash;
+            res
+        } else {
+            // the leading character is not a backslash
+            match data[0] {
+                b'a' => ByteResult::Escape(b'\x07', &data[1..]),
+                b'b' => ByteResult::Escape(b'\x08', &data[1..]),
+                b'c' => ByteResult::Stop,
+                b'f' => ByteResult::Escape(b'\x0c', &data[1..]),
+                b'n' => ByteResult::Escape(b'\n', &data[1..]),
+                b'r' => ByteResult::Escape(b'\r', &data[1..]),
+                b't' => ByteResult::Escape(b'\t', &data[1..]),
+                b'v' => ByteResult::Escape(b'\x0b', &data[1..]),
+                b'\\' => ByteResult::Escape(b'\\', &data[1..]),
+                b'0' => {
+                    let mut buffer = [0; 3];
+                    let mut found = 0;
+                    for (num_byte, &byte) in buffer.iter_mut().zip(data.iter().skip(1).take(3)) {
+                        match byte {
+                            b'0'...b'7' => *num_byte = byte,
+                            _ => break,
+                        }
+                        found += 1;
+                    }
+                    let num = if found > 0 {
+                        // this is guaranteed to be valid, but it's unlikely the slight performance
+                        // boost gained by using unsafe will make a difference
+                        str::from_utf8(&buffer[..found]).map_err(|e| {
+                            let err: MesaError = e.into();
+                            err
+                        }).and_then(|s| u8::from_str_radix(s, 8).map_err(|e| e.into()))
+                    } else {
+                        Ok(b'\0')
+                    };
+                    ByteResult::Num(num, &data[found + 1..])
+                }
+                _ => ByteResult::Escape(b'\\', data),
+            }
+        };
+        Some(res)
+    });
+
+    iter::once(ByteResult::Slice(first)).chain(scanner)
 }

@@ -35,7 +35,7 @@
 //     SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 //
 
-use clap::Arg;
+use clap::{App, Arg};
 use std::ffi::OsStr;
 use std::fs::{metadata, File};
 use std::iter;
@@ -405,48 +405,7 @@ where
     S: UtilSetup,
     T: ArgsIter,
 {
-    let matches = {
-        let app = util_app!("cat")
-                    .arg(Arg::with_name("show-all")
-                            .short("A")
-                            .long("show-all")
-                            .help("equivalent to -vET"))
-                    .arg(Arg::with_name("number-nonblank")
-                            .short("b")
-                            .long("number-nonblank")
-                            .overrides_with("number")
-                            .help("number nonempty output lines, overrides -n"))
-                    .arg(Arg::with_name("e")
-                            .short("e")
-                            .help("equivalent to -vE"))
-                    .arg(Arg::with_name("show-ends")
-                            .short("E")
-                            .long("show-ends")
-                            .help("display $ at the end of each line"))
-                    .arg(Arg::with_name("number")
-                            .short("n")
-                            .long("number")
-                            .help("number all output lines"))
-                    .arg(Arg::with_name("squeeze-blank")
-                            .short("s")
-                            .long("squeeze-blank")
-                            .help("suppress repeated empty output lines"))
-                    .arg(Arg::with_name("t")
-                            .short("t")
-                            .help("equivalent to -vT"))
-                    .arg(Arg::with_name("show-tabs")
-                            .short("T")
-                            .long("show-tabs")
-                            .help("display TAB characters as ^I"))
-                    .arg(Arg::with_name("show-nonprinting")
-                            .short("v")
-                            .long("show-nonprinting")
-                            .help("use ^ and M- notation, except for LF (\\n) and TAB (\\t)"))
-                    .arg(Arg::with_name("FILES")
-                            .index(1)
-                            .multiple(true));
-        app.get_matches_from_safe(args)?
-    };
+    let matches = create_app().get_matches_from_safe(args)?;
 
     let mut options = OutputOptions::default();
 
@@ -468,6 +427,48 @@ where
     } else {
         run(setup, iter::once(OsStr::new("-")), options)
     }
+}
+
+fn create_app() -> App<'static, 'static> {
+    util_app!("cat")
+            .arg(Arg::with_name("show-all")
+                    .short("A")
+                    .long("show-all")
+                    .help("equivalent to -vET"))
+            .arg(Arg::with_name("number-nonblank")
+                    .short("b")
+                    .long("number-nonblank")
+                    .overrides_with("number")
+                    .help("number nonempty output lines, overrides -n"))
+            .arg(Arg::with_name("e")
+                    .short("e")
+                    .help("equivalent to -vE"))
+            .arg(Arg::with_name("show-ends")
+                    .short("E")
+                    .long("show-ends")
+                    .help("display $ at the end of each line"))
+            .arg(Arg::with_name("number")
+                    .short("n")
+                    .long("number")
+                    .help("number all output lines"))
+            .arg(Arg::with_name("squeeze-blank")
+                    .short("s")
+                    .long("squeeze-blank")
+                    .help("suppress repeated empty output lines"))
+            .arg(Arg::with_name("t")
+                    .short("t")
+                    .help("equivalent to -vT"))
+            .arg(Arg::with_name("show-tabs")
+                    .short("T")
+                    .long("show-tabs")
+                    .help("display TAB characters as ^I"))
+            .arg(Arg::with_name("show-nonprinting")
+                    .short("v")
+                    .long("show-nonprinting")
+                    .help("use ^ and M- notation, except for LF (\\n) and TAB (\\t)"))
+            .arg(Arg::with_name("FILES")
+                    .index(1)
+                    .multiple(true))
 }
 
 fn run<'a, 'b, S, T>(setup: &mut S, files: T, mut options: OutputOptions<'b>) -> Result<()>

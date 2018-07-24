@@ -124,3 +124,9 @@ fn test_no_arg() {
 fn test_escape_none() {
     new_ucmd!().arg(r"\").succeeds().stdout_only("\\\n");
 }
+
+#[test]
+fn test_many_backslash() {
+    // should output 4 backslashes + newline
+    new_ucmd!().arg(r"\\\\\\\").succeeds().stdout_only("\\\\\\\\\n");
+}

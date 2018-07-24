@@ -63,8 +63,9 @@ use std::iter;
 use std::path::{Path, PathBuf};
 use std::result::Result as StdResult;
 
+pub use util::{AsRawObject, RawObject, UtilReadDyn, UtilWriteDyn};
+
 pub use error::*;
-pub(crate) use platform::*;
 pub use setup::*;
 #[allow(unused)]
 pub(crate) use util::*;
@@ -73,7 +74,6 @@ mod error;
 #[macro_use]
 #[allow(unused_macros)]
 mod macros;
-mod platform;
 mod setup;
 #[allow(dead_code)]
 mod util;

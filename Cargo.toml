@@ -76,6 +76,11 @@ windows = [
 # the following are real features (rather than utilities)
 # used to prioritize latency over throughput in utilites that care
 latency = []
+# use dynamic dispatch rather than static dispatch (makes utilities slower, but sometimes smaller
+# as well).  this is preferred to no-dynamic if both are specified
+full-dynamic = []
+# only use static dispatch (this will lead to dramatically larger compile times and binary sizes)
+no-dynamic = []
 
 default = ["unix"]
 

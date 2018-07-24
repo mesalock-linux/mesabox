@@ -305,7 +305,7 @@ impl Drop for Pipe {
 }
 
 /// Determine whether the given file descriptor is a TTY.
-pub(crate) fn is_tty(stream: Option<RawObject>) -> bool {
+pub fn is_tty(stream: Option<RawObject>) -> bool {
     stream
         .map(|obj| {
             match obj {

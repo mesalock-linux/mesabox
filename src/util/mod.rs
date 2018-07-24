@@ -6,7 +6,7 @@
 // For a copy, see the LICENSE file.
 //
 
-pub(crate) use super::{is_tty, AsRawObject, OsStrExt, Pipe, RawObject, RawObjectWrapper};
+pub use self::platform::{is_tty, AsRawObject, OsStrExt, Pipe, RawObject, RawObjectWrapper};
 use super::{LockableRead, LockableWrite, MesaError, Result};
 
 use failure;
@@ -16,6 +16,8 @@ use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::result::Result as StdResult;
 use std::str::FromStr;
+
+mod platform;
 
 // defined out here rather than in parse_num_with_suffix() because we need the array for testing
 const SUFFIXES: [char; 8] = ['K', 'M', 'G', 'T', 'P', 'E', 'Z', 'Y'];

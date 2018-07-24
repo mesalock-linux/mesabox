@@ -4,7 +4,7 @@ use std::iter;
 use std::result::Result as StdResult;
 
 use ::{UtilData, UtilRead, UtilWrite, ArgsIter};
-use util::{ReadableVec, UtilReadDyn, UtilWriteDyn};
+use util::ReadableVec;
 use super::UtilSetup;
 use super::ast::{ExitCode, RuntimeData};
 use super::command::{ExecData, InProcessChild, InProcessCommand, ShellChild};
@@ -162,20 +162,33 @@ impl Builtin {
             }.map_err(|e| CommandError::Builtin(e))
         }
 
-        // FIXME: this needs use dynamic dispatch at the moment to avoid very, very slow build
-        //        times and huge binaries (e.g. 8.5 min and 18 MB for release build with maybe 10
-        //        utils + sh, like 30 sec and 112 MB for debug build with the same).  ideally, we
-        //        would not have to do this (as obviously static dispatch is faster)
-        // TODO: add anything else in data to setup
-        // TODO: add export_vars to setup
-        let input_fd = input.raw_object();
-        let output_fd = output.raw_object();
-        let error_fd = error.raw_object();
+        let (mut input, mut output, mut error) = {
+            #[cfg(any(not(feature = "no-dynamic"), feature = "full-dynamic"))]
+            {
+                use util::{UtilReadDyn, UtilWriteDyn};
 
-        let mut input = UtilReadDyn::new(Box::new(input), input_fd);
-        let mut output = UtilWriteDyn::new(Box::new(output), output_fd);
-        let mut error = UtilWriteDyn::new(Box::new(error), error_fd);
+                // FIXME: this needs to use dynamic dispatch at the moment to avoid very, very slow
+                //        build times and huge binaries (e.g. 8.5 min and 18 MB for release build
+                //        with maybe 10 utils + sh, like 30 sec and 112 MB for debug build with the
+                //        same).  ideally, we would not have to do this (as obviously static
+                //        dispatch is faster)
+                // TODO: add anything else in data to setup
+                // TODO: add export_vars to setup
+                let input_fd = input.raw_object();
+                let output_fd = output.raw_object();
+                let error_fd = error.raw_object();
 
+                let mut input = UtilReadDyn::new(Box::new(input), input_fd);
+                let mut output = UtilWriteDyn::new(Box::new(output), output_fd);
+                let mut error = UtilWriteDyn::new(Box::new(error), error_fd);
+
+                (input, output, error)
+            }
+            #[cfg(all(feature = "no-dynamic", not(feature = "full-dynamic")))]
+            {
+                (input, output, error)
+            }
+        };
         let mut util_setup = UtilData::new(&mut input, &mut output, &mut error, iter::empty(), None);
         let setup = &mut util_setup;
         execute_util(setup, &OsStr::new(utilname), &mut iter::once(OsString::from(utilname)).chain(data.args.into_iter())).map(|_| 0).map_err(|e| {
