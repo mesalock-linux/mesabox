@@ -35,7 +35,6 @@ use {MesaError, UtilSetup, Result, ArgsIter, UtilWrite};
 use util;
 
 use clap::{Arg, ArgGroup, AppSettings, OsValues};
-use regex::Regex;
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io::{self, Write};
@@ -64,6 +63,44 @@ enum Verbosity {
     Changes,
     Quiet,
     Verbose,
+}
+
+enum MessageKind {
+    Stdout,
+    Stderr,
+}
+
+// FIXME: find a better way to store this (preferably avoid allocating)
+// NOTE: the message setup is to avoid duplicating chmod_file() and change_file() for every generic
+//       type
+struct Message {
+    kind: MessageKind,
+    data: String,
+}
+
+impl Message {
+    pub fn stdout(data: String) -> Self {
+        Self {
+            kind: MessageKind::Stdout,
+            data,
+        }
+    }
+
+    pub fn stderr(data: String) -> Self {
+        Self {
+            kind: MessageKind::Stderr,
+            data,
+        }
+    }
+}
+
+struct Options<'a> {
+    verbosity: Verbosity,
+    preserve_root: bool,
+    recursive: bool,
+    fmode: Option<u32>,
+    cmode: Option<&'a str>,
+    current_dir: Option<PathBuf>,
 }
 
 pub fn execute<S, T>(setup: &mut S, args: T) -> Result<()>
@@ -143,17 +180,20 @@ where
     let current_dir = setup.current_dir().map(|p| p.to_owned());
     let (_, stdout, stderr) = setup.stdio();
     let mut chmoder = Chmoder {
+        stdout: stdout.lock()?,
+        stderr: stderr.lock()?,
+    };
+
+    let options = Options {
         verbosity: verbosity,
         preserve_root: preserve_root,
         recursive: recursive,
         fmode: fmode,
         cmode: matches.value_of("MODE"),
-        stdout: stdout.lock()?,
-        stderr: stderr.lock()?,
         current_dir: current_dir,
     };
 
-    let exitcode = chmoder.chmod(matches.values_of_os("FILES").unwrap())?;
+    let exitcode = chmoder.chmod(&options, matches.values_of_os("FILES").unwrap())?;
 
     if exitcode == 0 {
         Ok(())
@@ -167,161 +207,157 @@ where
 }
 
 fn validate_mode(arg: &OsStr) -> StdResult<(), OsString> {
-    let re = Regex::new("[ugoa]*([-+=]([rwxXst]*|[ugo]))+|[-+=][0-7]+|[0-7]+").expect("invalid regex");
-
+    // NOTE: used to use regex to match the mode, but that caused the binary size to increase
+    //       considerably
     arg.to_str()
         .ok_or_else(|| "mode was not a string (must be encoded using UTF-8)".into())
         .and_then(|s| {
-            let mut valid = true;
             for mode in s.split(',') {
-                if mode.len() <= 1 || !re.is_match(mode) {
-                    valid = false;
-                    break;
+                if mode::parse_numeric(0, mode).is_err() && mode::parse_symbolic(0, mode, false).is_err() {
+                    return Err("found invalid character in mode string".into())
                 }
             }
-            if valid && s.len() > 1 {
-                Ok(())
-            } else {
-                Err("found invalid character in mode string".into())
-            }
+            Ok(())
         })
 }
 
-struct Chmoder<'a, O, E>
+struct Chmoder<O, E>
 where
     O: Write,
     E: Write,
 {
-    verbosity: Verbosity,
-    preserve_root: bool,
-    recursive: bool,
-    fmode: Option<u32>,
-    cmode: Option<&'a str>,
     stdout: O,
     stderr: E,
-    current_dir: Option<PathBuf>,
 }
 
-impl<'a, O, E> Chmoder<'a, O, E>
+impl<'a, O, E> Chmoder<O, E>
 where
     O: Write,
     E: Write,
 {
-    fn chmod<'b>(&mut self, files: OsValues<'b>) -> Result<i32> {
+    fn chmod<'b>(&mut self, options: &Options, files: OsValues<'b>) -> Result<i32> {
         let mut r = 0;
 
-        for filename in files {
-            let file = util::actual_path(&self.current_dir, filename);
+        let mut msgs = [None, None];
 
-            r |= if file.is_dir() && self.recursive {
-                self.chmod_dir(&file)
+        for filename in files {
+            let file = util::actual_path(&options.current_dir, filename);
+
+            r |= if file.is_dir() && options.recursive {
+                self.chmod_dir(options, &mut msgs, &file)
             } else {
-                self.chmod_file(&file)
+                let res = chmod_file(options, &mut msgs, &file);
+                self.write_msgs(&mut msgs).map(|_| res)
             }?;
         }
 
         Ok(r)
     }
 
-    fn chmod_dir(&mut self, file: &Path) -> Result<i32> {
+    fn chmod_dir(&mut self, options: &Options, msgs: &mut [Option<Message>; 2], file: &Path) -> Result<i32> {
         let mut r = 0;
 
-        if !self.preserve_root || file != Path::new("/") {
+        if !options.preserve_root || file != Path::new("/") {
             let walker = WalkDir::new(file).contents_first(true);
             for entry in walker {
                 match entry {
-                    Ok(entry) => r |= self.chmod_file(&entry.path())?,
-                    Err(f) => writeln!(self.stderr, "{}", f)?,
+                    Ok(entry) => {
+                        r |= chmod_file(options, msgs, &entry.path());
+                        self.write_msgs(msgs)?;
+                    }
+                    Err(f) => display_msg!(self.stderr, "{}", f)?,
                 }
             }
         } else {
-            display_err!(self.stderr, "could not change permissions of directory '{}'", file.display())?;
+            display_msg!(self.stderr, "could not change permissions of directory '{}'", file.display())?;
             r = 1;
         }
 
         Ok(r)
     }
 
-    #[cfg(any(unix, target_os = "redox"))]
-    fn chmod_file(&mut self, file: &Path) -> Result<i32> {
-        let mut fperm = match fs::metadata(file) {
-            Ok(meta) => meta.mode() & 0o7777,
-            Err(err) => {
-                if self.verbosity != Verbosity::Quiet {
-                    display_err!(self.stderr, "could not stat '{}': {}", file.display(), err)?;
+    fn write_msgs(&mut self, msgs: &mut [Option<Message>; 2]) -> Result<()> {
+        for msg in msgs {
+            if let Some(msg) = msg {
+                match msg.kind {
+                    MessageKind::Stdout => display_msg!(self.stdout, "{}", msg.data)?,
+                    MessageKind::Stderr => display_msg!(self.stderr, "{}", msg.data)?,
                 }
-                return Ok(1);
             }
-        };
-        match self.fmode {
-            Some(mode) => self.change_file(fperm, mode, file),
-            None => {
-                let cmode_unwrapped = self.cmode.clone().unwrap();
-                for mode in cmode_unwrapped.split(',') {
-                    // cmode is guaranteed to be Some in this case
-                    let arr: &[char] = &['0', '1', '2', '3', '4', '5', '6', '7'];
-                    let result = if mode.contains(arr) {
-                        mode::parse_numeric(fperm, mode)
-                    } else {
-                        mode::parse_symbolic(fperm, mode, file.is_dir())
-                    };
-                    match result {
-                        Ok(mode) => {
-                            self.change_file(fperm, mode, file)?;
-                            fperm = mode;
+            *msg = None;
+        }
+        Ok(())
+    }
+}
+
+#[cfg(any(unix, target_os = "redox"))]
+fn chmod_file(options: &Options, msgs: &mut [Option<Message>; 2], file: &Path) -> i32 {
+    let mut fperm = match fs::metadata(file) {
+        Ok(meta) => meta.mode() & 0o7777,
+        Err(err) => {
+            if options.verbosity != Verbosity::Quiet {
+                msgs[0] = Some(Message::stderr(format!("could not stat '{}': {}", file.display(), err)));
+            }
+            return 1;
+        }
+    };
+    match options.fmode {
+        Some(mode) => change_file(options, msgs, fperm, mode, file),
+        None => {
+            let cmode_unwrapped = options.cmode.clone().unwrap();
+            for mode in cmode_unwrapped.split(',') {
+                // cmode is guaranteed to be Some in this case
+                let arr: &[char] = &['0', '1', '2', '3', '4', '5', '6', '7'];
+                let result = if mode.contains(arr) {
+                    mode::parse_numeric(fperm, mode)
+                } else {
+                    mode::parse_symbolic(fperm, mode, file.is_dir())
+                };
+                match result {
+                    Ok(mode) => {
+                        change_file(options, msgs, fperm, mode, file);
+                        fperm = mode;
+                    }
+                    Err(f) => {
+                        if options.verbosity != Verbosity::Quiet {
+                            msgs[0] = Some(Message::stderr(format!("failed to parse mode: {}", f)));
                         }
-                        Err(f) => {
-                            if self.verbosity != Verbosity::Quiet {
-                                display_err!(self.stderr, "failed to parse mode: {}", f)?;
-                            }
-                            return Ok(1);
-                        }
+                        return 1;
                     }
                 }
-                Ok(0)
             }
+            0
+        }
+    }
+}
+
+#[cfg(unix)]
+fn change_file(options: &Options, msgs: &mut [Option<Message>; 2], fperm: u32, mode: u32, file: &Path) -> i32 {
+    if fperm == mode {
+        if options.verbosity == Verbosity::Verbose {
+            msgs[0] = Some(Message::stdout(format!("mode of '{}' retained as {:o} ({})", file.display(), fperm, display_permissions_unix(fperm))));
+        }
+        return 0;
+    }
+
+    let mut exitcode = 0;
+    
+    let res = fs::set_permissions(file, fs::Permissions::from_mode(mode));
+    if let Err(err) = res {
+        let mut count = 0;
+        if options.verbosity != Verbosity::Quiet {
+            msgs[0] = Some(Message::stderr(format!("could not set permissions: {}", err)));
+            count += 1;
+        }
+        if options.verbosity == Verbosity::Verbose {
+            msgs[count] = Some(Message::stdout(format!("failed to change mode of file '{}' from {:o} ({}) to {:o} ({})", file.display(), fperm, display_permissions_unix(fperm), mode, display_permissions_unix(mode))));
+        }
+        exitcode = 1;
+    } else {
+        if options.verbosity == Verbosity::Verbose || options.verbosity == Verbosity::Changes {
+            msgs[0] = Some(Message::stdout(format!("mode of '{}' changed from {:o} ({}) to {:o} ({})", file.display(), fperm, display_permissions_unix(fperm), mode, display_permissions_unix(mode))));
         }
     }
 
-    #[cfg(unix)]
-    fn change_file(&mut self, fperm: u32, mode: u32, file: &Path) -> Result<i32> {
-        if fperm == mode {
-            if self.verbosity == Verbosity::Verbose {
-                display_msg!(self.stdout, "mode of '{}' retained as {:o} ({})", file.display(), fperm, display_permissions_unix(fperm))?;
-            }
-            return Ok(0);
-        }
-        
-        let res = fs::set_permissions(file, fs::Permissions::from_mode(mode));
-        if let Err(err) = res {
-            if self.verbosity != Verbosity::Quiet {
-                display_err!(self.stderr, "could not set permissions: {}", err)?;
-            }
-            if self.verbosity == Verbosity::Verbose {
-                display_msg!(
-                    self.stdout,
-                    "failed to change mode of file '{}' from {:o} ({}) to {:o} ({})",
-                    file.display(),
-                    fperm,
-                    display_permissions_unix(fperm),
-                    mode,
-                    display_permissions_unix(mode)
-                )?;
-            }
-            Ok(1)
-        } else {
-            if self.verbosity == Verbosity::Verbose || self.verbosity == Verbosity::Changes {
-                display_msg!(
-                    self.stdout,
-                    "mode of '{}' changed from {:o} ({}) to {:o} ({})",
-                    file.display(),
-                    fperm,
-                    display_permissions_unix(fperm),
-                    mode,
-                    display_permissions_unix(mode)
-                )?;
-            }
-            Ok(0)
-        }
-    }
+    exitcode
 }
