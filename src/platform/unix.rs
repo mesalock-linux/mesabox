@@ -7,7 +7,7 @@ use std::os::unix::ffi::OsStrExt;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::process::Stdio;
 
-use super::AsRawObject;
+use super::{AsRawObject, PipeKind};
 
 impl super::OsStrExt for OsStr {
     fn try_as_bytes(&self) -> Result<&[u8], super::Utf8Error> {
@@ -109,12 +109,6 @@ impl Write for RawObjectWrapper {
         // XXX: may want to try fsync() or something and ignore failures due to invalid fd type
         Ok(())
     }
-}
-
-#[derive(Copy, Clone, Debug, PartialEq)]
-enum PipeKind {
-    Read,
-    Write,
 }
 
 /// An platform-independent abstraction for pipes that automatically closes the pipe on drop.

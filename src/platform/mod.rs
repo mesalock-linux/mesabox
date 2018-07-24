@@ -22,3 +22,9 @@ pub trait OsStrExt {
 pub trait AsRawObject {
     fn as_raw_object(&self) -> RawObject;
 }
+
+#[derive(Copy, Clone, Debug, PartialEq)]
+enum PipeKind {
+    Read,
+    Write,
+}

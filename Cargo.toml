@@ -84,7 +84,7 @@ clap = "2.31.2"
 failure = "0.1.1"
 failure_derive = "0.1.1"
 kernel32-sys = "0.2.2"
-winapi = "0.3.5"
+winapi = { version = "0.3.5", features = ["namedpipeapi"] }
 libc = "0.2.40"
 nix = "0.10.0"
 
