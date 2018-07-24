@@ -4,10 +4,7 @@ use super::{BuiltinSetup, UtilSetup, Environment, ExecData, CheckBreak, ExitCode
 pub struct BreakBuiltin;
 
 impl BreakBuiltin {
-    pub fn run_common<S>(_setup: &mut S, env: &mut Environment, data: ExecData, kind: CheckBreak) -> Result<ExitCode>
-    where
-        S: UtilSetup,
-    {
+    pub fn run_common(env: &mut Environment, data: ExecData, kind: CheckBreak) -> Result<ExitCode> {
         let mut args = data.args.into_iter();
 
         let count = match args.next() {
@@ -24,10 +21,10 @@ impl BreakBuiltin {
 }
 
 impl BuiltinSetup for BreakBuiltin {
-    fn run<S>(&self, setup: &mut S, env: &mut Environment, data: ExecData) -> Result<ExitCode>
+    fn run<S>(&self, _setup: &mut S, env: &mut Environment, data: ExecData) -> Result<ExitCode>
     where
         S: UtilSetup,
     {
-        Self::run_common(setup, env, data, CheckBreak::Break)
+        Self::run_common(env, data, CheckBreak::Break)
     }
 }

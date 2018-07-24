@@ -37,6 +37,29 @@ mod read;
 mod shift;
 mod unset;
 
+macro_rules! generate_execute {
+    ($self:ident, $env:expr, $data:ident, $fd:tt, $method:ident) => {
+        generate_execute!($self, $env, $data, $fd, $method,)
+    };
+    ($self:ident, $env:expr, $data:ident, $fd:tt, $method:ident, $($args:expr),*) => {{
+        use self::EnvFd::*;
+
+        match $env.get_fd($fd).try_clone()? {
+            File(file) => $self.$method($env, $data, $($args,)* file),
+            Fd(fd) | ChildStdout(fd) => $self.$method($env, $data, $($args,)* fd),
+            Pipe(pipe) => $self.$method($env, $data, $($args,)* pipe.raw_object_wrapper()),
+            // FIXME: this won't work correctly
+            Piped(piped) => $self.$method($env, $data, $($args,)* generate_execute!($fd, Piped, piped)),
+            Null => $self.$method($env, $data, $($args,)* generate_execute!($fd, Null)),
+            _ => unimplemented!(),
+        }
+    }};
+    (0, Null) => { io::empty() };
+    (0, Piped, $arg:expr) => { ReadableVec($arg) };
+    ($fd:expr, Null) => { io::sink() };
+    ($fd:expr, Piped, $arg:expr) => { $arg };
+}
+
 type Result<T> = StdResult<T, BuiltinError>;
 
 #[derive(Clone, Debug)]
@@ -97,17 +120,7 @@ impl Builtin {
     where
         I: for<'a> UtilRead<'a> + 'static,
     {
-        use self::EnvFd::*;
-
-        match env.get_fd(1).try_clone()? {
-            File(file) => self.execute_stdout(env, data, input, file),
-            Fd(fd) | ChildStdout(fd) => self.execute_stdout(env, data, input, fd),
-            Pipe(pipe) => self.execute_stdout(env, data, input, pipe.raw_object_wrapper()),
-            // FIXME: this won't work correctly
-            Piped(piped) => self.execute_stdout(env, data, input, piped),
-            Null => self.execute_stdout(env, data, input, io::sink()),
-            _ => unimplemented!(),
-        }
+        generate_execute!(self, env, data, 1, execute_stdout, input)
     }
 
     fn execute_stdout<I, O>(&self, env: &mut Environment, data: ExecData, input: I, output: O) -> CmdResult<ExitCode>
@@ -115,17 +128,7 @@ impl Builtin {
         I: for<'a> UtilRead<'a> + 'static,
         O: for<'a> UtilWrite<'a> + 'static,
     {
-        use self::EnvFd::*;
-
-        match env.get_fd(2).try_clone()? {
-            File(file) => self.execute_stderr(env, data, input, output, file),
-            Fd(fd) | ChildStdout(fd) => self.execute_stderr(env, data, input, output, fd),
-            Pipe(pipe) => self.execute_stderr(env, data, input, output, pipe.raw_object_wrapper()),
-            // FIXME: this won't work correctly
-            Piped(piped) => self.execute_stderr(env, data, input, output, piped),
-            Null => self.execute_stderr(env, data, input, output, io::sink()),
-            _ => unimplemented!(),
-        }
+        generate_execute!(self, env, data, 2, execute_stderr, input, output)
     }
 
     fn execute_stderr<I, O, E>(&self, env: &mut Environment, data: ExecData, mut input: I, mut output: O, mut error: E) -> CmdResult<ExitCode>
@@ -200,16 +203,7 @@ impl Builtin {
 
 impl InProcessCommand for Builtin {
     fn execute<'a: 'b, 'b, S: UtilSetup + 'a>(&self, rt_data: &mut RuntimeData<'a, 'b, S>, data: ExecData) -> CmdResult<ExitCode> {
-        use self::EnvFd::*;
-
-        let res = match rt_data.env.get_fd(0).try_clone()? {
-            File(file) => self.execute_stdin(rt_data.env, data, file),
-            Fd(fd) | ChildStdout(fd) => self.execute_stdin(rt_data.env, data, fd),
-            Pipe(pipe) => self.execute_stdin(rt_data.env, data, pipe.raw_object_wrapper()),
-            Piped(piped) => self.execute_stdin(rt_data.env, data, ReadableVec(piped)),
-            Null => self.execute_stdin(rt_data.env, data, io::empty()),
-            _ => unimplemented!(),
-        };
+        let res = generate_execute!(self, rt_data.env, data, 0, execute_stdin);
 
         Ok(match res {
             Ok(m) => m,

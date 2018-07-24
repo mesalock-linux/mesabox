@@ -10,33 +10,37 @@ impl BuiltinSetup for UnsetBuiltin {
     where
         S: UtilSetup,
     {
-        // TODO: suppress --help/--version (non-POSIX, although they could perhaps serve as an extension)
-        let matches = App::new("unset")
-            .setting(AppSettings::NoBinaryName)
-            .arg(Arg::with_name("function")
-                .short("f")
-                .overrides_with("variable"))
-            .arg(Arg::with_name("variable")
-                .short("v"))
-            .arg(Arg::with_name("NAMES")
-                .index(1)
-                .multiple(true))
-            .get_matches_from_safe(data.args)?;
+        actual_run(env, data)
+    }
+}
 
-        let func = matches.is_present("function");
+fn actual_run(env: &mut Environment, data: ExecData) -> Result<ExitCode> {
+    // TODO: suppress --help/--version (non-POSIX, although they could perhaps serve as an extension)
+    let matches = App::new("unset")
+        .setting(AppSettings::NoBinaryName)
+        .arg(Arg::with_name("function")
+            .short("f")
+            .overrides_with("variable"))
+        .arg(Arg::with_name("variable")
+            .short("v"))
+        .arg(Arg::with_name("NAMES")
+            .index(1)
+            .multiple(true))
+        .get_matches_from_safe(data.args)?;
 
-        // TODO: if variable/whatever is readonly, this function should return >0 and NOT remove that
-        //       variable
-        if let Some(values) = matches.values_of_os("NAMES") {
-            for name in values {
-                if func {
-                    env.remove_func(name);
-                } else {
-                    env.remove_var(name);
-                }
+    let func = matches.is_present("function");
+
+    // TODO: if variable/whatever is readonly, this function should return >0 and NOT remove that
+    //       variable
+    if let Some(values) = matches.values_of_os("NAMES") {
+        for name in values {
+            if func {
+                env.remove_func(name);
+            } else {
+                env.remove_var(name);
             }
         }
-
-        Ok(0)
     }
+
+    Ok(0)
 }

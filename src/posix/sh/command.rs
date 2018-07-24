@@ -78,10 +78,7 @@ impl CommandWrapper {
         }
     }
 
-    fn setup_child<S>(&mut self, _setup: &mut S, env: &mut Environment) -> CmdResult<ShellChild>
-    where
-        S: UtilSetup,
-    {
+    fn setup_child(&mut self, env: &mut Environment) -> CmdResult<ShellChild> {
         let mut stdin_pipe = None;
         let mut stdout_pipe = None;
         let mut stderr_pipe = None;
@@ -196,7 +193,7 @@ impl CommandEnv for CommandWrapper {
     where
         S: UtilSetup + 'a,
     {
-        let mut child = self.setup_child(data.setup, data.env)?;
+        let mut child = self.setup_child(data.env)?;
         let stat = child.wait()?;
         Ok(stat.code())
     }
@@ -205,7 +202,7 @@ impl CommandEnv for CommandWrapper {
     where
         S: UtilSetup + 'a,
     {
-        self.setup_child(data.setup, data.env)
+        self.setup_child(data.env)
     }
 }
 

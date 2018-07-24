@@ -1,4 +1,4 @@
-use clap::{App, AppSettings, Arg};
+use clap::{App, AppSettings, Arg, OsValues};
 
 use std::borrow::Cow;
 use std::ffi::OsString;
@@ -63,40 +63,45 @@ impl BuiltinSetup for ReadBuiltin {
         }
 
         let vars = matches.values_of_os("VARS").unwrap();
-        let var_count = vars.clone().count();
 
-        let field_iter = {
-            // XXX: maybe this should be extracted into a separate function (i feel like this will be used
-            //      to split fields normally too)
-            let ifs = env.get_var("IFS").map(|v| v.clone()).unwrap_or_else(|| OsString::from(" \t\n"));
-            buffer.splitn(var_count, move |byte| {
-                ifs.as_bytes().contains(byte)
-            })
-        };
-        for (var, value) in vars.zip(field_iter) {
-            let value = if ignore_backslash {
-                value.to_owned()
-            } else {
-                let mut result = Vec::with_capacity(value.len());
-                let mut in_escape = false;
-                for &byte in value {
-                    if in_escape {
-                        result.push(byte);
-                        in_escape = false;
+        setup_vars(env, vars, &buffer, ignore_backslash)
+    }
+}
+
+fn setup_vars(env: &mut Environment, vars: OsValues, buffer: &[u8], ignore_backslash: bool) -> Result<ExitCode> {
+    let var_count = vars.clone().count();
+
+    let field_iter = {
+        // XXX: maybe this should be extracted into a separate function (i feel like this will be used
+        //      to split fields normally too)
+        let ifs = env.get_var("IFS").map(|v| v.clone()).unwrap_or_else(|| OsString::from(" \t\n"));
+        buffer.splitn(var_count, move |byte| {
+            ifs.as_bytes().contains(byte)
+        })
+    };
+    for (var, value) in vars.zip(field_iter) {
+        let value = if ignore_backslash {
+            value.to_owned()
+        } else {
+            let mut result = Vec::with_capacity(value.len());
+            let mut in_escape = false;
+            for &byte in value {
+                if in_escape {
+                    result.push(byte);
+                    in_escape = false;
+                } else {
+                    if byte == b'\\' {
+                        in_escape = true;
                     } else {
-                        if byte == b'\\' {
-                            in_escape = true;
-                        } else {
-                            result.push(byte);
-                        }
+                        result.push(byte);
                     }
                 }
-                // it should be impossible for there to be an extra escape
-                result
-            };
-            env.set_var(Cow::Borrowed(var), OsString::from_vec(value));
-        }
-
-        Ok(0)
+            }
+            // it should be impossible for there to be an extra escape
+            result
+        };
+        env.set_var(Cow::Borrowed(var), OsString::from_vec(value));
     }
+
+    Ok(0)
 }

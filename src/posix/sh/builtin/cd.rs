@@ -23,59 +23,7 @@ impl BuiltinSetup for CdBuiltin {
     where
         S: UtilSetup,
     {
-        // TODO: suppress --help/--version
-        let matches = App::new("cd")
-            .setting(AppSettings::NoBinaryName)
-            .arg(Arg::with_name("logical")
-                .short("L")
-                .overrides_with("physical"))
-            .arg(Arg::with_name("physical")
-                .short("P"))
-            .arg(Arg::with_name("DIRECTORY")
-                .index(1))
-            .get_matches_from_safe(data.args)?;
-
-        let mut should_print = false;
-
-        let dir = if let Some(dir) = matches.value_of_os("DIRECTORY") {
-            if dir == OsStr::new("-") {
-                // command should be equivalent to: cd "$OLDPWD" && pwd
-                should_print = true;
-                if let Some(oldpwd) = env.get_var("OLDPWD") {
-                    Cow::Owned(oldpwd.clone())
-                } else {
-                    Cow::Borrowed(OsStr::new(""))
-                }
-            } else {
-                Cow::Borrowed(dir)
-            }
-        } else {
-            match env.get_var_nonempty("HOME") {
-                Some(dir) => Cow::Owned(dir.clone()),
-                None => return Ok(0),
-            }
-        };
-
-        let dirlen = dir.len();
-        let physical = matches.is_present("physical");
-
-        let dir = Path::new(&dir);
-        if dir.is_absolute() || dir.starts_with("..") {
-            resolve_dot(env, dir.into(), physical, dirlen)
-        } else {
-            let mut curpath = dir.into();
-            if let Some(cdpath) = env.get_var("CDPATH") {
-                for path in cdpath.as_bytes().split(|&byte| byte == b':') {
-                    let newpath = Path::new(OsStr::from_bytes(path)).join(dir);
-                    if newpath.is_dir() {
-                        curpath = newpath.into();
-                        should_print = true;
-                        break;
-                    }
-                }
-            }
-            resolve_dot(env, curpath, physical, dirlen)
-        }.map(|code| {
+        handle_data(env, data).map(|(should_print, code)| {
             if should_print {
                 // XXX: ignore errors?
                 let output = setup.output();
@@ -87,6 +35,62 @@ impl BuiltinSetup for CdBuiltin {
             code
         })
     }
+}
+
+fn handle_data(env: &mut Environment, data: ExecData) -> Result<(bool, ExitCode)> {
+    // TODO: suppress --help/--version
+    let matches = App::new("cd")
+        .setting(AppSettings::NoBinaryName)
+        .arg(Arg::with_name("logical")
+            .short("L")
+            .overrides_with("physical"))
+        .arg(Arg::with_name("physical")
+            .short("P"))
+        .arg(Arg::with_name("DIRECTORY")
+            .index(1))
+        .get_matches_from_safe(data.args)?;
+
+    let mut should_print = false;
+
+    let dir = if let Some(dir) = matches.value_of_os("DIRECTORY") {
+        if dir == OsStr::new("-") {
+            // command should be equivalent to: cd "$OLDPWD" && pwd
+            should_print = true;
+            if let Some(oldpwd) = env.get_var("OLDPWD") {
+                Cow::Owned(oldpwd.clone())
+            } else {
+                Cow::Borrowed(OsStr::new(""))
+            }
+        } else {
+            Cow::Borrowed(dir)
+        }
+    } else {
+        match env.get_var_nonempty("HOME") {
+            Some(dir) => Cow::Owned(dir.clone()),
+            None => return Ok((should_print, 0)),
+        }
+    };
+
+    let dirlen = dir.len();
+    let physical = matches.is_present("physical");
+
+    let dir = Path::new(&dir);
+    if dir.is_absolute() || dir.starts_with("..") {
+        resolve_dot(env, dir.into(), physical, dirlen)
+    } else {
+        let mut curpath = dir.into();
+        if let Some(cdpath) = env.get_var("CDPATH") {
+            for path in cdpath.as_bytes().split(|&byte| byte == b':') {
+                let newpath = Path::new(OsStr::from_bytes(path)).join(dir);
+                if newpath.is_dir() {
+                    curpath = newpath.into();
+                    should_print = true;
+                    break;
+                }
+            }
+        }
+        resolve_dot(env, curpath, physical, dirlen)
+    }.map(|code| (should_print, code))
 }
 
 fn resolve_dot(env: &mut Environment, curpath: Cow<Path>, physical: bool, dirlen: usize) -> Result<ExitCode> {
