@@ -201,6 +201,10 @@ impl Parser {
     //      one line (or, if the command is split over multiple, however many lines are needed to
     //      parse one command) and then make script parse everything BUT execute stuff line-by-line
     //      (or more accurately command-by-command)
+    // NOTE: afaict, the shell should execute each full line/command *until* it hits a line that
+    //       can't be parsed or we reach the end of the file (so we can't do what we do now which
+    //       is fail without doing anything if any line is wrong, although maybe this could be an
+    //       shopt extension?)
     pub fn complete_command<'a>(mut self, input: &'a [u8]) -> (Self, IResult<'a, CompleteCommand>) {
         let res = do_parse!(input,
             ignore >>
@@ -494,36 +498,36 @@ fn compound_list<'a>(input: &'a [u8], parser: &mut Parser) -> IResult<'a, Comman
 
 fn compound_list_inner<'a>(input: &'a [u8], parser: &mut Parser) -> IResult<'a, CommandInner> {
     do_parse!(input,
-        // XXX: this is technically an optional newline_list in the spec
-        call!(linebreak, parser) >>
+        opt!(call!(newline_list, parser)) >>
         res: map!(call!(term, parser), |and_ors| CommandInner::AndOr(and_ors)) >>
-        opt!(call!(separator, parser)) >>
+        opt!(preceded!(not!(term_separator), call!(separator, parser))) >>
         (res)
     )
 }
 
-// FIXME: check if this sketchy parsing is still needed
+// XXX: verify this works (needed some sketchy parsing before)
 fn term<'a>(input: &'a [u8], parser: &mut Parser) -> IResult<'a, Vec<Vec<AndOr>>> {
-    //terminated!(separated_nonempty_list_complete!(separator, and_or), opt!(separator))
-    do_parse!(input,
-        first: call!(and_or, parser) >>
-        res: many_till!(
-            complete!(call!(term_inner, parser)),
-            pair!(opt!(call!(separator, parser)), not!(call!(and_or, parser)))
-        ) >>
-        //    vec![first],
-        //    |mut acc: Vec<_>, item| { acc.push(item); acc }
-        //) >>
-        ({ let mut res = res.0; res.insert(0, first); res })
-    )
+    separated_nonempty_list!(input, preceded!(not!(term_separator), call!(separator, parser)), call!(and_or, parser))
+    // NOTE: if the above doesn't work, the below should
+    /*let (mut input, first) = try_parse!(input, call!(and_or, parser));
+    let mut and_ors = vec![first];
+    loop {
+        if let Ok((new_input, _)) = preceded!(input, not!(term_separator), call!(separator, parser)) {
+            if let Ok((new_input, value)) = call!(new_input, and_or, parser) {
+                input = new_input;
+                and_ors.push(value);
+                continue;
+            }
+        }
+        break;
+    }
+    Ok((input, and_ors))*/
 }
 
-fn term_inner<'a>(input: &'a [u8], parser: &mut Parser) -> IResult<'a, Vec<AndOr>> {
-    do_parse!(input,
-        call!(separator, parser) >>
-        and_or: call!(and_or, parser) >>
-        (and_or)
-    )
+// FIXME: the only reason this needs to be done is because we don't tokenize the input
+fn term_separator<'a>(input: &'a [u8]) -> IResult<'a, &'a [u8]> {
+    // thus far the only item that seems to confuse the parser is DSEMI
+    clean_tag!(input, ";;")
 }
 
 fn for_clause<'a>(input: &'a [u8], parser: &mut Parser) -> IResult<'a, ForClause> {
@@ -567,8 +571,20 @@ fn case_clause<'a>(input: &'a [u8], parser: &mut Parser) -> IResult<'a, CaseClau
         tag_keyword!("in") >>
         ignore >>
         call!(linebreak, parser) >>
-        case_list: many0!(
-            alt!(call!(case_item, parser) | call!(case_item_ns, parser))
+        // XXX: we can add return_error!() here
+        case_list: alt!(
+            do_parse!(
+                list: many1!(call!(case_item, parser)) >>
+                last_case: opt!(call!(case_item_ns, parser)) >>
+                ({
+                    let mut list = list;
+                    if let Some(case) = last_case {
+                        list.push(case);
+                    }
+                    list
+                })
+            ) |
+            map!(call!(case_item_ns, parser), |case| vec![case])
         ) >>
         tag_keyword!("esac") >>
         ignore >>
@@ -576,35 +592,46 @@ fn case_clause<'a>(input: &'a [u8], parser: &mut Parser) -> IResult<'a, CaseClau
     )
 }
 
-fn case_item_ns<'a>(input: &'a [u8], parser: &mut Parser) -> IResult<'a, CaseItem> {
+fn case_item_common<'a, F>(input: &'a [u8], parser: &mut Parser, func: F) -> IResult<'a, CaseItem>
+where
+    F: Fn(&'a [u8], &mut Parser) -> IResult<'a, Option<Command>>,
+{
     do_parse!(input,
-        opt!(tag_token!("(")) >>
+        alt!(
+            tag_token!("(") => { |_| () } |
+            not!(tag_keyword!("esac"))
+        ) >>
         pattern: call!(pattern, parser) >>
         tag_token!(")") >>
-        list: opt!(call!(compound_list, parser)) >>
+        list: call!(func, parser) >>
         call!(linebreak, parser) >>
         (CaseItem::new(pattern, list))
     )
 }
 
-fn case_item<'a>(input: &'a [u8], parser: &mut Parser) -> IResult<'a, CaseItem> {
-    do_parse!(input,
-        item: call!(case_item_ns, parser) >>
-        tag_token!(";;") >>
-        call!(linebreak, parser) >>
-        (item)
-    )
+fn case_item_ns<'a>(inp: &'a [u8], p: &mut Parser) -> IResult<'a, CaseItem> {
+    case_item_common(inp, p, |input, parser| {
+        opt!(input, call!(compound_list, parser))
+    })
+}
+
+fn case_item<'a>(inp: &'a [u8], p: &mut Parser) -> IResult<'a, CaseItem> {
+    case_item_common(inp, p, |input, parser| {
+        terminated!(input,
+            alt!(
+                call!(compound_list, parser) => { |res| Some(res) } |
+                call!(linebreak, parser) => { |_| None }
+            ),
+            tag_token!(";;")
+        )
+    })
 }
 
 // TODO: this needs to actually match "patterns" rather than words
 fn pattern<'a>(input: &'a [u8], parser: &mut Parser) -> IResult<'a, Pattern> {
-    do_parse!(input,
-        not!(tag_keyword!("esac")) >>
-        res: map!(
-            separated_nonempty_list_complete!(tag_token!("|"), call!(word, parser)),
-            |values| Pattern::new(values)
-        ) >>
-        (res)
+    map!(input,
+        separated_nonempty_list_complete!(tag_token!("|"), call!(word, parser)),
+        |values| Pattern::new(values)
     )
 }
 
@@ -704,12 +731,11 @@ fn simple_command<'a>(input: &'a [u8], parser: &mut Parser) -> IResult<'a, Simpl
 fn cmd_name<'a>(input: &'a [u8], parser: &mut Parser) -> IResult<'a, CommandName> {
     // TODO: apply rule 7a
     map_opt!(input, call!(word, parser), |word: Word| {
-        // TODO: this prob needs to check all keywords (ensure that e.g. in and then are actually not allowed)
-        // FIXME: not sure if this should behave differently if the command is surrounded with single quotes
-        //        dash gives a syntax error without quotes and a command not found with quotes
+        // XXX: need to ensure all reserved words are being checked (a command name is not allowed
+        //      to be exactly a reserved word unless it is quoted)
         if let Word::Simple(ref text) = word {
             match text.as_os_str().as_bytes() {
-                b"do" | b"done" | b"for" | b"if" | b"elif" | b"else" | b"fi" | b"while" | b"until" | b"case" | b"esac" | b"in" | b"then" => return None,
+                b"do" | b"done" | b"for" | b"if" | b"elif" | b"else" | b"fi" | b"while" | b"until" | b"case" | b"esac" | b"in" | b"then" | b"{" | b"}" | b"!" => return None,
                 _ => {}
             }
         }
@@ -864,11 +890,11 @@ named!(single_quote<&[u8], Word, ParserError>,
 );
 
 fn double_quote<'a>(input: &'a [u8], parser: &mut Parser) -> IResult<'a, DoubleQuote> {
-    do_parse!(input,
-        clean_tag!("\"") >>
-        res: return_error!(
+    delimited!(input,
+        clean_tag!("\""),
+        return_error!(
             ErrorKind::Custom(ParserError::DoubleQuote),
-            terminated!(
+            map!(
                 many0!(
                     alt!(
                         map!(call!(parameter, parser), |res| Word::Parameter(res)) |
@@ -878,22 +904,27 @@ fn double_quote<'a>(input: &'a [u8], parser: &mut Parser) -> IResult<'a, DoubleQ
                         text_or_escape_seq => { |text| Word::SingleQuote(text) }
                         // TODO: arith expr
                     )
+                ), |res| DoubleQuote::new(res)
+            )
                 ),
                 clean_tag!("\"")
             )
-        ) >>
-        (DoubleQuote::new(res))
-    )
 }
 
 named!(text_or_escape_seq<&[u8], OsString, ParserError>,
     fold_many1!(
         fix_error!(ParserError, alt!(
             preceded!(
-                tag!(r"\"),
+                peek!(tag!(r"\")),
+                alt!(
+                    preceded!(
+                        take!(1),
                 alt!(
                     recognize!(one_of!("$`\"\\")) |
                     map!(newline, |_| &b""[..])
+                )
+            ) |
+                    take!(2)
                 )
             ) |
             is_not!("\"$`\\")
@@ -941,9 +972,15 @@ fn word<'a>(input: &'a [u8], parser: &mut Parser) -> IResult<'a, Word> {
                 map!(call!(parameter, parser), |param| Word::Parameter(param)) |
                 map!(call!(command_subst, parser), |subst| Word::CommandSubst(subst)) |
                 // XXX: there may be more that need to be checked for
-                // FIXME: need to handle escapes for e.g. $ and (
                 // FIXME: this should not ignore "}" (this is why i likely need to tokenize first)
-                map!(verify!(fix_error!(ParserError, is_not!(" \t\r\n'\"$();&}<>|")), |arr: &[u8]| arr.len() > 0), |res| Word::Simple(OsString::from_vec(res.to_owned())))
+                // FIXME: if there is a word like \\LINE CONTINUATIONhi, the result will be two
+                //        words rather than one (i.e. \ and hi instead of \hi), which is wrong
+                preceded!(not!(line_continuation), alt!(
+                    map!(preceded!(clean_tag!(r"\"), fix_error!(ParserError, take!(1))), |res| Word::Simple(OsString::from_vec(res.to_owned()))) |
+                    map!(many1!(preceded!(not!(delimiter), fix_error!(ParserError, map!(take!(1), |arr| arr[0])))), |res| {
+                        Word::Simple(OsString::from_vec(res))
+                    })
+                ))
             ),
             vec![],
             |mut acc: Vec<_>, item| {
