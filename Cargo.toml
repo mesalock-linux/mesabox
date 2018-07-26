@@ -39,13 +39,15 @@ echo = []
 head = []
 sh = ["nom", "glob", "rustyline"]
 sleep = ["uucore"]
+uname = ["platform-info"]
 posix = [
     "cat",
     "chmod",
     "echo",
     "head",
     "sh",
-    "sleep"
+    "sleep",
+    "uname"
 ]
 
 init = ["fnv"]
@@ -71,6 +73,7 @@ windows = [
     "echo",
     "head",
     "sleep",
+    "uname"
 ]
 
 # the following are real features (rather than utilities)

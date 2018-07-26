@@ -20,7 +20,8 @@ generate_fns! {
         (echo, "echo"),
         (head, "head"),
         (sh, "sh"),
-        (sleep, "sleep")
+        (sleep, "sleep"),
+        (uname, "uname")
     },
     sysinit {
         (init, "init")

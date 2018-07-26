@@ -6,9 +6,7 @@
 // For a copy, see the LICENSE file.
 //
 
-extern crate platform_info;
-
-use self::platform_info::*;
+use platform_info::*;
 use std::io::Write;
 use {ArgsIter, Result, UtilSetup};
 

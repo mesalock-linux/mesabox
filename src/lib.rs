@@ -49,6 +49,8 @@ extern crate nom;
 extern crate glob;
 #[cfg(feature = "rustyline")]
 extern crate rustyline;
+#[cfg(feature = "platform-info")]
+extern crate platform_info;
 
 use clap::{App, SubCommand};
 use libc::EXIT_FAILURE;
