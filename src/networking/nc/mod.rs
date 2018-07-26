@@ -1,6 +1,5 @@
 extern crate mio;
 extern crate clap;
-extern crate libc;
 extern crate socket2;
 
 use std;
@@ -10,7 +9,7 @@ use clap::{Arg, ArgMatches};
 use mio::{Events, Event, Poll, Ready, PollOpt, Token};
 use libc::{AF_UNSPEC, AF_INET, AF_INET6, AF_UNIX};
 use std::io;
-use std::net::{SocketAddr};
+use std::net::SocketAddr;
 use mio::unix::EventedFd;
 use std::io::{Read,Write, ErrorKind};
 use mio::unix::UnixReady;
@@ -81,10 +80,10 @@ fn debug_info(msg: &str) {
 
 impl NcOptions {
     pub fn parse(matches: ArgMatches, msg: &str) -> Result<NcOptions, MesaError> {
-        let mut portlist = vec!();
+        let mut portlist = vec![];
         let lflag = matches.is_present("l");
         let mut host = String::from("127.0.0.1");
-        let uport:String;
+        let uport: String;
         let mut interval = None;
         let mut timeout = None;
         let s_addr = match matches.value_of("s") {
@@ -98,11 +97,7 @@ impl NcOptions {
         let kflag = matches.is_present("k");
 
         /* Cruft to make sure options are clean, and used properly. */
-        let positionals: Vec<&str> = if matches.is_present("positionals") {
-            matches.values_of("positionals").unwrap().collect()
-        } else {
-            vec!()
-        };
+        let positionals:Vec<&str> = matches.values_of("positionals").unwrap().collect();
 
         let family = if matches.is_present("U") {
             AF_UNIX
@@ -128,7 +123,7 @@ impl NcOptions {
             host = String::from(positionals[0]);
             uport = String::from(positionals[1]);
         } else {
-            return mesaerr_result(msg);
+            unreachable!()
         }
 
         if lflag && s_addr.is_some() {
@@ -345,7 +340,7 @@ impl <'a> NcCore<'a> {
                     } else if self.stdinbuf_full() {
                         self.disable_stdin()?;
                     }
-                }                
+                }
 
                 // if net writable and buf not empty, try to write to net
                 //      error, stop watching for netout
@@ -444,81 +439,81 @@ impl <'a> NcCore<'a> {
         self.netinbufpos >= BUFSIZE
     }
 
-    fn remove_stdin(&mut self) -> std::io::Result<()> {
+    fn remove_stdin(&mut self) -> io::Result<()> {
         remove_item(&mut self.open_ends, NcCore::STDIN_POLL);
         self.poll.deregister(&self.event_stdin)
     }
 
-    fn remove_stdout(&mut self) -> std::io::Result<()> {
+    fn remove_stdout(&mut self) -> io::Result<()> {
         debug_info("remove_stdout");
         remove_item(&mut self.open_ends, NcCore::STDOUT_POLL);
         self.poll.deregister(&self.event_stdout)
     }
 
-    fn remove_netin(&mut self) -> std::io::Result<()> {
+    fn remove_netin(&mut self) -> io::Result<()> {
         remove_item(&mut self.open_ends, NcCore::NETIN_POLL);
         self.net_interest.remove(Ready::readable());
         self.reregister_net()
     }
 
-    fn remove_netout(&mut self) -> std::io::Result<()> {
+    fn remove_netout(&mut self) -> io::Result<()> {
         remove_item(&mut self.open_ends, NcCore::NETOUT_POLL);
         self.net_interest.remove(Ready::writable());
         return self.reregister_net();
     }
 
-    fn reregister_net(&mut self) -> std::io::Result<()> {
+    fn reregister_net(&mut self) -> io::Result<()> {
         self.poll.reregister(&self.event_net, NcCore::TK_NET, self.net_interest,
             PollOpt::empty())
     }
 
-    fn enable_netin(&mut self) -> std::io::Result<()>{
+    fn enable_netin(&mut self) -> io::Result<()>{
         self.net_interest |= Ready::readable();
         self.reregister_net()
     }
 
-    fn disable_netin(&mut self) -> std::io::Result<()>{
+    fn disable_netin(&mut self) -> io::Result<()>{
         self.net_interest.remove(Ready::readable());
-        self.reregister_net()     
+        self.reregister_net()
     }
 
-    fn enable_netout(&mut self) -> std::io::Result<()> {
+    fn enable_netout(&mut self) -> io::Result<()> {
         self.net_interest |= Ready::writable();
-        self.reregister_net()        
+        self.reregister_net()
     }
 
-    fn disable_netout(&mut self) -> std::io::Result<()> {
+    fn disable_netout(&mut self) -> io::Result<()> {
         self.net_interest.remove(Ready::writable());
-        self.reregister_net()       
+        self.reregister_net()
     }
 
-    fn enable_stdin(&mut self) -> std::io::Result<()> {
+    fn enable_stdin(&mut self) -> io::Result<()> {
         self.poll.reregister(&self.event_stdin, NcCore::TK_STDIN, Ready::readable(),
                         PollOpt::empty())
     }
 
-    fn disable_stdin(&mut self) -> std::io::Result<()> {
+    fn disable_stdin(&mut self) -> io::Result<()> {
         self.poll.reregister(&self.event_stdin, NcCore::TK_STDIN, Ready::empty(),
                         PollOpt::empty())
     }
 
-    fn enable_stdout(&mut self) -> std::io::Result<()> {
+    fn enable_stdout(&mut self) -> io::Result<()> {
         self.poll.reregister(&self.event_stdout, NcCore::TK_STDOUT, Ready::writable(),
                         PollOpt::empty())
     }
 
-    fn disable_stdout(&mut self) -> std::io::Result<()> {
+    fn disable_stdout(&mut self) -> io::Result<()> {
         self.poll.reregister(&self.event_stdout, NcCore::TK_STDOUT, Ready::empty(),
                         PollOpt::empty())
     }
 
-    fn remove_net(&mut self) -> std::io::Result<()> {
+    fn remove_net(&mut self) -> io::Result<()> {
         remove_item(&mut self.open_ends, NcCore::NETIN_POLL);
         remove_item(&mut self.open_ends, NcCore::NETOUT_POLL);
         self.poll.deregister(&self.event_net)
     }
 
-    fn read_stdin(&mut self) -> std::io::Result<()> {
+    fn read_stdin(&mut self) -> io::Result<()> {
         let mut remove = false;
         match io::stdin().read(&mut self.stdinbuf[self.stdinbufpos..]) {
             Ok(len) => {
@@ -538,7 +533,7 @@ impl <'a> NcCore<'a> {
         Ok(())
     }
 
-    fn write_netout(&mut self) -> std::io::Result<()> {
+    fn write_netout(&mut self) -> io::Result<()> {
         let mut remove = false;
         match self.sock.write(&mut self.stdinbuf[0..self.stdinbufpos]) {
             Ok(len) => {
@@ -567,7 +562,7 @@ impl <'a> NcCore<'a> {
         Ok(())
     }
 
-    fn read_netin(&mut self) -> std::io::Result<()> {
+    fn read_netin(&mut self) -> io::Result<()> {
         let mut remove = false;
         match self.sock.read(&mut self.netinbuf[self.netinbufpos..]) {
             Ok(len) => {
@@ -587,7 +582,7 @@ impl <'a> NcCore<'a> {
         Ok(())
     }
 
-    fn write_stdout(&mut self) -> std::io::Result<()> {
+    fn write_stdout(&mut self) -> io::Result<()> {
         let mut remove = false;
         match io::stdout().write(&mut self.netinbuf[0..self.netinbufpos]) {
             Ok(len) => {
@@ -607,14 +602,14 @@ impl <'a> NcCore<'a> {
                     _ => remove = true
                 }
             },
-        }  
+        }
         if remove {
             return self.remove_stdout();
         }
-        Ok(())           
+        Ok(())
     }
 
-    fn handle_error_event(&mut self, event: &Event) -> std::io::Result<()> {
+    fn handle_error_event(&mut self, event: &Event) -> io::Result<()> {
         match event.token() {
             NcCore::TK_STDIN => self.remove_stdin(),
             NcCore::TK_STDOUT => self.remove_stdout(),
@@ -623,7 +618,7 @@ impl <'a> NcCore<'a> {
         }
     }
 
-    fn handle_hup_event(&mut self, event: &Event) -> std::io::Result<()> {
+    fn handle_hup_event(&mut self, event: &Event) -> io::Result<()> {
         if !self.stdin_gone() && event.token() == NcCore::TK_STDIN &&
             !event.readiness().is_readable() {
             self.remove_stdin()?
@@ -667,7 +662,7 @@ impl <'a> NcCore<'a> {
                 debug_info(&format!("new_ready_end {:?}", new_ready_end));
             }
         }
-        *last_ready_end = new_ready_end;    
+        *last_ready_end = new_ready_end;
     }
 }
 
@@ -910,9 +905,9 @@ where
             .takes_value(true))
         .arg(Arg::with_name("s")
             .short("s")
-            .value_name("source_ip_address") 
+            .value_name("source_ip_address")
             .takes_value(true)
-            .help("Specifies the IP of the interface which is used to send the packets.  It is an error to use this option in conjunction with the -l option."))        
+            .help("Specifies the IP of the interface which is used to send the packets.  It is an error to use this option in conjunction with the -l option."))
         .arg(Arg::with_name("d")
             .short("d")
             .help("Do not attempt to read from stdin."))
