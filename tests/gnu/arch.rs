@@ -8,6 +8,8 @@
 
 use util::*;
 
+const NAME: &str = "arch";
+
 #[test]
 #[cfg(target_arch = "x86_64")]
 fn test_x86_64() {

@@ -39,7 +39,7 @@ use std::borrow::Cow;
 use std::env;
 use std::ffi::{OsStr, OsString};
 use std::fs::{self, File, OpenOptions};
-use std::io::{Read, Result, Write};
+use std::io::{Read, Result, Write, Seek, SeekFrom};
 #[cfg(unix)]
 use std::os::unix::ffi::OsStringExt;
 #[cfg(unix)]
@@ -53,7 +53,7 @@ use std::thread::{self, sleep, JoinHandle};
 use std::time::Duration;
 
 use mesabox::{self, UtilData};
-use tempfile::TempDir;
+use tempfile::{self, TempDir};
 
 const TESTS_DIR: &str = "tests";
 const FIXTURES_DIR: &str = "fixtures";
@@ -610,20 +610,25 @@ impl UCommand {
         let env = self.env.clone().into_iter();
         let args = self.args.clone().into_iter();
 
-        let stdout = Arc::new(Mutex::new(vec![]));
-        let stderr = Arc::new(Mutex::new(vec![]));
+        // FIXME: would be easier to use Vec<u8>, but not sure how to get this to work with sh at
+        //        the moment
+        let mut stdin = tempfile::tempfile().unwrap();
+        if let Some(input) = self.stdin.as_ref() {
+            stdin.write_all(input).unwrap();
+            stdin.seek(SeekFrom::Start(0));
+        }
 
-        let stdout_clone = stdout.clone();
-        let stderr_clone = stderr.clone();
+        // FIXME: same issue
+        let stdout = tempfile::tempfile().unwrap();
+        let stderr = tempfile::tempfile().unwrap();
+
+        let mut stdout_clone = stdout.try_clone().unwrap();
+        let mut stderr_clone = stderr.try_clone().unwrap();
         UChild::new(
             thread::spawn(move || {
-                let stdin = stdin;
                 let mut args = args;
-                let mut stdin = &stdin[..];
-                let mut stdout = stdout_clone.lock().unwrap();
-                let mut stderr = stderr_clone.lock().unwrap();
                 let mut setup =
-                    UtilData::new(&mut stdin, &mut *stdout, &mut *stderr, env, current_dir);
+                    UtilData::new(&mut stdin, &mut stdout_clone, &mut stderr_clone, env, current_dir);
                 mesabox::execute(&mut setup, &mut args)
             }),
             stdout,
@@ -682,15 +687,15 @@ impl UCommand {
 
 pub struct UChild {
     handle: JoinHandle<mesabox::Result<()>>,
-    stdout: Arc<Mutex<Vec<u8>>>,
-    stderr: Arc<Mutex<Vec<u8>>>,
+    stdout: File,
+    stderr: File,
 }
 
 impl UChild {
     pub fn new(
         handle: JoinHandle<mesabox::Result<()>>,
-        stdout: Arc<Mutex<Vec<u8>>>,
-        stderr: Arc<Mutex<Vec<u8>>>,
+        stdout: File,
+        stderr: File,
     ) -> Self {
         Self {
             handle: handle,
@@ -699,21 +704,27 @@ impl UChild {
         }
     }
 
-    pub fn wait_with_output(self) -> UOutput {
+    pub fn wait_with_output(mut self) -> UOutput {
         let res = self.handle.join().unwrap();
 
-        let stdout = Arc::try_unwrap(self.stdout).unwrap().into_inner().unwrap();
-        let mut stderr = Arc::try_unwrap(self.stderr).unwrap().into_inner().unwrap();
+        let mut output = vec![];
+        let mut error = vec![];
+
+        self.stdout.seek(SeekFrom::Start(0)).unwrap();
+        self.stderr.seek(SeekFrom::Start(0)).unwrap();
+
+        self.stdout.read_to_end(&mut output).unwrap();
+        self.stderr.read_to_end(&mut error).unwrap();
 
         // FIXME: what to do with res?  print error to stderr first?  should this just be done in library?
         if let Err(ref f) = res {
-            write!(stderr, "{}", f).unwrap();
+            write!(error, "{}", f).unwrap();
         }
 
         UOutput {
             success: res.is_ok(),
-            stdout: stdout,
-            stderr: stderr,
+            stdout: output,
+            stderr: error,
         }
     }
 }

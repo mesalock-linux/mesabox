@@ -34,6 +34,8 @@
 
 use util::*;
 
+const NAME: &str = "base64";
+
 #[test]
 fn test_encode() {
     let input = "hello, world!";

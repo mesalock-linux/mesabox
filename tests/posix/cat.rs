@@ -33,6 +33,8 @@
 
 use util::*;
 
+const NAME: &str = "cat";
+
 #[test]
 fn test_output_multi_files_print_all_chars() {
     new_ucmd!()

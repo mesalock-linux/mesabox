@@ -33,6 +33,8 @@
 
 use util::*;
 
+const NAME: &str = "head";
+
 const INPUT: &str = "lorem_ipsum.txt";
 const INPUT2: &str = "lorem_ipsum_reverse.txt";
 

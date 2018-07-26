@@ -34,6 +34,8 @@
 
 use util::*;
 
+const NAME: &str = "base32";
+
 #[test]
 fn test_encode() {
     let input = "Hello, World!";

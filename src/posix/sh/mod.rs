@@ -7,8 +7,9 @@ use std::borrow::Cow;
 use std::ffi::{OsStr, OsString};
 use std::fs::File;
 use std::io::{Read, Write};
+use std::path::Path;
 
-use util::RawObjectWrapper;
+use util::{self, RawObjectWrapper};
 use {ArgsIter, Result, UtilRead, UtilSetup, UtilWrite};
 
 use self::ast::ExitCode;
@@ -68,11 +69,11 @@ where
     } else {
         // we have arguments and nothing was specified, so assume it's a script
         let mut args = matches.values_of_os("ARGUMENTS").unwrap();
-        let script = args.next().unwrap();
+        let script = util::actual_path(&setup.current_dir(), args.next().unwrap());
 
         // FIXME: dunno what to do with exitcode (guess do the chmod trick where we set exitcode in
         //        MesaError?  maybe execute() should return Result<i32>)
-        let code = run_script(setup, script, args)?;
+        let code = run_script(setup, &script, args)?;
         Ok(())
     }
 }
@@ -95,7 +96,7 @@ fn create_app() -> App<'static, 'static> {
             .multiple(true))
 }
 
-fn run_script<S>(setup: &mut S, name: &OsStr, args: OsValues) -> Result<ExitCode>
+fn run_script<S>(setup: &mut S, name: &Path, args: OsValues) -> Result<ExitCode>
 where
     S: UtilSetup,
 {

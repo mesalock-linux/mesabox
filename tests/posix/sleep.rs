@@ -10,6 +10,8 @@ use util::*;
 
 use std::time::{Duration, Instant};
 
+const NAME: &str = "sleep";
+
 const SLEEP_TIME: f32 = 1.75;
 const DIFF: f32 = 0.5;
 

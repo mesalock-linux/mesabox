@@ -33,6 +33,8 @@
 
 use util::*;
 
+const NAME: &str = "echo";
+
 #[test]
 fn test_default() {
     //CmdResult.stdout_only(...) trims trailing newlines

@@ -1,0 +1,1 @@
+echo hi | echo hello | cat | (echo hi; cat) | cat

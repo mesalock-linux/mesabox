@@ -37,6 +37,8 @@ use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::sync::Mutex;
 use libc::umask;
 
+const NAME: &str = "chmod";
+
 const TEST_FILE: &str = "file";
 const REFERENCE_FILE: &str = "reference";
 const REFERENCE_PERMS: u32 = 0o247;

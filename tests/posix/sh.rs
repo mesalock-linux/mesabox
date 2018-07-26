@@ -5,3 +5,61 @@
 // This work is licensed under the terms of the BSD 3-Clause License.
 // For a copy, see the LICENSE file.
 //
+
+use util::*;
+
+const NAME: &str = "sh";
+
+const PIPELINE: &str = "pipeline";
+const PIPELINE_SUBSHELL: &str = "pipeline_subshell";
+
+// FIXME: need to add the ability to read from stdin
+mod stdin {
+    use super::*;
+
+    #[test]
+    #[ignore]
+    fn test_pipeline() {
+        new_ucmd!()
+            .pipe_in_fixture(input_fixture(PIPELINE))
+            .run()
+            .stdout_is_fixture(expected_fixture(PIPELINE));
+    }
+
+    #[test]
+    #[ignore]
+    fn test_pipeline_subshell() {
+        new_ucmd!()
+            .pipe_in_fixture(input_fixture(PIPELINE_SUBSHELL))
+            .run()
+            .stdout_is_fixture(expected_fixture(PIPELINE_SUBSHELL));
+    }
+}
+
+mod script {
+    use super::*;
+
+    #[test]
+    fn test_pipeline() {
+        new_ucmd!()
+            .arg(input_fixture(PIPELINE))
+            .run()
+            .stdout_is_fixture(expected_fixture(PIPELINE));
+    }
+
+    #[test]
+    fn test_pipeline_subshell() {
+        new_ucmd!()
+            .arg(input_fixture(PIPELINE_SUBSHELL))
+            .run()
+            .stdout_is_fixture(expected_fixture(PIPELINE_SUBSHELL));
+    }
+}
+
+fn input_fixture(name: &str) -> String {
+    format!("{}.sh", name)
+}
+
+fn expected_fixture(name: &str) -> String {
+    format!("{}.expected", name)
+}

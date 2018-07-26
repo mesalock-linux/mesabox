@@ -85,7 +85,7 @@ macro_rules! path_concat {
 #[macro_export]
 macro_rules! util_name {
     () => {
-        module_path!().split("::").last().expect("no test name")
+        self::NAME
     };
 }
 
