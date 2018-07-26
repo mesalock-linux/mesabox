@@ -39,7 +39,7 @@ use std::borrow::Cow;
 use std::env;
 use std::ffi::{OsStr, OsString};
 use std::fs::{self, File, OpenOptions};
-use std::io::{Read, Result, Write, Seek, SeekFrom};
+use std::io::{Read, Result, Seek, SeekFrom, Write};
 #[cfg(unix)]
 use std::os::unix::ffi::OsStringExt;
 #[cfg(unix)]
@@ -627,8 +627,13 @@ impl UCommand {
         UChild::new(
             thread::spawn(move || {
                 let mut args = args;
-                let mut setup =
-                    UtilData::new(&mut stdin, &mut stdout_clone, &mut stderr_clone, env, current_dir);
+                let mut setup = UtilData::new(
+                    &mut stdin,
+                    &mut stdout_clone,
+                    &mut stderr_clone,
+                    env,
+                    current_dir,
+                );
                 mesabox::execute(&mut setup, &mut args)
             }),
             stdout,
@@ -692,11 +697,7 @@ pub struct UChild {
 }
 
 impl UChild {
-    pub fn new(
-        handle: JoinHandle<mesabox::Result<()>>,
-        stdout: File,
-        stderr: File,
-    ) -> Self {
+    pub fn new(handle: JoinHandle<mesabox::Result<()>>, stdout: File, stderr: File) -> Self {
         Self {
             handle: handle,
             stdout: stdout,
