@@ -11,7 +11,6 @@ extern crate clap;
 extern crate failure;
 #[macro_use]
 extern crate failure_derive;
-extern crate libc;
 
 #[cfg(windows)]
 extern crate kernel32;
@@ -30,6 +29,8 @@ extern crate crossbeam;
 extern crate fnv;
 #[cfg(feature = "globset")]
 extern crate globset;
+#[cfg(feature = "libc")]
+extern crate libc;
 #[cfg(feature = "mio")]
 extern crate mio;
 #[cfg(feature = "pnet")]
@@ -47,10 +48,10 @@ extern crate walkdir;
 extern crate nom;
 #[cfg(feature = "glob")]
 extern crate glob;
-#[cfg(feature = "rustyline")]
-extern crate rustyline;
 #[cfg(feature = "platform-info")]
 extern crate platform_info;
+#[cfg(feature = "rustyline")]
+extern crate rustyline;
 
 use clap::{App, SubCommand};
 use std::env::{self, VarsOs};
@@ -60,7 +61,9 @@ use std::iter;
 use std::path::{Path, PathBuf};
 use std::result::Result as StdResult;
 
-pub use util::{AsRawObject, RawObject, UtilReadDyn, UtilWriteDyn, ExitCode, EXIT_SUCCESS, EXIT_FAILURE};
+pub use util::{
+    AsRawObject, ExitCode, RawObject, UtilReadDyn, UtilWriteDyn, EXIT_FAILURE, EXIT_SUCCESS,
+};
 
 pub use error::*;
 pub use setup::*;

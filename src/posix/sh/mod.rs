@@ -9,10 +9,9 @@ use std::fs::File;
 use std::io::{Read, Write};
 use std::path::Path;
 
-use util::{self, RawObjectWrapper};
+use util::{self, ExitCode, RawObjectWrapper};
 use {ArgsIter, Result, UtilRead, UtilSetup, UtilWrite};
 
-use self::ast::ExitCode;
 use self::env::{EnvFd, Environment};
 use self::parser::Parser;
 

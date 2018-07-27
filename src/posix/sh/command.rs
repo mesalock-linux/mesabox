@@ -10,13 +10,13 @@ use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::process::{self, Child, Command, ExitStatus, Stdio};
 use std::rc::Rc;
 
-use super::ast::{ExitCode, FunctionBody, RuntimeData};
+use super::ast::{FunctionBody, RuntimeData};
 use super::builtin::Builtin;
 use super::env::{EnvFd, Environment};
 use super::error::{CmdResult, CommandError};
 use super::types::TryClone;
 use super::UtilSetup;
-use util::{AsRawObject, Pipe, RawObject, RawObjectWrapper};
+use util::{AsRawObject, ExitCode, Pipe, RawObject, RawObjectWrapper};
 
 /// A command executed within the current shell process (e.g. a function or builtin)
 pub trait InProcessCommand {

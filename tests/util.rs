@@ -697,7 +697,11 @@ pub struct UChild {
 }
 
 impl UChild {
-    pub fn new(handle: JoinHandle<mesabox::Result<mesabox::ExitCode>>, stdout: File, stderr: File) -> Self {
+    pub fn new(
+        handle: JoinHandle<mesabox::Result<mesabox::ExitCode>>,
+        stdout: File,
+        stderr: File,
+    ) -> Self {
         Self {
             handle: handle,
             stdout: stdout,

@@ -8,12 +8,12 @@ use std::os::unix::io::FromRawFd;
 use std::process::Stdio;
 use std::rc::Rc;
 
-use super::ast::{ExitCode, FunctionBody};
+use super::ast::FunctionBody;
 use super::builtin::{Builtin, BuiltinSet};
 use super::error::CommandError;
 use super::types::scoped_array::ScopedArrayIter;
 use super::types::{FdArray, Locality, Scoped, ScopedMap, TryClone};
-use util::{AsRawObject, Pipe, RawObjectWrapper};
+use util::{AsRawObject, ExitCode, Pipe, RawObjectWrapper};
 
 // XXX: not exactly happy that we need to clone the data for Piped, but due to issues with
 //      lifetimes in SimpleCommand::run_command() and IoRedirect::setup() the only alternative

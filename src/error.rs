@@ -1,17 +1,18 @@
 use failure::{Error, Fail};
-use libc;
 use std::ffi::OsString;
 use std::fmt::{self, Display};
+
+use super::ExitCode;
 
 #[derive(Debug)]
 pub struct MesaError {
     pub(crate) progname: Option<OsString>,
-    pub exitcode: libc::c_int,
+    pub exitcode: ExitCode,
     pub err: Option<Error>,
 }
 
 impl MesaError {
-    pub fn new(progname: Option<OsString>, exitcode: libc::c_int, err: Option<Error>) -> Self {
+    pub fn new(progname: Option<OsString>, exitcode: ExitCode, err: Option<Error>) -> Self {
         Self {
             progname: progname,
             exitcode: exitcode,
@@ -19,7 +20,7 @@ impl MesaError {
         }
     }
 
-    pub fn with_exitcode(mut self, code: libc::c_int) -> Self {
+    pub fn with_exitcode(mut self, code: ExitCode) -> Self {
         self.exitcode = code;
         self
     }

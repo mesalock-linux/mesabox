@@ -10,7 +10,6 @@ pub use self::platform::{is_tty, AsRawObject, OsStrExt, Pipe, RawObject, RawObje
 use super::{LockableRead, LockableWrite, MesaError, Result};
 
 use failure;
-use libc;
 use std::borrow::Cow;
 use std::error::Error as StdError;
 use std::io::{self, Read, Write};
@@ -112,7 +111,7 @@ impl From<ExitCode> for ExitCodeWrapper {
 /// [MesaError](../error/struct.MesaError.html).
 pub(crate) fn set_exitcode<T, E: StdError + Send + Sync + 'static>(
     error: StdResult<T, E>,
-    code: libc::c_int,
+    code: ExitCode,
 ) -> Result<T> {
     error.map_err(|e| {
         let mut err: MesaError = e.into();

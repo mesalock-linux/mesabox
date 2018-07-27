@@ -1,7 +1,6 @@
 use failure::Fail;
 use glob::Pattern as GlobPattern;
 use glob::{self, MatchOptions};
-use libc;
 
 use std::borrow::Cow;
 use std::cell::RefCell;
@@ -24,9 +23,7 @@ use super::env::{CheckBreak, EnvFd, Environment};
 use super::error::{CmdResult, CommandError, Result, ShellError};
 use super::types::{Scoped, TryClone};
 use super::{UtilSetup, NAME};
-use util::Pipe;
-
-pub type ExitCode = libc::c_int;
+use util::{ExitCode, Pipe};
 
 pub struct RuntimeData<'a: 'b, 'b, S: UtilSetup + 'a> {
     pub setup: &'a mut S,

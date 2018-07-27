@@ -17,7 +17,7 @@ gnu = [
     "yes"
 ]
 
-getty = []
+getty = ["libc"]
 loginutils = [
     "getty"
 ]
@@ -28,7 +28,7 @@ lsb = [
     "tar_util"
 ]
 
-ping = ["chrono", "crossbeam", "pnet", "byteorder", "trust-dns-resolver", "mio", "socket2"]
+ping = ["chrono", "crossbeam", "libc", "pnet", "byteorder", "trust-dns-resolver", "mio", "socket2"]
 networking = [
     "ping"
 ]
@@ -38,7 +38,7 @@ chmod = ["walkdir", "uucore"]
 echo = []
 false = []
 head = []
-sh = ["nom", "glob", "rustyline"]
+sh = ["nom", "glob", "rustyline", "libc"]
 sleep = ["uucore"]
 true = []
 uname = ["platform-info"]
@@ -54,7 +54,7 @@ posix = [
     "uname"
 ]
 
-init = ["fnv"]
+init = ["fnv", "libc"]
 sysinit = [
     "init"
 ]
@@ -99,9 +99,9 @@ failure = "0.1.1"
 failure_derive = "0.1.1"
 kernel32-sys = "0.2.2"
 winapi = { version = "0.3.5", features = ["namedpipeapi"] }
-libc = "0.2.40"
 nix = "0.10.0"
 
+libc = { version = "0.2.40", optional = true }
 platform-info = { git = "https://github.com/uutils/platform-info", optional = true }
 uucore = { git = "https://github.com/uutils/coreutils", features = ["encoding", "fs", "mode", "parse_time"], optional = true }
 tar = { version = "0.4.15", optional = true }

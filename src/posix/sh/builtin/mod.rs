@@ -3,14 +3,14 @@ use std::io::{self, Write};
 use std::iter;
 use std::result::Result as StdResult;
 
-use super::ast::{ExitCode, RuntimeData};
+use super::ast::RuntimeData;
 use super::command::{ExecData, InProcessChild, InProcessCommand, ShellChild};
 use super::env::{CheckBreak, EnvFd, Environment};
 use super::error::{BuiltinError, CmdResult, CommandError};
 use super::option::ShellOption;
 use super::types::TryClone;
 use super::UtilSetup;
-use util::ReadableVec;
+use util::{ExitCode, ReadableVec};
 use {ArgsIter, UtilData, UtilRead, UtilWrite};
 
 use self::break_builtin::BreakBuiltin;
