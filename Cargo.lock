@@ -394,7 +394,7 @@ dependencies = [
  "mio 0.6.15 (registry+https://github.com/rust-lang/crates.io-index)",
  "nix 0.10.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "nom 4.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "platform-info 0.1.0 (git+https://github.com/uutils/platform-info)",
+ "platform-info 0.0.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "pnet 0.21.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "rustyline 2.0.0-alpha (git+https://github.com/kkawakam/rustyline)",
  "socket2 0.3.7 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -568,8 +568,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
 name = "platform-info"
-version = "0.1.0"
-source = "git+https://github.com/uutils/platform-info#d8f497798725694c821cfe3a65cbd2c21d16762a"
+version = "0.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
  "libc 0.2.42 (registry+https://github.com/rust-lang/crates.io-index)",
  "winapi 0.3.5 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -1369,7 +1369,7 @@ dependencies = [
 "checksum num-traits 0.2.5 (registry+https://github.com/rust-lang/crates.io-index)" = "630de1ef5cc79d0cdd78b7e33b81f083cbfe90de0f4b2b2f07f905867c70e9fe"
 "checksum num_cpus 1.8.0 (registry+https://github.com/rust-lang/crates.io-index)" = "c51a3322e4bca9d212ad9a158a02abc6934d005490c054a2778df73a70aa0a30"
 "checksum percent-encoding 1.0.1 (registry+https://github.com/rust-lang/crates.io-index)" = "31010dd2e1ac33d5b46a5b413495239882813e0369f8ed8a5e266f173602f831"
-"checksum platform-info 0.1.0 (git+https://github.com/uutils/platform-info)" = "<none>"
+"checksum platform-info 0.0.1 (registry+https://github.com/rust-lang/crates.io-index)" = "f2fd076acdc7a98374de6e300bf3af675997225bef21aecac2219553f04dd7e8"
 "checksum pnet 0.21.0 (registry+https://github.com/rust-lang/crates.io-index)" = "7f3961c514be0c95233bdccdee9831aadd887a889ebc22e57d73e14d1cedb670"
 "checksum pnet_base 0.21.0 (registry+https://github.com/rust-lang/crates.io-index)" = "948dbdd36f46888ada1d497703e6cae53d227ab0e8871638aba492ad1e4a76dc"
 "checksum pnet_datalink 0.21.0 (registry+https://github.com/rust-lang/crates.io-index)" = "f8d3b3dd76a11ad99d92fef54b2489f76f4045ebd5251bd1af485d55a7e13db6"
