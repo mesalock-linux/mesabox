@@ -286,7 +286,7 @@ fn arg_to_usize<F: FnOnce(usize) -> bool>(arg: OsString, validator: F) -> Result
     }
 }
 
-fn execute_util<S, T>(setup: &mut S, name: &OsStr, args: T) -> ::Result<()>
+fn execute_util<S, T>(setup: &mut S, name: &OsStr, args: T) -> ::Result<ExitCode>
 where
     S: UtilSetup,
     T: ArgsIter,

@@ -16,16 +16,11 @@ mod util;
 #[macro_use]
 mod macros;
 
+include!("../src/util/build/import.rs");
+
 macro_rules! generate_fns {
-    ($($group:ident { $(($util:ident, $feature:expr)),+ }),*) => {
-        $(
-            mod $group {
-                $(
-                    #[cfg(feature = $feature)]
-                    mod $util;
-                )+
-            }
-        )*
+    ($($group:ident { $(($util:tt, $feature:expr)),+ }),*) => {
+        import_utils!($($group { $(($util, $feature)),+ }),*);
     }
 }
 

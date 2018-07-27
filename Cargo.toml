@@ -36,17 +36,21 @@ networking = [
 cat = []
 chmod = ["walkdir", "uucore"]
 echo = []
+false = []
 head = []
 sh = ["nom", "glob", "rustyline"]
 sleep = ["uucore"]
+true = []
 uname = ["platform-info"]
 posix = [
     "cat",
     "chmod",
     "echo",
+    "false",
     "head",
     "sh",
     "sleep",
+    "true",
     "uname"
 ]
 
@@ -71,8 +75,10 @@ windows = [
 
     "cat",
     "echo",
+    "false",
     "head",
     "sleep",
+    "true",
     "uname"
 ]
 

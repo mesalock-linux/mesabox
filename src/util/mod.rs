@@ -20,9 +20,14 @@ use std::str::FromStr;
 
 mod platform;
 
+pub const EXIT_SUCCESS: ExitCode = 0;
+pub const EXIT_FAILURE: ExitCode = 1;
+
 // defined out here rather than in parse_num_with_suffix() because we need the array for testing
 const SUFFIXES: [char; 8] = ['K', 'M', 'G', 'T', 'P', 'E', 'Z', 'Y'];
 const OBSOLETE_SUFFIXES: [char; 2] = ['k', 'm'];
+
+pub type ExitCode = i32;
 
 /// Wrapper around a `Vec<T>` to make it readable (using the standard `Read` trait).
 pub struct ReadableVec<T>(pub Vec<T>);
@@ -86,6 +91,20 @@ impl Write for UtilWriteDyn {
 
     fn flush(&mut self) -> io::Result<()> {
         self.inner.flush()
+    }
+}
+
+pub(crate) struct ExitCodeWrapper(pub ExitCode);
+
+impl From<()> for ExitCodeWrapper {
+    fn from(_val: ()) -> Self {
+        ExitCodeWrapper(0)
+    }
+}
+
+impl From<ExitCode> for ExitCodeWrapper {
+    fn from(val: ExitCode) -> Self {
+        ExitCodeWrapper(val)
     }
 }
 

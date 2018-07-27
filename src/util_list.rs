@@ -18,9 +18,11 @@ generate_fns! {
         (cat, "cat"),
         (chmod, "chmod"),
         (echo, "echo"),
+        (false, "false"),
         (head, "head"),
         (sh, "sh"),
         (sleep, "sleep"),
+        (true, "true"),
         (uname, "uname")
     },
     sysinit {

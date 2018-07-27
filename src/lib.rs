@@ -53,7 +53,6 @@ extern crate rustyline;
 extern crate platform_info;
 
 use clap::{App, SubCommand};
-use libc::EXIT_FAILURE;
 use std::env::{self, VarsOs};
 use std::ffi::{OsStr, OsString};
 use std::io::{self, BufRead, Read, Stderr, Stdin, Stdout, Write};
@@ -61,7 +60,7 @@ use std::iter;
 use std::path::{Path, PathBuf};
 use std::result::Result as StdResult;
 
-pub use util::{AsRawObject, RawObject, UtilReadDyn, UtilWriteDyn};
+pub use util::{AsRawObject, RawObject, UtilReadDyn, UtilWriteDyn, ExitCode, EXIT_SUCCESS, EXIT_FAILURE};
 
 pub use error::*;
 pub use setup::*;
@@ -76,127 +75,12 @@ mod setup;
 #[allow(dead_code)]
 mod util;
 
+include!("util/build/execute.rs");
+
 macro_rules! generate_fns {
-    ($($group:ident { $(($util:ident, $feature:expr)),+ }),*) => {
-        generate_fns!(import $($group { $(($util, $feature)),+ }),*);
-        generate_fns!(dump_cmds $($group { $(($util, $feature)),+ }),*);
-        generate_fns!(easy_util $($group { $(($util, $feature)),+ }),*);
-        generate_fns!(execute_util $($group { $(($util, $feature)),+ }),*);
-        generate_fns!(generate_app $($group { $(($util, $feature)),+ }),*);
-    };
-
-    (import $($group:ident { $(($util:ident, $feature:expr)),+ }),*) => {
-        $(
-            mod $group {
-                $(
-                    #[cfg(feature = $feature)]
-                    pub mod $util;
-                )+
-            }
-        )*
-    };
-
-    (dump_cmds $($group:ident { $(($util:ident, $feature:expr)),+ }),*) => {
-        pub fn dump_commands<S>(setup: &mut S) -> Result<()>
-        where
-            S: UtilSetup,
-        {
-            let stdout = setup.output();
-            let mut stdout = stdout.lock()?;
-
-            $($(
-                #[cfg(feature = $feature)]
-                {
-                    writeln!(stdout, stringify!($util))?;
-                }
-            )+)*
-
-            Ok(())
-        }
-    };
-
-    (easy_util $($group:ident { $(($util:ident, $feature:expr)),+ }),*) => {
-        $($(
-            #[cfg(feature = $feature)]
-            pub fn $util<T, U, V>(args: T) -> Result<()>
-            where
-                T: IntoIterator<IntoIter = V, Item = U>,
-                U: Into<OsString> + AsRef<OsStr> + Clone,
-                V: ArgsIter<ArgItem = U>,
-            {
-                let mut args = iter::once(OsString::from(stringify!($util))).chain(args.into_iter().map(|s| s.into()));
-                EasyUtil::new().execute(&mut args, $group::$util::execute)
-            }
-        )+)*
-    };
-
-    (execute_util $($group:ident { $(($util:ident, $feature:expr)),+ }),*) => {
-        fn execute_util<S, T>(setup: &mut S, name: &OsStr, args: T) -> Option<Result<()>>
-        where
-            S: UtilSetup,
-            T: ArgsIter,
-        {
-            generate_fns!(execute_util_common setup, name, args, $($group { $(($util, $feature)),+ }),*)
-        }
-
-        #[cfg(feature = "sh")]
-        fn execute_util_sh<S, T>(setup: &mut S, name: &OsStr, args: T) -> Option<Result<()>>
-        where
-            S: UtilSetup,
-            T: ArgsIter,
-        {
-            if name == "sh" {
-                None
-            } else {
-                generate_fns!(execute_util_common setup, name, args, $($group { $(($util, $feature)),+ }),*)
-            }
-        }
-
-        #[cfg(feature = "sh")]
-        fn util_exists(name: &str) -> bool {
-            [
-                $($(
-                    #[cfg(feature = $feature)]
-                    stringify!($util),
-                )+)*
-            ].contains(&name)
-        }
-    };
-
-    (execute_util_common $setup:ident, $name:ident, $args:ident, $($group:ident { $(($util:ident, $feature:expr)),+ }),*) => {{
-        let mut result = None;
-        loop {
-            $($(
-                #[cfg(feature = $feature)]
-                {
-                    if $name == stringify!($util) {
-                        result = Some($group::$util::execute($setup, $args));
-                        break
-                    }
-                }
-            )+)*
-            if $name == "dump-cmds" {
-                result = Some(dump_commands($setup))
-            }
-            break;
-        }
-        result
-    }};
-
-    (generate_app $($group:ident { $(($util:ident, $feature:expr)),+ }),*) => {
-        // generate a clap::App such that the available utils are set up as subcommands without any
-        // arguments (adding all the arguments would slow down startup time)
-        fn generate_app() -> App<'static, 'static> {
-            let mut app = app_from_crate!();
-            $($(
-                #[cfg(feature = $feature)]
-                {
-                    app = app.subcommand(SubCommand::with_name(stringify!($util)).about($group::$util::DESCRIPTION));
-                }
-            )+)*
-            app.subcommand(SubCommand::with_name("dump-cmds").about("Print a list of commands in the binary"))
-        }
-    };
+    ($($group:ident { $(($util:tt, $feature:expr)),+ }),*) => {
+        generate_executors!($($group { $(($util, $feature)),+ }),*);
+    }
 }
 
 include!("util_list.rs");
@@ -361,12 +245,12 @@ impl EasyUtil {
         }
     }
 
-    pub fn execute<'a, T, U, V, F>(&'a mut self, args: T, func: F) -> Result<()>
+    pub fn execute<'a, T, U, V, F>(&'a mut self, args: T, func: F) -> Result<ExitCode>
     where
         T: IntoIterator<IntoIter = V, Item = U>,
         U: Into<OsString> + AsRef<OsStr> + Clone,
         V: ArgsIter<ArgItem = U>,
-        F: Fn(&mut UtilData<'a, 'a, 'a, Stdin, Stdout, Stderr, VarsOs>, V) -> Result<()>,
+        F: Fn(&mut UtilData<'a, 'a, 'a, Stdin, Stdout, Stderr, VarsOs>, V) -> Result<ExitCode>,
     {
         let mut data = UtilData::new(
             &mut self.stdin,
@@ -379,7 +263,7 @@ impl EasyUtil {
     }
 }
 
-pub fn execute<S, T, U, V>(setup: &mut S, args: T) -> Result<()>
+pub fn execute<S, T, U, V>(setup: &mut S, args: T) -> Result<ExitCode>
 where
     S: UtilSetup,
     T: IntoIterator<IntoIter = V, Item = U>,
@@ -407,7 +291,7 @@ where
     res
 }
 
-fn start<S, T>(setup: &mut S, args: &mut T) -> Option<Result<()>>
+fn start<S, T>(setup: &mut S, args: &mut T) -> Option<Result<ExitCode>>
 where
     S: UtilSetup,
     T: ArgsIter,
@@ -424,7 +308,7 @@ where
     None
 }
 
-fn handle_util_result<S>(setup: &mut S, filename: &OsStr, res: Result<()>) -> Result<()>
+fn handle_util_result<S>(setup: &mut S, filename: &OsStr, res: Result<ExitCode>) -> Result<ExitCode>
 where
     S: UtilSetup,
 {
@@ -435,7 +319,7 @@ where
                     || clap_err.kind == clap::ErrorKind::VersionDisplayed
                 {
                     write!(setup.output(), "{}", clap_err)?;
-                    return Ok(());
+                    return Ok(EXIT_SUCCESS);
                 }
             }
         }

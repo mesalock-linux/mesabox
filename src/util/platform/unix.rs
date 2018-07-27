@@ -1,4 +1,3 @@
-use libc;
 use nix::{fcntl, unistd};
 
 use std::ffi::OsStr;
@@ -212,7 +211,7 @@ impl From<Pipe> for Stdio {
 /// Determine whether the given file descriptor is a TTY.
 pub fn is_tty(stream: Option<RawObject>) -> bool {
     stream
-        .map(|fd| unsafe { libc::isatty(fd.raw_value()) == 1 })
+        .and_then(|fd| unistd::isatty(fd.raw_value()).ok())
         .unwrap_or(false)
 }
 
