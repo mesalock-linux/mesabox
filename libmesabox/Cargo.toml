@@ -37,7 +37,7 @@ chmod = ["walkdir", "uucore"]
 echo = []
 false = []
 head = []
-sh = ["nom", "glob", "rustyline", "libc"]
+sh = ["nom", "glob", "rustyline", "libc", "log"]
 sleep = ["uucore"]
 true = []
 uname = ["platform-info"]
@@ -118,3 +118,4 @@ fnv = { version = "1.0.6", optional = true }
 nom = { version = "4.0.0", features = ["verbose-errors"], optional = true }
 #rustyline = { version = "1.0.0", optional = true }
 rustyline = { git = "https://github.com/kkawakam/rustyline", optional = true }
+log = { version = "0.4.3", optional = true }

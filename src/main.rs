@@ -7,6 +7,8 @@
 //
 
 extern crate libmesabox as mesabox;
+#[cfg(feature = "env_logger")]
+extern crate env_logger;
 
 use mesabox::UtilData;
 use std::env;
@@ -15,6 +17,11 @@ use std::process;
 
 // this is just a thin wrapper around the library
 fn main() {
+    #[cfg(feature = "env_logger")]
+    {
+        env_logger::init();
+    }
+
     let stdout = io::stdout();
     let stdin = io::stdin();
     let stderr = io::stderr();

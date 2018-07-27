@@ -39,7 +39,7 @@ chmod = ["libmesabox/chmod"]
 echo = ["libmesabox/echo"]
 false = ["libmesabox/false"]
 head = ["libmesabox/head"]
-sh = ["libmesabox/sh"]
+sh = ["libmesabox/sh", "env_logger"]
 sleep = ["libmesabox/sleep"]
 true = ["libmesabox/true"]
 uname = ["libmesabox/uname"]
@@ -97,7 +97,8 @@ default = ["unix"]
 [workspace]
 
 [dependencies]
-libmesabox = { path = "libmesabox" }
+libmesabox = { path = "libmesabox", default-features = false }
+env_logger = { version = "0.5.11", optional = true }
 
 [dev-dependencies]
 tempfile = "3.0.2"

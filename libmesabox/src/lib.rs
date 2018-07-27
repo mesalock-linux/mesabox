@@ -52,6 +52,9 @@ extern crate glob;
 extern crate platform_info;
 #[cfg(feature = "rustyline")]
 extern crate rustyline;
+#[cfg(feature = "log")]
+#[macro_use]
+extern crate log;
 
 use clap::{App, SubCommand};
 use std::env::{self, VarsOs};
