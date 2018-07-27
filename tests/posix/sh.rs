@@ -13,12 +13,10 @@ const NAME: &str = "sh";
 const PIPELINE: &str = "pipeline";
 const PIPELINE_SUBSHELL: &str = "pipeline_subshell";
 
-// FIXME: need to add the ability to read from stdin
 mod stdin {
     use super::*;
 
     #[test]
-    #[ignore]
     fn test_pipeline() {
         new_ucmd!()
             .pipe_in_fixture(input_fixture(PIPELINE))
@@ -27,12 +25,20 @@ mod stdin {
     }
 
     #[test]
-    #[ignore]
     fn test_pipeline_subshell() {
         new_ucmd!()
             .pipe_in_fixture(input_fixture(PIPELINE_SUBSHELL))
             .run()
             .stdout_is_fixture(expected_fixture(PIPELINE_SUBSHELL));
+    }
+
+    // XXX: this is likely a parser issue (again)
+    #[test]
+    #[ignore]
+    fn test_invalid_subshell_loc() {
+        new_ucmd!()
+            .pipe_in("echo hi | echo hello (echo hi; cat) | cat")
+            .fails();
     }
 }
 

@@ -7,6 +7,7 @@ use std::borrow::Cow;
 use std::ffi::{OsStr, OsString};
 use std::fs::File;
 use std::io::{Read, Write};
+use std::iter;
 use std::path::Path;
 
 use util::{self, ExitCode, RawObjectWrapper};
@@ -48,7 +49,7 @@ macro_rules! complete (
     );
 );
 
-pub fn execute<S, T>(setup: &mut S, args: T) -> Result<()>
+pub fn execute<S, T>(setup: &mut S, args: T) -> Result<ExitCode>
 where
     S: UtilSetup,
     T: ArgsIter,
@@ -63,17 +64,20 @@ where
             start_repl(setup)
         } else {
             // TODO: read commands from stdin and exit
-            unimplemented!()
+            let mut data = vec![];
+            setup.input().read_to_end(&mut data)?;
+
+            match matches.values_of_os("ARGUMENTS") {
+                Some(args) => run_data(setup, &data, args),
+                None => run_data(setup, &data, iter::empty()),
+            }
         }
     } else {
         // we have arguments and nothing was specified, so assume it's a script
         let mut args = matches.values_of_os("ARGUMENTS").unwrap();
         let script = util::actual_path(&setup.current_dir(), args.next().unwrap());
 
-        // FIXME: dunno what to do with exitcode (guess do the chmod trick where we set exitcode in
-        //        MesaError?  maybe execute() should return Result<i32>)
-        let code = run_script(setup, &script, args)?;
-        Ok(())
+        run_script(setup, &script, args)
     }
 }
 
@@ -104,8 +108,16 @@ where
     let mut data = vec![];
     input.read_to_end(&mut data)?;
 
+    run_data(setup, &data, args)
+}
+
+fn run_data<'a, S, I>(setup: &mut S, data: &[u8], args: I) -> Result<ExitCode>
+where
+    S: UtilSetup,
+    I: Iterator<Item = &'a OsStr>,
+{
     let mut parser = Parser::new();
-    let res = complete!(data.as_slice(), call_m!(parser.complete_command));
+    let res = complete!(data, call_m!(parser.complete_command));
 
     // FIXME: clearly gross
     match res {
@@ -144,7 +156,7 @@ where
 
 // FIXME: rustyline (and linefeed) seem to only return Strings instead of OsStrings, so they fail
 //        on invalid UTF-8
-fn start_repl<S>(setup: &mut S) -> Result<()>
+fn start_repl<S>(setup: &mut S) -> Result<ExitCode>
 where
     S: UtilSetup,
 {
@@ -281,7 +293,7 @@ where
         }
     }
 
-    Ok(())
+    Ok(0)
 }
 
 fn setup_default_env<S>(setup: &mut S, env: &mut Environment) -> Result<()>
