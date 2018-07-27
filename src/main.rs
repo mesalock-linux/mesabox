@@ -6,7 +6,7 @@
 // For a copy, see the LICENSE file.
 //
 
-extern crate mesabox;
+extern crate libmesabox as mesabox;
 
 use mesabox::UtilData;
 use std::env;

@@ -6,10 +6,10 @@ description = "A collection of utilities important to basic system functionality
 autotests = false
 
 [features]
-arch = ["platform-info"]
-base32 = ["uucore"]
-base64 = ["uucore"]
-yes = []
+arch = ["libmesabox/arch"]
+base32 = ["libmesabox/base32"]
+base64 = ["libmesabox/base64"]
+yes = ["libmesabox/yes"]
 gnu = [
     "arch",
     "base32",
@@ -17,31 +17,32 @@ gnu = [
     "yes"
 ]
 
-getty = ["libc"]
+getty = ["libmesabox/getty"]
 loginutils = [
     "getty"
 ]
 
-# XXX: temporary until renaming dependencies is supported
-tar_util = ["tar", "globset"]
+# FIXME: this is only like this because we can't rename dependencies and we use the same macro in
+#        the tests that libmesabox uses to build
+tar_util = ["libmesabox/tar_util"]
 lsb = [
     "tar_util"
 ]
 
-ping = ["chrono", "crossbeam", "libc", "pnet", "byteorder", "trust-dns-resolver", "mio", "socket2"]
+ping = ["libmesabox/ping"]
 networking = [
     "ping"
 ]
 
-cat = []
-chmod = ["walkdir", "uucore"]
-echo = []
-false = []
-head = []
-sh = ["nom", "glob", "rustyline", "libc"]
-sleep = ["uucore"]
-true = []
-uname = ["platform-info"]
+cat = ["libmesabox/cat"]
+chmod = ["libmesabox/chmod"]
+echo = ["libmesabox/echo"]
+false = ["libmesabox/false"]
+head = ["libmesabox/head"]
+sh = ["libmesabox/sh"]
+sleep = ["libmesabox/sleep"]
+true = ["libmesabox/true"]
+uname = ["libmesabox/uname"]
 posix = [
     "cat",
     "chmod",
@@ -54,7 +55,7 @@ posix = [
     "uname"
 ]
 
-init = ["fnv", "libc"]
+init = ["libmesabox/init"]
 sysinit = [
     "init"
 ]
@@ -66,7 +67,7 @@ unix = [
     "lsb",
     "networking",
     "posix",
-    "sysinit",
+    "sysinit"
 ]
 
 # utilities that work on Windows
@@ -84,41 +85,19 @@ windows = [
 
 # the following are real features (rather than utilities)
 # used to prioritize latency over throughput in utilites that care
-latency = []
+latency = ["libmesabox/latency"]
 # use dynamic dispatch rather than static dispatch (makes utilities slower, but sometimes smaller
 # as well).  this is preferred to no-dynamic if both are specified
-full-dynamic = []
+full-dynamic = ["libmesabox/full-dynamic"]
 # only use static dispatch (this will lead to dramatically larger compile times and binary sizes)
-no-dynamic = []
+no-dynamic = ["libmesabox/no-dynamic"]
 
 default = ["unix"]
 
-[dependencies]
-clap = "2.31.2"
-failure = "0.1.1"
-failure_derive = "0.1.1"
-kernel32-sys = "0.2.2"
-winapi = { version = "0.3.5", features = ["namedpipeapi"] }
-nix = "0.10.0"
+[workspace]
 
-libc = { version = "0.2.40", optional = true }
-platform-info = { git = "https://github.com/uutils/platform-info", optional = true }
-uucore = { git = "https://github.com/uutils/coreutils", features = ["encoding", "fs", "mode", "parse_time"], optional = true }
-tar = { version = "0.4.15", optional = true }
-globset = { version = "0.4.0", optional = true }
-glob = { git = "https://github.com/mesalock-linux/glob", optional = true }
-chrono = { version = "0.4.2", optional = true }
-crossbeam = { version = "0.3.2", optional = true }
-pnet = { version = "0.21.0", optional = true }
-byteorder = { version = "1.2.3", optional = true }
-trust-dns-resolver = { version = "0.9.0", optional = true }
-mio = { version = "0.6.14", optional = true }
-socket2 = { version = "0.3.5", optional = true }
-walkdir = { version = "2.1.4", optional = true }
-fnv = { version = "1.0.6", optional = true }
-nom = { version = "4.0.0", features = ["verbose-errors"], optional = true }
-#rustyline = { version = "1.0.0", optional = true }
-rustyline = { git = "https://github.com/kkawakam/rustyline", optional = true }
+[dependencies]
+libmesabox = { path = "libmesabox" }
 
 [dev-dependencies]
 tempfile = "3.0.2"

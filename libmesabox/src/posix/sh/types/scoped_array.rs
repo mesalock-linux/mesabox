@@ -1,5 +1,5 @@
 use std::iter::IntoIterator;
-use std::ops::{Index, IndexMut};
+use std::ops::Index;
 use std::slice;
 
 use super::{Locality, Scoped};
@@ -24,8 +24,6 @@ impl<T: FixedArray<Item = Locality<V>>, V> ScopedArray<T, V> {
     }
 }
 
-// XXX: do we really want to implement this?  this allows stuff like arr[idx] = val to work, which
-//      will end up ignoring Locality::set_val()
 impl<T: FixedArray<Item = Locality<V>>, V> ScopedArray<T, V> {
     pub fn iter_mut(&mut self) -> ScopedArrayIter<V> {
         ScopedArrayIter {
@@ -62,12 +60,6 @@ impl<T: FixedArray<Item = Locality<V>>, V> Index<usize> for ScopedArray<T, V> {
 
     fn index(&self, index: usize) -> &Self::Output {
         self.inner.as_slice()[index].current_val()
-    }
-}
-
-impl<T: FixedArray<Item = Locality<V>>, V> IndexMut<usize> for ScopedArray<T, V> {
-    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
-        self.inner.as_mut()[index].current_val_mut()
     }
 }
 

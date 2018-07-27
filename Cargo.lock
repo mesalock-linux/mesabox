@@ -356,6 +356,35 @@ version = "0.2.42"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
+name = "libmesabox"
+version = "0.1.0"
+dependencies = [
+ "byteorder 1.2.3 (registry+https://github.com/rust-lang/crates.io-index)",
+ "chrono 0.4.4 (registry+https://github.com/rust-lang/crates.io-index)",
+ "clap 2.32.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "crossbeam 0.3.2 (registry+https://github.com/rust-lang/crates.io-index)",
+ "failure 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "failure_derive 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "fnv 1.0.6 (registry+https://github.com/rust-lang/crates.io-index)",
+ "glob 0.2.11 (git+https://github.com/mesalock-linux/glob)",
+ "globset 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "kernel32-sys 0.2.2 (registry+https://github.com/rust-lang/crates.io-index)",
+ "libc 0.2.42 (registry+https://github.com/rust-lang/crates.io-index)",
+ "mio 0.6.15 (registry+https://github.com/rust-lang/crates.io-index)",
+ "nix 0.10.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "nom 4.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "platform-info 0.1.0 (git+https://github.com/uutils/platform-info)",
+ "pnet 0.21.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "rustyline 2.0.0-alpha (git+https://github.com/kkawakam/rustyline)",
+ "socket2 0.3.7 (registry+https://github.com/rust-lang/crates.io-index)",
+ "tar 0.4.16 (registry+https://github.com/rust-lang/crates.io-index)",
+ "trust-dns-resolver 0.9.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "uucore 0.0.1 (git+https://github.com/uutils/coreutils)",
+ "walkdir 2.1.4 (registry+https://github.com/rust-lang/crates.io-index)",
+ "winapi 0.3.5 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
 name = "linked-hash-map"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -406,31 +435,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 name = "mesabox"
 version = "0.1.0"
 dependencies = [
- "byteorder 1.2.3 (registry+https://github.com/rust-lang/crates.io-index)",
- "chrono 0.4.4 (registry+https://github.com/rust-lang/crates.io-index)",
- "clap 2.32.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "crossbeam 0.3.2 (registry+https://github.com/rust-lang/crates.io-index)",
- "failure 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
- "failure_derive 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
- "fnv 1.0.6 (registry+https://github.com/rust-lang/crates.io-index)",
- "glob 0.2.11 (git+https://github.com/mesalock-linux/glob)",
- "globset 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "kernel32-sys 0.2.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "lazy_static 1.0.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "libc 0.2.42 (registry+https://github.com/rust-lang/crates.io-index)",
- "mio 0.6.15 (registry+https://github.com/rust-lang/crates.io-index)",
- "nix 0.10.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "nom 4.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "platform-info 0.1.0 (git+https://github.com/uutils/platform-info)",
- "pnet 0.21.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "rustyline 2.0.0-alpha (git+https://github.com/kkawakam/rustyline)",
- "socket2 0.3.7 (registry+https://github.com/rust-lang/crates.io-index)",
- "tar 0.4.16 (registry+https://github.com/rust-lang/crates.io-index)",
+ "libmesabox 0.1.0",
  "tempfile 3.0.3 (registry+https://github.com/rust-lang/crates.io-index)",
- "trust-dns-resolver 0.9.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "uucore 0.0.1 (git+https://github.com/uutils/coreutils)",
- "walkdir 2.1.4 (registry+https://github.com/rust-lang/crates.io-index)",
- "winapi 0.3.5 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]

@@ -300,10 +300,6 @@ impl Environment {
         &self.fds[fd]
     }
 
-    pub fn get_fd_mut(&mut self, fd: usize) -> &mut EnvFd {
-        &mut self.fds[fd]
-    }
-
     pub fn fds(&self) -> &FdArray {
         &self.fds
     }

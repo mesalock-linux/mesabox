@@ -6,7 +6,7 @@
 // For a copy, see the LICENSE file.
 //
 
-extern crate mesabox;
+extern crate libmesabox as mesabox;
 #[macro_use]
 extern crate lazy_static;
 extern crate libc;
@@ -16,7 +16,7 @@ mod util;
 #[macro_use]
 mod macros;
 
-include!("../src/util/build/import.rs");
+include!("../libmesabox/src/util/build/import.rs");
 
 macro_rules! generate_fns {
     ($($group:ident { $(($util:tt, $feature:expr)),+ }),*) => {
@@ -25,4 +25,4 @@ macro_rules! generate_fns {
 }
 
 // calls generate_fns!()
-include!("../src/util_list.rs");
+include!("../libmesabox/src/util_list.rs");

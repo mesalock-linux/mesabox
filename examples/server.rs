@@ -1,4 +1,4 @@
-extern crate mesabox;
+extern crate libmesabox as mesabox;
 
 use mesabox::UtilData;
 use std::io::Write;
