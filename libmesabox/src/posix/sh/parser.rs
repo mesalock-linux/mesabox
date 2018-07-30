@@ -111,7 +111,12 @@ macro_rules! return_error (
     );
 );
 
-type IResult<'a, O> = nom::IResult<&'a [u8], O, ParserError>;
+#[cfg(windows)]
+type ParseInput<'a> = std::os::windows::ffi::EncodeWide<'a>;
+#[cfg(unix)]
+type ParseInput<'a> = std::slice::Iter<'a, u8>;
+
+type ParseResult<'a, O> = Result<(ParseInput<'a>, O), ParserError>;
 
 #[derive(Debug)]
 pub enum ParserError {
@@ -127,17 +132,24 @@ pub enum ParserError {
     CommandSubst,
     DoubleQuote,
     SingleQuote,
+    AndOrSep,
     Token(&'static str),
     Keyword(&'static str),
+    Item(&'static OsStr),
 
-    // XXX: this should never happen but is needed to make nom happy
-    Other(u32)
+    // this occurs when there is a newline but nothing else in the input (in a location where a
+    // newline is expected AND where we are still in the middle of parsing something) or when there
+    // is a line continuation and nothing else in the input (unlike `nom`, which gives this value
+    // back very easily)
+    Incomplete,
 }
 
 impl fmt::Display for ParserError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         use self::ParserError::*;
 
+        // TODO: add line numbers (probably set ParserError up so that it's a struct with `linenum`
+        //       and `kind` fields
         let args = match self {
             If => "in if",
             Case => "in case",
@@ -151,11 +163,12 @@ impl fmt::Display for ParserError {
             CommandSubst => "in command substitution",
             DoubleQuote => "in double quote",
             SingleQuote => "in single quote",
+            AndOrSep => "expected && or ||",
             Token(tok) => return write!(f, "expected token {}", tok),
             Keyword(keyword) => return write!(f, "expected keyword {}", keyword),
+            Item(item) => return write!(f, "expected {:?}", item),
 
-            // XXX: if this is reachable the parser is broken
-            Other(_) => unreachable!()
+            Incomplete => "expected more input",
         };
         write!(f, "{}", args)
     }
@@ -218,6 +231,92 @@ impl Parser {
     }
 }
 
+enum Token<'a> {
+    AndIf,
+    OrIf,
+    DSemi,
+    DLess,
+    DGreat,
+    LessAnd,
+    GreatAnd,
+    LessGreat,
+    DLessDash,
+    Clobber,
+    LParen,
+    RParen,
+
+    Newline,
+    // NOTE: u8 is big enough as we only store FDs from 0 to 9
+    Number(u8),
+    Word(&'a OsStr),
+
+    // the following are reserved words, so they only matter if they are the first element in a
+    // command
+    If,
+    Then,
+    Else,
+    Elif,
+    Fi,
+    Do,
+    Done,
+    Case,
+    Esac,
+    While,
+    Until,
+    For,
+
+    // also reserved words, not tokens
+    LBrace,
+    RBrace,
+    Bang,
+    In,
+}
+
+fn token_to_input(token: &OsStr) -> ParseInput {
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+
+        token.as_bytes().iter()
+    }
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+
+        token.encode_wide()
+    }
+}
+
+/*
+fn next_token<'a>(input: ParseInput<'a>) -> (ParseInput<'a>, Token<'a>) {
+
+}
+*/
+fn is_token<'a>(input: ParseInput<'a>, token: &'static OsStr) -> ParseResult<'a, ()> {
+    let (mut input, res) = is_next(input, token);
+
+    if res {
+        // FIXME: this should be based on tag_token() below instead of using delimiter
+        if !is_delimiter(input) {}
+    } else {
+        (input, res)
+    }
+}
+
+fn is_next<'a>(mut input: ParseInput<'a>, value: &'static OsStr) -> ParseResult<'a, ()> {
+    for ch in token_to_input(token) {
+        match input.next() {
+            Some(val) if val == ch => {}
+            _ => {
+                return Err(ParserError::Item(value));
+            }
+        }
+    }
+
+    Ok((input, ()))
+}
+
 fn tag_token<'a>(input: &'a [u8], token: &'static str) -> IResult<'a, &'a [u8]> {
     debug!("tag_token {:?}", token);
     add_return_error!(input, ErrorKind::Custom(ParserError::Token(token)), terminated!(clean_tag!(token), ignore))
@@ -228,59 +327,94 @@ fn tag_keyword<'a>(input: &'a [u8], keyword: &'static str) -> IResult<'a, &'a [u
     add_return_error!(input, ErrorKind::Custom(ParserError::Keyword(keyword)), terminated!(clean_tag!(keyword), delimiter))
 }
 
-fn list<'a>(input: &'a [u8], parser: &mut Parser) -> IResult<'a, Vec<Vec<AndOr>>> {
+fn list<'a>(input: ParseInput<'a>, parser: &mut Parser) -> ParseResult<'a, Vec<Vec<AndOr>>> {
     debug!("list");
-    separated_nonempty_list_complete!(input, separator_op, call!(and_or, parser))
+
+    let (mut input, value) = and_or(input, parser)?;
+    let mut result = vec![value];
+
+    while let Ok((inp, op)) = separator_op(input.clone()) {
+        let (inp, value) = and_or(inp, parser)?;
+        input = inp;
+        result.push(value);
+    }
+
+    Ok((input, result))
 }
 
-fn and_or<'a>(input: &'a [u8], parser: &mut Parser) -> IResult<'a, Vec<AndOr>> {
+fn and_or<'a>(input: ParseInput<'a>, parser: &mut Parser) -> ParseResult<'a, Vec<AndOr>> {
     debug!("and_or");
-    do_parse!(input,
-        first: call!(pipeline, parser) >>
-        res: fold_many0!(
-            call!(and_or_inner, parser),
-            vec![AndOr::new(first, SepKind::First)],
-            |mut acc: Vec<_>, item| { acc.push(item); acc }
-        ) >>
-        (res)
-    )
+
+    let (mut input, value) = pipeline(input, parser)?;
+    let mut result = vec![AndOr::new(value, SepKind::First)];
+
+    while let Ok((inp, sep)) = and_or_sep(input.clone(), parser) {
+        let (inp, _) = linebreak(inp, parser)?;
+        let (inp, value) = pipeline(inp, parser)?;
+
+        input = inp;
+        result.push(AndOr::new(value, sep));
+    }
+
+    Ok((input, result))
 }
 
-fn and_or_inner<'a>(input: &'a [u8], parser: &mut Parser) -> IResult<'a, AndOr> {
-    debug!("and_or_inner");
-    do_parse!(input,
-        sep: call!(and_or_sep, parser) >>
-        pipe: call!(pipeline, parser) >>
-        (AndOr::new(pipe, sep))
-    )
-}
-
-fn and_or_sep<'a>(input: &'a [u8], parser: &mut Parser) -> IResult<'a, SepKind> {
+fn and_or_sep<'a>(input: ParseInput<'a>, parser: &mut Parser) -> ParseResult<'a, SepKind> {
     debug!("and_or_sep");
-    do_parse!(input,
-        res: alt!(
-            tag_token!("&&") => { |_| SepKind::And } |
-            tag_token!("||") => { |_| SepKind::Or }
-        ) >>
-        call!(linebreak, parser) >>
-        (res)
-    )
+
+    is_token(input.clone(), OsStr::new("&&"))
+        .map(|(input, _)| (input, SepKind::And))
+        .map_err(|_| {
+            is_token(input, OsStr::new("||"))
+                .map(|(input, _)| (input, SepKind::Or))
+                .map_err(|_| ParserError::AndOrSep)
+        })
 }
 
-fn var_name<'a>(input: &'a [u8]) -> IResult<'a, OsString> {
+fn var_name<'a>(input: ParseInput<'a>) -> ParseResult<'a, OsString> {
     debug!("var_name");
     name(input)
 }
 
-fn var_assign<'a>(input: &'a [u8], parser: &mut Parser) -> IResult<'a, VarAssign> {
+fn var_assign<'a>(input: ParseInput<'a>, parser: &mut Parser) -> ParseResult<'a, VarAssign> {
     debug!("var_assign");
-    do_parse!(input,
-        name: var_name >>
-        clean_tag!("=") >>
-        expr: opt!(call!(word, parser)) >>
-        cond!(expr.is_none(), ignore) >>
-        (VarAssign { varname: name, value: expr })
-    )
+
+    let (mut input, name) = var_name(input)?;
+    is_next(input, OsStr::new("="))
+        .map(|(input, _)| {
+            let (input, expr) = match word(input.clone(), parser) {
+                Ok((input, expr)) => (input, Some(expr)),
+                _ => {
+                    let (input, _) = ignore(input).unwrap();
+                    (input, None)
+                }
+            };
+            (input, VarAssign { varname: name, value: expr })
+        })
+}
+
+fn parameter<'a>(input: ParseInput<'a>, parser: &mut Parser) -> ParseResult<'a, ParamExpr> {
+    debug!("parameter");
+
+    let (input, res) = is_next(input, OsStr::new("$"));
+    if res {
+        let (input, res) = is_next(input, OsStr::new("{"));
+        if res {
+            let (input, expr) = param_expr(input, parser)?;
+            let (input, res) = is_next(input, OsStr::new("}"));
+            if res {
+                // we are good now
+                Ok((input, expr))
+            } else {
+                // TODO: error
+            }
+        } else {
+            let (input, name) = param_name(input)?;
+            Ok((input, ParamExpr::new(name, ParamExprKind::Value)))
+        }
+    } else {
+        // TODO: error
+    }
 }
 
 fn parameter<'a>(input: &'a [u8], parser: &mut Parser) -> IResult<'a, ParamExpr> {
