@@ -12,8 +12,8 @@ use std::time::{Duration, Instant};
 
 const NAME: &str = "sleep";
 
-const SLEEP_TIME: f32 = 1.75;
-const DIFF: f32 = 0.5;
+const SLEEP_TIME: f32 = 5.75;
+const DIFF: f32 = 1.5;
 
 #[test]
 fn test_one_param() {
