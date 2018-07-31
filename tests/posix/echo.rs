@@ -1,7 +1,7 @@
 //
 // Copyright (c) 2018, The MesaLock Linux Project Contributors
 // All rights reserved.
-// 
+//
 // This work is licensed under the terms of the BSD 3-Clause License.
 // For a copy, see the LICENSE file.
 //
@@ -31,104 +31,113 @@
 //     SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 //
 
-use util::*;
+use assert_cmd::prelude::*;
+use std::process::Command;
 
 const NAME: &str = "echo";
 
 #[test]
 fn test_default() {
-    //CmdResult.stdout_only(...) trims trailing newlines
-    assert_eq!("hi\n".as_bytes(), &new_ucmd!().arg("hi").succeeds().no_stderr().stdout[..]);
+    new_cmd!()
+        .arg("hi")
+        .assert()
+        .success()
+        .stdout("hi\n")
+        .stderr("");
 }
 
 #[test]
 fn test_no_trailing_newline() {
-    //CmdResult.stdout_only(...) trims trailing newlines
-    assert_eq!("hi".as_bytes(), &new_ucmd!().arg(r"hi\c").succeeds().no_stderr().stdout[..]);
+    new_cmd!()
+        .arg(r"hi\c")
+        .assert()
+        .success()
+        .stdout("hi")
+        .stderr("");
 }
 
 #[test]
 fn test_escape_alert() {
-    new_ucmd!().arg(r"\a").succeeds().stdout_only("\x07\n");
+    new_cmd!().arg(r"\a").assert().success().stdout("\x07\n").stderr("");
 }
 
 #[test]
 fn test_escape_backslash() {
-    new_ucmd!().arg(r"\\").succeeds().stdout_only("\\\n");
+    new_cmd!().arg(r"\\").assert().success().stdout("\\\n").stderr("");
 }
 
 #[test]
 fn test_escape_backspace() {
-    new_ucmd!().arg(r"\b").succeeds().stdout_only("\x08\n");
+    new_cmd!().arg(r"\b").assert().success().stdout("\x08\n").stderr("");
 }
 
 #[test]
 fn test_escape_carriage_return() {
-    new_ucmd!().arg(r"\r").succeeds().stdout_only("\r\n");
+    new_cmd!().arg(r"\r").assert().success().stdout("\r\n").stderr("");
 }
 
 #[test]
 fn test_escape_form_feed() {
-    new_ucmd!().arg(r"\f").succeeds().stdout_only("\x0C\n");
+    new_cmd!().arg(r"\f").assert().success().stdout("\x0C\n").stderr("");
 }
 
 #[test]
 fn test_escape_newline() {
-    new_ucmd!().arg(r"\na").succeeds().stdout_only("\na\n");
+    new_cmd!().arg(r"\na").assert().success().stdout("\na\n").stderr("");
 }
 
 #[test]
 fn test_escape_no_further_output() {
-    new_ucmd!().arg(r"a\cb").succeeds().stdout_only("a");
+    new_cmd!().arg(r"a\cb").assert().success().stdout("a").stderr("");
 }
 
 #[test]
 fn test_escape_octal() {
-    new_ucmd!().arg(r"\0100").succeeds().stdout_only("@\n");
+    new_cmd!().arg(r"\0100").assert().success().stdout("@\n").stderr("");
 }
 
 #[test]
 fn test_escape_tab() {
-    new_ucmd!().arg(r"\t").succeeds().stdout_only("\t\n");
+    new_cmd!().arg(r"\t").assert().success().stdout("\t\n").stderr("");
 }
 
 #[test]
 fn test_escape_vertical_tab() {
-    new_ucmd!().arg(r"\v").succeeds().stdout_only("\x0B\n");
+    new_cmd!().arg(r"\v").assert().success().stdout("\x0B\n").stderr("");
 }
 
 #[test]
 fn test_escape_others() {
-    new_ucmd!().arg(r"\o").succeeds().stdout_only("\\o\n");
+    new_cmd!().arg(r"\o").assert().success().stdout("\\o\n").stderr("");
 }
 
 #[test]
 fn test_escape_octal_break() {
-    new_ucmd!().arg(r"\0178").succeeds().stdout_only("\x0f\x38\n");
+    new_cmd!().arg(r"\0178").assert().success().stdout("\x0f\x38\n").stderr("");
 }
 
 #[test]
 fn test_escape_octal_nothing() {
-    new_ucmd!().arg(r"\0").succeeds().stdout_only("\x00\n");
+    new_cmd!().arg(r"\0").assert().success().stdout("\x00\n").stderr("");
 }
 
 #[test]
 fn test_multiple_args() {
-    new_ucmd!().args(&[r"a", r"b", r"c"]).succeeds().stdout_only("a b c\n");
+    new_cmd!().args(&[r"a", r"b", r"c"]).assert().success().stdout("a b c\n").stderr("");
 }
 
 #[test]
 fn test_no_arg() {
-    new_ucmd!().succeeds().stdout_only("\n");
+    new_cmd!().assert().success().stdout("\n").stderr("");
 }
 
 #[test]
 fn test_escape_none() {
-    new_ucmd!().arg(r"\").succeeds().stdout_only("\\\n");
+    new_cmd!().arg(r"\").assert().success().stdout("\\\n").stderr("");
 }
 
 #[test]
 fn test_many_backslash() {
     // should output 4 backslashes + newline
-    new_ucmd!().arg(r"\\\\\\\").succeeds().stdout_only("\\\\\\\\\n");
+    new_cmd!().arg(r"\\\\\\\").assert().success().stdout("\\\\\\\\\n").stderr("");
 }
