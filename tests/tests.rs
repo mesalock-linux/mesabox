@@ -12,6 +12,7 @@ extern crate lazy_static;
 extern crate libc;
 extern crate tempfile;
 extern crate assert_cmd;
+extern crate assert_fs;
 extern crate predicates;
 
 mod util;
