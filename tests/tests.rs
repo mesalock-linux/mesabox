@@ -15,7 +15,6 @@ extern crate assert_cmd;
 extern crate assert_fs;
 extern crate predicates;
 
-mod util;
 #[macro_use]
 mod macros;
 
