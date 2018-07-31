@@ -34,8 +34,9 @@ ping    | Networking | Simple Version
 cat     | POSIX/GNU | **Complete**
 chmod   | POSIX/GNU | **Mostly Complete** <br/> (missing `--reference`)
 head    | POSIX/GNU | **Complete**
+echo    | POSIX | **Complete**
 init    | POSIX | Simple Version
-sh      | POSIX | TODO
+sh      | POSIX | Significant Progress
 sleep   | POSIX | **Complete**
 
 Maintainer

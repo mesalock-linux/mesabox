@@ -6,7 +6,9 @@
 // For a copy, see the LICENSE file.
 //
 
-extern crate mesabox;
+extern crate libmesabox as mesabox;
+#[cfg(feature = "env_logger")]
+extern crate env_logger;
 
 use mesabox::UtilData;
 use std::env;
@@ -15,27 +17,57 @@ use std::process;
 
 // this is just a thin wrapper around the library
 fn main() {
-    let mut stdout = io::stdout();
-    let mut stdin = io::stdin();
-    let mut stderr = io::stderr();
+    #[cfg(feature = "env_logger")]
+    {
+        env_logger::init();
+    }
 
-    let mut setup = UtilData::new(&mut stdin, &mut stdout, &mut stderr, env::vars_os(), None);
+    let stdout = io::stdout();
+    let stdin = io::stdin();
+    let stderr = io::stderr();
 
-    if let Err(f) = mesabox::execute(&mut setup, &mut env::args_os()) {
-        if let Some(ref err) = f.err {
-            let mut skip = false;
-            // XXX: should this be checked in lib.rs?  i feel like it might be useful if people can detect this, so it is being done this way atm
-            if let Some(e) = err.downcast_ref::<io::Error>() {
-                if e.kind() == io::ErrorKind::BrokenPipe {
-                    skip = true;
+    let (mut input, mut output, mut error) = {
+        #[cfg(feature = "full-dynamic")]
+        {
+            use mesabox::{AsRawObject, UtilReadDyn, UtilWriteDyn};
+
+            let in_obj = stdin.as_raw_object();
+            let out_obj = stdout.as_raw_object();
+            let err_obj = stderr.as_raw_object();
+
+            let input = UtilReadDyn::new(Box::new(stdin), Some(in_obj));
+            let output = UtilWriteDyn::new(Box::new(stdout), Some(out_obj));
+            let error = UtilWriteDyn::new(Box::new(stderr), Some(err_obj));
+            (input, output, error)
+        }
+        #[cfg(not(feature = "full-dynamic"))]
+        {
+            (stdin, stdout, stderr)
+        }
+    };
+    let mut setup = UtilData::new(&mut input, &mut output, &mut error, env::vars_os(), None);
+
+    let code = match mesabox::execute(&mut setup, &mut env::args_os()) {
+        Ok(code) => code,
+        Err(f) => {
+            if let Some(ref err) = f.err {
+                let mut skip = false;
+                // XXX: should this be checked in lib.rs?  i feel like it might be useful if people can detect this, so it is being done this way atm
+                if let Some(e) = err.downcast_ref::<io::Error>() {
+                    if e.kind() == io::ErrorKind::BrokenPipe {
+                        skip = true;
+                    }
+                }
+
+                if !skip {
+                    let _ = writeln!(setup.stderr, "{}", f);
+                    let _ = setup.stderr.flush();
                 }
             }
 
-            if !skip {
-                let _ = writeln!(setup.stderr, "{}", f);
-                let _ = setup.stderr.flush();
-            }
+            f.exitcode
         }
-        process::exit(f.exitcode);
-    }
+    };
+
+    process::exit(code);
 }

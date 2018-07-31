@@ -1,0 +1,121 @@
+[package]
+name = "libmesabox"
+version = "0.1.0"
+authors = ["Alex Lyon <alexlyon@baidu.com>"]
+description = "A collection of common command-line utilities in library form"
+
+[features]
+arch = ["platform-info"]
+base32 = ["uucore"]
+base64 = ["uucore"]
+yes = []
+gnu = [
+    "arch",
+    "base32",
+    "base64",
+    "yes"
+]
+
+getty = ["libc"]
+loginutils = [
+    "getty"
+]
+
+# XXX: temporary until renaming dependencies is supported
+tar_util = ["tar", "globset"]
+lsb = [
+    "tar"
+]
+
+ping = ["chrono", "crossbeam", "libc", "pnet", "byteorder", "trust-dns-resolver", "mio", "socket2"]
+networking = [
+    "ping"
+]
+
+cat = []
+chmod = ["walkdir", "uucore"]
+echo = []
+false = []
+head = []
+sh = ["nom", "glob", "rustyline", "libc", "log"]
+sleep = ["uucore"]
+true = []
+uname = ["platform-info"]
+posix = [
+    "cat",
+    "chmod",
+    "echo",
+    "false",
+    "head",
+    "sh",
+    "sleep",
+    "true",
+    "uname"
+]
+
+init = ["fnv", "libc"]
+sysinit = [
+    "init"
+]
+
+# utilities that work on Unix
+unix = [
+    "gnu",
+    "loginutils",
+    "lsb",
+    "networking",
+    "posix",
+    "sysinit",
+]
+
+# utilities that work on Windows
+windows = [
+    "gnu",
+
+    "cat",
+    "echo",
+    "false",
+    "head",
+    "sleep",
+    "true",
+    "uname"
+]
+
+# the following are real features (rather than utilities)
+# used to prioritize latency over throughput in utilites that care
+latency = []
+# use dynamic dispatch rather than static dispatch (makes utilities slower, but sometimes smaller
+# as well).  this is preferred to no-dynamic if both are specified
+full-dynamic = []
+# only use static dispatch (this will lead to dramatically larger compile times and binary sizes)
+no-dynamic = []
+
+default = ["unix"]
+
+[dependencies]
+clap = "2.31.2"
+failure = "0.1.1"
+failure_derive = "0.1.1"
+kernel32-sys = "0.2.2"
+winapi = { version = "0.3.5", features = ["namedpipeapi"] }
+nix = "0.10.0"
+
+libc = { version = "0.2.40", optional = true }
+platform-info = { version = "0.0.1", optional = true }
+uucore = { git = "https://github.com/uutils/coreutils", features = ["encoding", "fs", "mode", "parse_time"], optional = true }
+tar = { version = "0.4.15", optional = true }
+globset = { version = "0.4.0", optional = true }
+glob = { git = "https://github.com/mesalock-linux/glob", optional = true }
+chrono = { version = "0.4.2", optional = true }
+crossbeam = { version = "0.3.2", optional = true }
+pnet = { version = "0.21.0", optional = true }
+byteorder = { version = "1.2.3", optional = true }
+trust-dns-resolver = { version = "0.9.0", optional = true }
+mio = { version = "0.6.14", optional = true }
+socket2 = { version = "0.3.5", optional = true }
+walkdir = { version = "2.1.4", optional = true }
+fnv = { version = "1.0.6", optional = true }
+nom = { version = "4.0.0", features = ["verbose-errors"], optional = true }
+# use the git version until an update is finally published to crates.io
+rustyline = { git = "https://github.com/kkawakam/rustyline", optional = true }
+log = { version = "0.4.3", optional = true }

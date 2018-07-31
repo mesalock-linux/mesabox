@@ -1,10 +1,12 @@
 language: rust
+cache: cargo
 rust:
+  - 1.26.2
   - stable
   - nightly
 env:
-  - TARGET=x86_64-unknown-linux-gnu
-  - TARGET=x86_64-unknown-linux-musl
+  - TARGET=x86_64-unknown-linux-gnu TEST=1
+  - TARGET=x86_64-unknown-linux-musl TEST=1
   - TARGET=aarch64-unknown-linux-gnu RUSTFLAGS="-C linker=aarch64-linux-gnu-gcc"
   - TARGET=arm-unknown-linux-gnueabi RUSTFLAGS="-C linker=arm-linux-gnueabi-gcc"
 matrix:
@@ -17,20 +19,43 @@ matrix:
       env: TARGET=x86_64-apple-darwin
     - rust: nightly
       env: TARGET=x86_64-unknown-linux-gnu COVERAGE=1
+      install:
+        - ./ci/build-lcov
+        - sudo apt-get install -qq libclang-common-3.8-dev llvm-3.8-dev
+      script:
+        - ./ci/run-cov
+        - bash <(curl -s https://codecov.io/bash) -f final.info
+    - rust: stable
+      env: TARGET=x86_64-unknown-linux-gnu FMT=1
+      before_install:
+      install:
+      before_script:
+        - rustup component add rustfmt-preview
+      script:
+        - cargo fmt -- --write-mode check
+    - rust: nightly
+      env: TARGET=x86_64-unknown-linux-gnu CLIPPY=1
+      before_install:
+      install:
+      before_script:
+        - rustup component add clippy-preview --toolchain=nightly
+      script:
+        - cargo clippy
   allow_failures:
     - rust: nightly
   fast_finish: true
 before_install:
   - if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then sudo apt-get update -qq; fi
+install:
   - if [[ "$TARGET" == "x86_64-unknown-linux-musl" ]]; then sudo apt-get install -qq musl-tools; fi
   - if [[ "$TARGET" == "aarch64-unknown-linux-gnu" ]]; then sudo apt-get install -qq gcc-aarch64-linux-gnu libc6-arm64-cross libc6-dev-arm64-cross; fi
   - if [[ "$TARGET" == "arm-unknown-linux-gnueabi" ]]; then sudo apt-get install -qq gcc-arm-linux-gnueabi libc6-armel-cross libc6-dev-armel-cross; fi
-  - if [[ "$COVERAGE" == "1" ]]; then ./ci/build-lcov; fi
-  - if [[ "$COVERAGE" == "1" ]]; then sudo apt-get install libclang-common-3.8-dev llvm-3.8-dev; fi
-script:
+before_script:
   - rustup target add $TARGET || true
+script:
   - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then cargo build --verbose --no-default-features --features gnu,lsb,networking,posix --target $TARGET; fi
   - if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then cargo build --verbose --all --target $TARGET; fi
-  - if [[ "$TARGET" =~ "x86_64-unknown-linux-*" ]]; then cargo test --verbose --all --target $TARGET; fi
-  - if [[ "$COVERAGE" == "1" ]]; then ./ci/run-cov; fi
-  - if [[ "$COVERAGE" == "1" ]]; then bash <(curl -s https://codecov.io/bash) -f final.info; fi
+  - if [[ "$TEST" == "1" ]]; then cargo test --verbose --all --target $TARGET; fi
+notifications:
+  email:
+    on_success: never

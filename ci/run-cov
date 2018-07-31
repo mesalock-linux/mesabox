@@ -1,10 +1,12 @@
 #!/bin/bash -e
 
-export COVERAGE_OPTIONS="-Zprofile -Copt-level=1 -Clink-dead-code -Ccodegen-units=1 -Zno-landing-pads"
+for path in /usr/lib/llvm-3.8/lib/clang/3.8.[0-9]/lib/linux/; do LLVM_PATH=$path; done
+export COVERAGE_OPTIONS="-Ccodegen-units=1 -Copt-level=0 -Clink-dead-code -Cpasses=insert-gcov-profiling -Zno-landing-pads -L$LLVM_PATH -lclang_rt.profile-x86_64"
 export RUSTC_WRAPPER="./ci/cov-rustc"
 export CARGO_INCREMENTAL=0
 
 LCOVOPT="--gcov-tool ./ci/llvm-gcov --rc lcov_branch_coverage=1 --rc lcov_excl_line=assert"
+LCOV="/usr/local/bin/lcov"
 
 # cleanup all
 rm -rf *.info *.gcda *.gcno
@@ -14,20 +16,21 @@ cargo clean
 cargo rustc --all-features --profile test --lib
 rm ./target/debug/mesabox-*.d
 ./target/debug/mesabox-*
-lcov ${LCOVOPT} --capture --directory . --base-directory . -o mesabox.info
+${LCOV} ${LCOVOPT} --capture --directory . --base-directory . -o mesabox.info
 
 # cleanup target
+rm -rf *.gcda *.gcno
 cargo clean
 
 # integration tests
 cargo rustc --all-features --test tests
 rm ./target/debug/tests-*.d
 ./target/debug/tests-*
-lcov ${LCOVOPT} --capture --directory . --base-directory . -o tests.info
+${LCOV} ${LCOVOPT} --capture --directory . --base-directory . -o tests.info
 
 # combining and filtering
-lcov ${LCOVOPT} --add mesabox.info --add tests.info -o coverage.info
-lcov ${LCOVOPT} --extract coverage.info `find "$(cd src; pwd)" -name "*.rs"` -o final.info
+${LCOV} ${LCOVOPT} --add mesabox.info --add tests.info -o coverage.info
+${LCOV} ${LCOVOPT} --extract coverage.info `find "$(cd src; pwd)" -name "*.rs"` -o final.info
 
 # generate report if not in CI
 if [[ "$CI" != true ]]; then
