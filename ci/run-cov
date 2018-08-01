@@ -31,7 +31,7 @@ ${LCOV} ${LCOVOPT} --capture --directory . --base-directory . -o tests.info
 
 # combining and filtering
 ${LCOV} ${LCOVOPT} --add libmesabox.info --add tests.info -o coverage.info
-${LCOV} ${LCOVOPT} --extract coverage.info `find "$(cd src; pwd)" -name "*.rs"` `find "$(cd libmesabox; pwd)" -name "*.rs"` -o final.info
+${LCOV} ${LCOVOPT} --extract coverage.info `find "$(cd src; pwd)" "$(cd libmesabox; pwd)" -name "*.rs"` -o final.info
 
 # generate report if not in CI
 if [[ "$CI" != true ]]; then
