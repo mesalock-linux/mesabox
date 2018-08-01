@@ -8,6 +8,7 @@
 
 use assert_cmd::prelude::*;
 use predicates::prelude::*;
+use timebomb;
 use std::process::Command;
 
 const NAME: &str = "sh";
@@ -44,6 +45,356 @@ mod stdin {
             .with_stdin().buffer("echo hi | echo hello (echo hi; cat) | cat")
             .assert()
             .failure();
+    }
+
+    #[test]
+    fn test_param_value_no_braces() {
+        new_cmd!()
+            .with_stdin().buffer("x=hi; echo $x")
+            .assert()
+            .success()
+            .stdout("hi\n")
+            .stderr("");
+    }
+
+    #[test]
+    fn test_param_value_braces() {
+        new_cmd!()
+            .with_stdin().buffer("x=hi; echo ${x}")
+            .assert()
+            .success()
+            .stdout("hi\n")
+            .stderr("");
+    }
+
+    #[test]
+    fn test_define_function_one_line() {
+        // we execute the function twice to ensure it doesn't run the command during definition
+        new_cmd!()
+            .with_stdin().buffer("test() { echo hi; }; test; test")
+            .assert()
+            .success()
+            .stdout("hi\nhi\n")
+            .stderr("");
+    }
+
+    #[test]
+    fn test_define_function_multiple_lines() {
+        new_cmd!()
+            .with_stdin().buffer("test() {\n  echo hi\n}\ntest\ntest")
+            .assert()
+            .success()
+            .stdout("hi\nhi\n")
+            .stderr("");
+    }
+
+    // TODO: add tests ensuring that positional parameters and special parameters can't be assigned
+    #[test]
+    fn test_param_assign_null_with_unset() {
+        new_cmd!()
+            .with_stdin().buffer("echo ${hi:=hello}; echo $hi")
+            .assert()
+            .success()
+            .stdout("hello\nhello\n")
+            .stderr("");
+    }
+
+    #[test]
+    fn test_param_assign_null_with_null() {
+        new_cmd!()
+            .with_stdin().buffer("hi=; echo $hi; echo ${hi:=hello}; echo $hi")
+            .assert()
+            .success()
+            .stdout("\nhello\nhello\n")
+            .stderr("");
+    }
+
+    #[test]
+    fn test_param_assign_null_with_value() {
+        new_cmd!()
+            .with_stdin().buffer("hi=value; echo $hi; echo ${hi:=hello}; echo $hi")
+            .assert()
+            .success()
+            .stdout("value\nvalue\nvalue\n")
+            .stderr("");
+    }
+
+    #[test]
+    fn test_param_assign_with_unset() {
+        new_cmd!()
+            .with_stdin().buffer("echo ${hi=hello}; echo $hi")
+            .assert()
+            .success()
+            .stdout("hello\nhello\n")
+            .stderr("");
+    }
+
+    #[test]
+    fn test_param_assign_with_null() {
+        new_cmd!()
+            .with_stdin().buffer("hi=; echo $hi; echo ${hi=hello}; echo $hi")
+            .assert()
+            .success()
+            .stdout("\n\n\n")
+            .stderr("");
+    }
+
+    #[test]
+    fn test_param_assign_with_value() {
+        new_cmd!()
+            .with_stdin().buffer("hi=value; echo $hi; echo ${hi=hello}; echo $hi")
+            .assert()
+            .success()
+            .stdout("value\nvalue\nvalue\n")
+            .stderr("");
+    }
+
+    #[test]
+    fn test_param_use_null_with_unset() {
+        new_cmd!()
+            .with_stdin().buffer("echo ${hi:-hello}; echo $hi")
+            .assert()
+            .success()
+            .stdout("hello\n\n")
+            .stderr("");
+    }
+
+    #[test]
+    fn test_param_use_null_with_null() {
+        new_cmd!()
+            .with_stdin().buffer("hi=; echo $hi; echo ${hi:-hello}; echo $hi")
+            .assert()
+            .success()
+            .stdout("\nhello\n\n")
+            .stderr("");
+    }
+
+    #[test]
+    fn test_param_use_null_with_value() {
+        new_cmd!()
+            .with_stdin().buffer("hi=value; echo $hi; echo ${hi:-hello}; echo $hi")
+            .assert()
+            .success()
+            .stdout("value\nvalue\nvalue\n")
+            .stderr("");
+    }
+
+    #[test]
+    fn test_param_use_with_unset() {
+        new_cmd!()
+            .with_stdin().buffer("echo ${hi-hello}; echo $hi")
+            .assert()
+            .success()
+            .stdout("hello\n\n")
+            .stderr("");
+    }
+
+    #[test]
+    fn test_param_use_with_null() {
+        new_cmd!()
+            .with_stdin().buffer("hi=; echo $hi; echo ${hi-hello}; echo $hi")
+            .assert()
+            .success()
+            .stdout("\n\n\n")
+            .stderr("");
+    }
+
+    #[test]
+    fn test_param_use_with_value() {
+        new_cmd!()
+            .with_stdin().buffer("hi=value; echo $hi; echo ${hi-hello}; echo $hi")
+            .assert()
+            .success()
+            .stdout("value\nvalue\nvalue\n")
+            .stderr("");
+    }
+
+    #[test]
+    fn test_param_alternate_null_with_unset() {
+        new_cmd!()
+            .with_stdin().buffer("echo ${hi+hello}; echo $hi")
+            .assert()
+            .success()
+            .stdout("\n\n")
+            .stderr("");
+    }
+
+    #[test]
+    fn test_param_alternate_null_with_null() {
+        new_cmd!()
+            .with_stdin().buffer("hi=; echo $hi; echo ${hi+hello}; echo $hi")
+            .assert()
+            .success()
+            .stdout("\nhello\n\n")
+            .stderr("");
+    }
+
+    #[test]
+    fn test_param_alternate_null_with_value() {
+        new_cmd!()
+            .with_stdin().buffer("hi=value; echo $hi; echo ${hi+hello}; echo $hi")
+            .assert()
+            .success()
+            .stdout("value\nhello\nvalue\n")
+            .stderr("");
+    }
+
+    #[test]
+    fn test_param_alternate_with_unset() {
+        new_cmd!()
+            .with_stdin().buffer("echo ${hi:+hello}; echo $hi")
+            .assert()
+            .success()
+            .stdout("\n\n")
+            .stderr("");
+    }
+
+    #[test]
+    fn test_param_alternate_with_null() {
+        new_cmd!()
+            .with_stdin().buffer("hi=; echo $hi; echo ${hi:+hello}; echo $hi")
+            .assert()
+            .success()
+            .stdout("\n\n\n")
+            .stderr("");
+    }
+
+    #[test]
+    fn test_param_alternate_with_value() {
+        new_cmd!()
+            .with_stdin().buffer("hi=value; echo $hi; echo ${hi:+hello}; echo $hi")
+            .assert()
+            .success()
+            .stdout("value\nhello\nvalue\n")
+            .stderr("");
+    }
+
+    // TODO: test ${var?val}, ${var:?val}, ${var?}, etc.
+
+    #[test]
+    fn test_if_simple() {
+        new_cmd!()
+            .with_stdin().buffer("if true; then echo hello; fi; if false; then echo whoops; fi")
+            .assert()
+            .success()
+            .stdout("hello\n")
+            .stderr("");
+    }
+
+    #[test]
+    fn test_if_elif_simple() {
+        new_cmd!()
+            .with_stdin().buffer("if false; then echo whoops; elif true; then echo yay; fi")
+            .assert()
+            .success()
+            .stdout("yay\n")
+            .stderr("");
+    }
+
+    #[test]
+    fn test_if_elif_first_found() {
+        new_cmd!()
+            .with_stdin().buffer("if false; then echo whoops; elif true; then echo yay; elif true; then echo whoops again; fi")
+            .assert()
+            .success()
+            .stdout("yay\n")
+            .stderr("");
+    }
+
+    #[test]
+    fn test_if_elif_if_works() {
+        new_cmd!()
+            .with_stdin().buffer("if true; then echo yay; elif true; then echo whoops; fi")
+            .assert()
+            .success()
+            .stdout("yay\n")
+            .stderr("");
+    }
+
+    #[test]
+    fn test_if_else() {
+        new_cmd!()
+            .with_stdin().buffer("if false; then echo whoops; else echo yay; fi")
+            .assert()
+            .success()
+            .stdout("yay\n")
+            .stderr("");
+    }
+
+    #[test]
+    fn test_if_elif_else() {
+        new_cmd!()
+            .with_stdin().buffer("if false; then echo wrong; elif false; then echo wrong; else echo correct; fi")
+            .assert()
+            .success()
+            .stdout("correct\n")
+            .stderr("");
+    }
+
+    #[test]
+    fn test_for_simple_params() {
+        new_cmd!()
+            .with_stdin().buffer("for var in x y z; do echo ${var}; done")
+            .assert()
+            .success()
+            .stdout("x\ny\nz\n")
+            .stderr("");
+    }
+
+    #[test]
+    fn test_cmd_subst_simple() {
+        new_cmd!()
+            .with_stdin().buffer("echo $(echo testing)")
+            .assert()
+            .success()
+            .stdout("testing\n")
+            .stderr("");
+    }
+
+    #[test]
+    fn test_cmd_subst_var() {
+        new_cmd!()
+            .with_stdin().buffer("x=$(echo value; echo value2); echo before \"$x\" after")
+            .assert()
+            .success()
+            .stdout("before value\nvalue2 after\n")
+            .stderr("");
+    }
+
+    #[test]
+    fn test_cmd_subst_var_with_expansion() {
+        new_cmd!()
+            .with_stdin().buffer("x=$(echo value; echo value2); echo before $x after")
+            .assert()
+            .success()
+            .stdout("before value value2 after\n")
+            .stderr("");
+    }
+
+    // FIXME: currently never finishes parsing (would be ideal if there was a way to just set a max
+    //        time for all tests, but it doesn't seem like there is)
+    #[test]
+    fn test_word_inner_single_quote() {
+        timebomb::timeout_ms(|| {
+            new_cmd!()
+                .with_stdin().buffer("echo test'ing values    here'")
+                .assert()
+                .success()
+                .stdout("testing values    here\n")
+                .stderr("");
+        }, 5000);
+    }
+
+    #[test]
+    fn test_word_single_quote() {
+        timebomb::timeout_ms(|| {
+            new_cmd!()
+                .with_stdin().buffer("echo 'testing  many  words'")
+                .assert()
+                .success()
+                .stdout("testing  many  words\n")
+                .stderr("");
+        }, 5000);
     }
 }
 

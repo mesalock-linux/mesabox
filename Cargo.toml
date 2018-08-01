@@ -107,6 +107,7 @@ lazy_static = "1.0.1"
 assert_cmd = "0.6.0"
 assert_fs = "0.3.0"
 predicates = "0.5.2"
+timebomb = "0.1.2"
 
 [profile.release]
 lto = true

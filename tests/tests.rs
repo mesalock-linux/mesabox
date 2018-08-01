@@ -14,6 +14,7 @@ extern crate tempfile;
 extern crate assert_cmd;
 extern crate assert_fs;
 extern crate predicates;
+extern crate timebomb;
 
 #[macro_use]
 mod macros;
