@@ -553,8 +553,6 @@ fn var_assign<'a>(input: ParseInput<'a>, parser: &mut Parser) -> ParseResult<'a,
 fn parameter<'a>(input: ParseInput<'a>, parser: &mut Parser) -> ParseResult<'a, ParamExpr> {
     debug!("parameter");
 
-    // FIXME: this fails for ${PATH:=hi} because word() uses delimiter (prob restructure everything
-    //        directly calling delimiter() to use a delimiter callback)
     is_next(input, "$")
         .and_then(|(input, _)| {
             match is_next(input.clone(), "{") {
@@ -1114,11 +1112,11 @@ fn else_part<'a>(input: ParseInput<'a>, parser: &mut Parser) -> ParseResult<'a, 
                 .and_then(|(input, cond)| {
                     is_keyword(input, "then")
                         .and_then(|(input, _)| compound_list(input, parser))
-                        .and_then(|(input, body)| {
-                            else_part(input, parser)
-                                .map(|(input, else_stmt)| {
-                                    (input, ElseClause::new(Some(cond), body, Some(Box::new(else_stmt))))
-                                })
+                        .map(|(input, body)| {
+                            let (input, else_stmt) = else_part(input.clone(), parser)
+                                .map(|(input, stmt)| (input, Some(Box::new(stmt))))
+                                .unwrap_or((input, None));
+                            (input, ElseClause::new(Some(cond), body, else_stmt))
                         })
                 })
         }
