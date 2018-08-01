@@ -174,9 +174,10 @@ impl Parser {
 
             // FIXME: this seems like a hacky solution, some rule in the parser is too lenient
             let (input, _) = ignore(input)?;
-            let input = match newline(input.clone()) {
+            let input = match newline_list(input.clone(), self) {
                 Ok((input, _)) => input,
                 Err(f) => {
+                    println!("{:?}", input);
                     if input.clone().next().is_some() {
                         return Err(f);
                     } else {
@@ -526,15 +527,16 @@ fn and_or_sep<'a>(input: ParseInput<'a>, parser: &mut Parser) -> ParseResult<'a,
         })
 }
 
-fn var_name<'a>(input: ParseInput<'a>, skip_delim: bool) -> ParseResult<'a, OsString> {
+fn var_name<'a>(input: ParseInput<'a>) -> ParseResult<'a, OsString> {
     debug!("var_name");
-    name(input, skip_delim)
+
+    general_name(input, |input| Ok((input, ())))
 }
 
 fn var_assign<'a>(input: ParseInput<'a>, parser: &mut Parser) -> ParseResult<'a, VarAssign> {
     debug!("var_assign");
 
-    let (input, name) = var_name(input, false)?;
+    let (input, name) = var_name(input)?;
     is_next(input, "=")
         .map(|(input, _)| {
             let (input, expr) = match word(input.clone(), parser) {
@@ -560,7 +562,7 @@ fn parameter<'a>(input: ParseInput<'a>, parser: &mut Parser) -> ParseResult<'a, 
                     .and_then(|(input, expr)| {
                         is_token(input, "}").map(|(input, _)| (input, expr))
                     }),
-                Err(_) => param_name(input, false)
+                Err(_) => param_name(input, delimiter)
                     .map(|(input, name)| (input, ParamExpr::new(name, ParamExprKind::Value)))
             }
         })
@@ -571,13 +573,13 @@ fn param_expr<'a>(input: ParseInput<'a>, parser: &mut Parser) -> ParseResult<'a,
 
     is_next(input.clone(), "#")
         .map(|(input, _)| {
-            let (input, name) = param_name(input.clone(), true)
+            let (input, name) = param_name(input.clone(), |input| Ok((input, ())))
                 .unwrap_or_else(|_| (input, Param::Var(OsString::new())));
 
             (input, ParamExpr::new(name, ParamExprKind::Length))
         })
         .or_else(|_| {
-            let (input, name) = param_name(input, true)?;
+            let (input, name) = param_name(input, |input| Ok((input, ())))?;
             param_subst(input.clone(), parser)
                 .or_else(|_| Ok((input, ParamExprKind::Value)))
                 .map(|(input, kind)| (input, ParamExpr::new(name, kind)))
@@ -670,10 +672,13 @@ fn param_subst_suffix<'a>(input: ParseInput<'a>, parser: &mut Parser) -> ParseRe
 }
 
 // FIXME: the names for *, ?, and @ suck
-fn param_name<'a>(input: ParseInput<'a>, skip_delim: bool) -> ParseResult<'a, Param> {
+fn param_name<'a, F>(input: ParseInput<'a>, check_fn: F) -> ParseResult<'a, Param>
+where
+    F: Fn(ParseInput<'a>) -> ParseResult<'a, ()> + Clone,
+{
     debug!("param");
 
-    var_name(input.clone(), skip_delim)
+    general_name(input.clone(), check_fn.clone())
         .map(|(input, name)| (input, Param::Var(name)))
         .or_else(|_| is_next(input.clone(), "*").map(|(input, _)| (input, Param::Star)))
         .or_else(|_| is_next(input.clone(), "?").map(|(input, _)| (input, Param::Question)))
@@ -681,16 +686,24 @@ fn param_name<'a>(input: ParseInput<'a>, skip_delim: bool) -> ParseResult<'a, Pa
         .or_else(|_| is_next(input.clone(), "#").map(|(input, _)| (input, Param::NumParams)))
         .or_else(|_| is_next(input.clone(), "$").map(|(input, _)| (input, Param::ShellPid)))
         .or_else(|_| is_next(input.clone(), "!").map(|(input, _)| (input, Param::BackgroundPid)))
-        .or_else(|_| number(input, skip_delim).map(|(input, num)| (input, Param::Positional(num))))
+        .or_else(|_| number(input, check_fn).map(|(input, num)| (input, Param::Positional(num))))
 }
 
 fn param_value<'a>(input: ParseInput<'a>, parser: &mut Parser) -> ParseResult<'a, Box<Word>> {
     debug!("param_value");
 
-    word(input, parser).map(|(input, val)| (input, Box::new(val)))
+    general_word(input, parser, param_delimiter).map(|(input, val)| (input, Box::new(val)))
 }
 
-fn number<'a>(mut input: ParseInput<'a>, skip_delim: bool) -> ParseResult<'a, usize> {
+fn param_delimiter(input: ParseInput) -> ParseResult<()> {
+    delimiter(input.clone())
+        .or_else(|_| is_next(input.clone(), "}").map(|_| (input, ())))
+}
+
+fn number<'a, F>(mut input: ParseInput<'a>, check_fn: F) -> ParseResult<'a, usize>
+where
+    F: Fn(ParseInput<'a>) -> ParseResult<'a, ()>,
+{
     debug!("number");
 
     if let Some(&unit) = input.next() {
@@ -706,13 +719,7 @@ fn number<'a>(mut input: ParseInput<'a>, skip_delim: bool) -> ParseResult<'a, us
                 }
             }
 
-            let input = if skip_delim {
-                input
-            } else {
-                delimiter(input.clone())?;
-                let (input, _) = ignore(input)?;
-                input
-            };
+            let (input, _) = check_fn(input)?;
 
             if let Ok(num) = buffer.parse() {
                 return Ok((input, num))
@@ -907,7 +914,7 @@ fn term_separator<'a>(input: ParseInput<'a>) -> ParseResult<'a, ()> {
 fn for_clause<'a>(input: ParseInput<'a>, parser: &mut Parser) -> ParseResult<'a, Command> {
     debug!("for_clause");
 
-    name(input, false)
+    name(input)
         .and_then(|(input, name)| {
             linebreak(input, parser)
                 .and_then(|(input, _)| {
@@ -933,8 +940,17 @@ fn for_clause<'a>(input: ParseInput<'a>, parser: &mut Parser) -> ParseResult<'a,
 }
 
 // FIXME: i think this will split like name @ on name@ (dunno if that's wrong though?)
-fn name<'a>(mut input: ParseInput<'a>, skip_delim: bool) -> ParseResult<'a, Name> {
+fn name<'a>(mut input: ParseInput<'a>) -> ParseResult<'a, Name> {
     debug!("name");
+
+    general_name(input, delimiter)
+}
+
+fn general_name<'a, F>(mut input: ParseInput<'a>, check_fn: F) -> ParseResult<'a, Name>
+where
+    F: Fn(ParseInput<'a>) -> ParseResult<'a, ()>,
+{
+    debug!("general_name");
 
     if let Some(&unit) = input.next() {
         if (unit >= b'a' as _ && unit <= b'z' as _) || (unit >= b'A' as _ && unit <= b'Z' as _) || unit == b'_' as _ {
@@ -950,13 +966,7 @@ fn name<'a>(mut input: ParseInput<'a>, skip_delim: bool) -> ParseResult<'a, Name
             }
 
             // FIXME: is the delimiter check necessary?
-            let input = if !skip_delim {
-                delimiter(input.clone())?;
-                let (input, _) = ignore(input)?;
-                input
-            } else {
-                input
-            };
+            let (input, _) = check_fn(input)?;
 
             return Ok((input, name.into()))
         }
@@ -1163,7 +1173,7 @@ fn function_body<'a>(input: ParseInput<'a>, parser: &mut Parser) -> ParseResult<
 fn fname<'a>(input: ParseInput<'a>) -> ParseResult<'a, Name> {
     debug!("fname");
 
-    name(input, false)
+    name(input)
 }
 
 fn brace_group<'a>(input: ParseInput<'a>, parser: &mut Parser) -> ParseResult<'a, Command> {
@@ -1589,20 +1599,30 @@ fn sequential_sep<'a>(input: ParseInput<'a>, parser: &mut Parser) -> ParseResult
 fn word<'a>(input: ParseInput<'a>, parser: &mut Parser) -> ParseResult<'a, Word> {
     debug!("word");
 
-    word_inner(input, parser).map_err(|mut e| {
+    general_word(input, parser, delimiter)
+}
+
+fn general_word<'a, F>(input: ParseInput<'a>, parser: &mut Parser, delim: F) -> ParseResult<'a, Word>
+where
+    F: Fn(ParseInput<'a>) -> ParseResult<'a, ()> + Clone,
+{
+    word_inner(input, parser, delim).map_err(|mut e| {
         e.errors.push(ParserErrorKind::Word);
         e
     })
 }
 
-fn word_inner<'a>(input: ParseInput<'a>, parser: &mut Parser) -> ParseResult<'a, Word> {
-    let (input, mut first) = word_part(input, parser)?;
+fn word_inner<'a, F>(input: ParseInput<'a>, parser: &mut Parser, delim: F) -> ParseResult<'a, Word>
+where
+    F: Fn(ParseInput<'a>) -> ParseResult<'a, ()> + Clone,
+{
+    let (input, mut first) = word_part(input, parser, delim.clone())?;
 
-    let (mut input, second) = next_word_part(input, parser, &mut first);
+    let (mut input, second) = next_word_part(input, parser, &mut first, delim.clone());
     let word = if let Some(second) = second {
         let mut complex = vec![first, second];
         loop {
-            let (inp, part) = next_word_part(input.clone(), parser, complex.last_mut().unwrap());
+            let (inp, part) = next_word_part(input.clone(), parser, complex.last_mut().unwrap(), delim.clone());
             if let Some(part) = part {
                 complex.push(part);
                 input = inp;
@@ -1620,9 +1640,12 @@ fn word_inner<'a>(input: ParseInput<'a>, parser: &mut Parser) -> ParseResult<'a,
     Ok((input, word))
 }
 
-fn next_word_part<'a>(mut input: ParseInput<'a>, parser: &mut Parser, prev: &mut Word) -> (ParseInput<'a>, Option<Word>) {
+fn next_word_part<'a, F>(mut input: ParseInput<'a>, parser: &mut Parser, prev: &mut Word, delim: F) -> (ParseInput<'a>, Option<Word>)
+where
+    F: Fn(ParseInput<'a>) -> ParseResult<'a, ()> + Clone,
+{
     loop {
-        match word_part(input.clone(), parser) {
+        match word_part(input.clone(), parser, delim.clone()) {
             Ok((inp, second)) => {
                 let second = combine_simple_words(second, prev);
                 if let Some(second) = second {
@@ -1650,7 +1673,10 @@ fn combine_simple_words(current: Word, prev: &mut Word) -> Option<Word> {
     }
 }
 
-fn word_part<'a>(input: ParseInput<'a>, parser: &mut Parser) -> ParseResult<'a, Word> {
+fn word_part<'a, F>(input: ParseInput<'a>, parser: &mut Parser, delim: F) -> ParseResult<'a, Word>
+where
+    F: Fn(ParseInput<'a>) -> ParseResult<'a, ()> + Clone,
+{
     debug!("word_part");
 
     // TODO: this might need to be able to parse quoted strings/words following different rules
@@ -1679,7 +1705,7 @@ fn word_part<'a>(input: ParseInput<'a>, parser: &mut Parser) -> ParseResult<'a, 
                     (input, Word::Simple(unit_to_osstring(unit)))
                 })
                 .or_else(|_| {
-                    let (input, data) = take_while_matches1(input.clone(), |input| is_not(input, delimiter))?;
+                    let (input, data) = take_while_matches1(input.clone(), |input| is_not(input, delim.clone()))?;
                     Ok((input, Word::Simple(data)))
                 })
         })
@@ -1747,9 +1773,6 @@ fn delimiter<'a>(input: ParseInput<'a>) -> ParseResult<'a, ()> {
     debug!("delimiter");
 
     delimiter_no_op(input.clone())
-        .and_then(|(input, _)| {
-            op(input.clone()).or_else(|_| Ok((input, ())))
-        })
         .or_else(|_| op(input))
 }
 
@@ -1790,9 +1813,10 @@ fn comment<'a>(input: ParseInput<'a>) -> ParseResult<'a, ()> {
 fn op<'a>(input: ParseInput<'a>) -> ParseResult<'a, ()> {
     debug!("op");
 
-    is_one_of(input.clone(), &["|", "&", ";", "<", ">", "(", ")", "$", "`", r"\", "\"", "'"])
-        .map(|(input, _)| (input, ()))
-        .or_else(|_| newline(input))
+    match is_one_of(input.clone(), &["|", "&", ";", "<", ">", "(", ")", "$", "`", r"\", "\"", "'"]) {
+        Ok(_) => Ok((input, ())),
+        Err(_) => newline(input),
+    }
 }
 
 // TODO: eliminate from as many parsers as possible
