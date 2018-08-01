@@ -177,7 +177,6 @@ impl Parser {
             let input = match newline_list(input.clone(), self) {
                 Ok((input, _)) => input,
                 Err(f) => {
-                    println!("{:?}", input);
                     if input.clone().next().is_some() {
                         return Err(f);
                     } else {
