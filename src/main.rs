@@ -6,9 +6,9 @@
 // For a copy, see the LICENSE file.
 //
 
-extern crate libmesabox as mesabox;
 #[cfg(feature = "env_logger")]
 extern crate env_logger;
+extern crate libmesabox as mesabox;
 
 use mesabox::UtilData;
 use std::env;
@@ -47,27 +47,24 @@ fn main() {
     };
     let mut setup = UtilData::new(&mut input, &mut output, &mut error, env::vars_os(), None);
 
-    let code = match mesabox::execute(&mut setup, &mut env::args_os()) {
-        Ok(code) => code,
-        Err(f) => {
-            if let Some(ref err) = f.err {
-                let mut skip = false;
-                // XXX: should this be checked in lib.rs?  i feel like it might be useful if people can detect this, so it is being done this way atm
-                if let Some(e) = err.downcast_ref::<io::Error>() {
-                    if e.kind() == io::ErrorKind::BrokenPipe {
-                        skip = true;
-                    }
-                }
-
-                if !skip {
-                    let _ = writeln!(setup.stderr, "{}", f);
-                    let _ = setup.stderr.flush();
+    let code = mesabox::execute(&mut setup, &mut env::args_os()).unwrap_or_else(|f| {
+        if let Some(ref err) = f.err {
+            let mut skip = false;
+            // XXX: should this be checked in lib.rs?  i feel like it might be useful if people can detect this, so it is being done this way atm
+            if let Some(e) = err.downcast_ref::<io::Error>() {
+                if e.kind() == io::ErrorKind::BrokenPipe {
+                    skip = true;
                 }
             }
 
-            f.exitcode
+            if !skip {
+                let _ = writeln!(setup.stderr, "{}", f);
+                let _ = setup.stderr.flush();
+            }
         }
-    };
+
+        f.exitcode
+    });
 
     process::exit(code);
 }

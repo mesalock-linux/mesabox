@@ -1,5 +1,4 @@
 use clap::{App, Arg, OsValues};
-use nom;
 use rustyline::error::ReadlineError;
 use rustyline::{CompletionType, Config, Editor};
 
@@ -14,7 +13,7 @@ use util::{self, ExitCode, RawObjectWrapper};
 use {ArgsIter, Result, UtilRead, UtilSetup, UtilWrite};
 
 use self::env::{EnvFd, Environment};
-use self::parser::Parser;
+use self::parser::{Parser, ParserError};
 
 mod ast;
 mod builtin;
@@ -27,27 +26,6 @@ mod types;
 
 pub const NAME: &str = "sh";
 pub const DESCRIPTION: &str = "Minimal POSIX shell";
-
-// XXX: redefine here as nom forces the error type to be u32
-macro_rules! complete (
-    ($i:expr, $submac:ident!( $($args:tt)* )) => (
-        {
-            use ::std::result::Result::*;
-            use $crate::nom::{Err, ErrorKind};
-
-            let i_ = $i.clone();
-            match $submac!(i_, $($args)*) {
-                Err(Err::Incomplete(_)) =>  {
-                    Err(Err::Error(error_position!($i, ErrorKind::Complete::<parser::ParserError>)))
-                },
-                rest => rest
-            }
-        }
-    );
-    ($i:expr, $f:expr) => (
-        complete!($i, call!($f));
-    );
-);
 
 pub fn execute<S, T>(setup: &mut S, args: T) -> Result<ExitCode>
 where
@@ -117,41 +95,44 @@ where
     I: Iterator<Item = &'a OsStr>,
 {
     let mut parser = Parser::new();
-    let res = complete!(data, call_m!(parser.complete_command));
 
-    // FIXME: clearly gross
-    match res {
-        Ok(m) => {
-            let mut env = setup.env().into();
-            setup_default_env(setup, &mut env)?;
+    // FIXME: how to deal with data read from input?  need to somehow convert that data to osstring
+    // FIXME: below is ugly hack for unix rn
+    let data = {
+        use std::os::unix::ffi::OsStrExt;
 
-            let mut data = ast::RuntimeData {
-                setup: setup,
-                env: &mut env,
-            };
+        OsStr::from_bytes(data)
+    };
 
-            Ok(m.1.execute(&mut data))
-        }
-        Err(nom::Err::Failure(ctx)) | Err(nom::Err::Error(ctx)) => {
-            match ctx {
-                nom::Context::List(ref vec) => {
-                    for (_, err) in vec {
-                        match err {
-                            nom::ErrorKind::Custom(s) => {
-                                writeln!(setup.error(), "{}", s)?;
-                            }
-                            other => {
-                                writeln!(setup.error(), "{:#?}", other)?;
-                            }
-                        }
-                    }
-                    Ok(1)
+    let mut input = parser.convert_input(data);
+    let mut env = setup.env().into();
+    setup_default_env(setup, &mut env)?;
+
+    let mut data = ast::RuntimeData {
+        setup: setup,
+        env: &mut env,
+    };
+
+    let mut code = 0;
+
+    while input.clone().next().is_some() {
+        match parser.complete_command(input.clone()) {
+            Ok((inp, cmd)) => {
+                code = cmd.execute(&mut data);
+                input = inp;
+            }
+            Err(f) => {
+                if input.next().is_some() {
+                    code = 1;
+                    return Err(f)?;
+                } else {
+                    break;
                 }
-                _ => unimplemented!(),
             }
         }
-        _ => unreachable!(),
     }
+
+    Ok(code)
 }
 
 // FIXME: rustyline (and linefeed) seem to only return Strings instead of OsStrings, so they fail
@@ -191,7 +172,8 @@ where
                     // FIXME: complete! is not right as we can have functions split across multiple
                     //        lines and such (which is when e.g. PS2 comes in)
                     {
-                        let res = complete!(line.as_bytes(), call_m!(parser.complete_command));
+                        let input = parser.convert_input(OsStr::new(&line));
+                        let res = parser.complete_command(input);
                         match res {
                             Ok(m) => {
                                 println!("status: {}", m.1.execute(&mut setup_data));
@@ -199,40 +181,9 @@ where
                             }
                             // FIXME: this is super wasteful (we build up part of the tree and then
                             //        just trash it when it's not complete)
-                            Err(nom::Err::Incomplete(_))
-                            | Err(nom::Err::Error(nom::Context::Code(
-                                _,
-                                nom::ErrorKind::Complete,
-                            )))
-                            | Err(nom::Err::Failure(nom::Context::Code(
-                                _,
-                                nom::ErrorKind::Complete,
-                            ))) => {}
-                            Err(nom::Err::Failure(ctx)) | Err(nom::Err::Error(ctx)) => {
-                                //println!("{}", f.into_error_kind())
-                                match ctx {
-                                    nom::Context::List(ref vec) => {
-                                        for (_, err) in vec {
-                                            match err {
-                                                nom::ErrorKind::Custom(s) => {
-                                                    println!("{}", s);
-                                                }
-                                                other => {
-                                                    println!("{:#?}", other);
-                                                }
-                                            }
-                                        }
-                                        break;
-                                    }
-                                    nom::Context::Code(_, err) => match err {
-                                        nom::ErrorKind::Custom(s) => {
-                                            println!("{}", s);
-                                        }
-                                        other => {
-                                            println!("{:#?}", other);
-                                        }
-                                    },
-                                    _ => unimplemented!(),
+                            Err(f) => {
+                                if !f.incomplete() {
+                                    writeln!(setup_data.setup.error(), "{}", f)?;
                                 }
                             }
                         }
@@ -251,25 +202,18 @@ where
                                 line.push_str(&data);
                                 line.push('\n');
 
-                                let res =
-                                    complete!(line.as_bytes(), call_m!(parser.complete_command));
+                                let input = parser.convert_input(OsStr::new(&line));
+                                let res = parser.complete_command(input);
                                 match res {
                                     Ok(m) => {
                                         println!("status: {}", m.1.execute(&mut setup_data));
                                         break 'outer;
                                     }
-                                    Err(nom::Err::Incomplete(_))
-                                    | Err(nom::Err::Error(nom::Context::Code(
-                                        _,
-                                        nom::ErrorKind::Complete,
-                                    )))
-                                    | Err(nom::Err::Failure(nom::Context::Code(
-                                        _,
-                                        nom::ErrorKind::Complete,
-                                    ))) => {}
                                     Err(f) => {
-                                        println!("{}", f);
-                                        break 'outer;
+                                        if !f.incomplete() {
+                                            writeln!(setup_data.setup.error(), "{}", f);
+                                            break 'outer;
+                                        }
                                     }
                                 }
                             }

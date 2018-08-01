@@ -38,9 +38,7 @@ mod stdin {
             .stderr("");
     }
 
-    // XXX: this is likely a parser issue (again)
     #[test]
-    #[ignore]
     fn test_invalid_subshell_loc() {
         new_cmd!()
             .with_stdin().buffer("echo hi | echo hello (echo hi; cat) | cat")

@@ -400,14 +400,14 @@ impl FromIterator<Command> for Pipeline {
 #[derive(Debug)]
 pub struct Command {
     inner: CommandInner,
-    pub redirect_list: Option<Vec<IoRedirect>>,
+    pub redirect_list: Vec<IoRedirect>,
 }
 
 impl Command {
     pub fn with_inner(inner: CommandInner) -> Self {
         Self {
             inner: inner,
-            redirect_list: None,
+            redirect_list: Vec::with_capacity(0),
         }
     }
 
@@ -673,12 +673,12 @@ impl WhileClause {
 #[derive(Debug)]
 pub struct ForClause {
     name: Name,
-    words: Option<Vec<Word>>,
+    words: Vec<Word>,
     body: Command,
 }
 
 impl ForClause {
-    pub fn new(name: Name, words: Option<Vec<Word>>, body: Command) -> Self {
+    pub fn new(name: Name, words: Vec<Word>, body: Command) -> Self {
         Self {
             name: name,
             words: words,
@@ -693,10 +693,11 @@ impl ForClause {
         // TODO: redirects
         data.env.inc_loop_depth();
 
-        // TODO: when self.words is None it should act as if it were the value in $@ (retrieve from env)
-        let words = match self.words {
-            Some(ref words) => &words[..],
-            None => unimplemented!(),
+        // TODO: when self.words is empty it should act as if it were the value in $@ (retrieve from env)
+        let words = if self.words.is_empty() {
+            unimplemented!()
+        } else {
+            &self.words[..]
         };
 
         let mut code = 0;
@@ -849,11 +850,11 @@ impl FunctionDef {
 #[derive(Debug)]
 pub struct FunctionBody {
     command: Command,
-    redirect_list: Option<Vec<IoRedirect>>,
+    redirect_list: Vec<IoRedirect>,
 }
 
 impl FunctionBody {
-    pub fn new(command: Command, redirect_list: Option<Vec<IoRedirect>>) -> Self {
+    pub fn new(command: Command, redirect_list: Vec<IoRedirect>) -> Self {
         Self {
             command: command,
             redirect_list: redirect_list,
@@ -901,16 +902,16 @@ impl InProcessCommand for FunctionBody {
 
 #[derive(Debug)]
 pub struct SimpleCommand {
-    pre_actions: Option<Vec<PreAction>>,
-    post_actions: Option<Vec<PostAction>>,
+    pre_actions: Vec<PreAction>,
+    post_actions: Vec<PostAction>,
     name: Option<Word>,
 }
 
 impl SimpleCommand {
     pub fn new(
         name: Option<Word>,
-        pre_actions: Option<Vec<PreAction>>,
-        post_actions: Option<Vec<PostAction>>,
+        pre_actions: Vec<PreAction>,
+        post_actions: Vec<PostAction>,
     ) -> Self {
         Self {
             name: name,
@@ -1024,8 +1025,8 @@ impl SimpleCommand {
             });
             data.env.exit_scope();
             return res.map(|v| Some(v));
-        } else if let Some(ref actions) = self.pre_actions {
-            for act in actions.iter() {
+        } else {
+            for act in self.pre_actions.iter() {
                 // XXX: i believe we are just supposed to ignore redirects here, but not certain
                 //      (this is not correct as the user could be trying to close file descriptors)
                 if let PreAction::VarAssign(ref assign) = act {
@@ -1053,33 +1054,29 @@ impl SimpleCommand {
                 .map(|(k, v)| (Cow::Borrowed(k), Cow::Borrowed(v))),
         );
 
-        if let Some(ref actions) = self.pre_actions {
-            for act in actions.iter() {
-                match act {
-                    PreAction::IoRedirect(ref redirect) => {
-                        redirect.setup(data, new_fds)?;
-                    }
-                    PreAction::VarAssign(ref assign) => {
-                        let (k, v) = assign.eval(data);
-                        cmd.env(Cow::Borrowed(k), Cow::Owned(v));
-                    }
+        for act in self.pre_actions.iter() {
+            match act {
+                PreAction::IoRedirect(ref redirect) => {
+                    redirect.setup(data, new_fds)?;
+                }
+                PreAction::VarAssign(ref assign) => {
+                    let (k, v) = assign.eval(data);
+                    cmd.env(Cow::Borrowed(k), Cow::Owned(v));
                 }
             }
         }
-        if let Some(ref actions) = self.post_actions {
-            for act in actions.iter() {
-                match act {
-                    PostAction::IoRedirect(ref redirect) => {
-                        redirect.setup(data, new_fds)?;
-                    }
-                    PostAction::Word(ref word) => {
-                        match word.eval_glob_fs(data) {
-                            WordEval::Text(text) => cmd.arg(Cow::Owned(text)),
-                            WordEval::Globbed(glob) => {
-                                cmd.args(glob.into_iter().map(|v| Cow::Owned(v)))
-                            }
-                        };
-                    }
+        for act in self.post_actions.iter() {
+            match act {
+                PostAction::IoRedirect(ref redirect) => {
+                    redirect.setup(data, new_fds)?;
+                }
+                PostAction::Word(ref word) => {
+                    match word.eval_glob_fs(data) {
+                        WordEval::Text(text) => cmd.arg(Cow::Owned(text)),
+                        WordEval::Globbed(glob) => {
+                            cmd.args(glob.into_iter().map(|v| Cow::Owned(v)))
+                        }
+                    };
                 }
             }
         }
@@ -1272,7 +1269,7 @@ impl IoRedirectFile {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug)]
 pub enum IoRedirectKind {
     Input,
     DupInput,
