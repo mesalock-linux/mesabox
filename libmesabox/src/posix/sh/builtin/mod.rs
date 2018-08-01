@@ -216,11 +216,10 @@ impl Builtin {
             setup,
             &OsStr::new(utilname),
             &mut iter::once(OsString::from(utilname)).chain(data.args.into_iter()),
-        ).map(|_| 0)
-            .map_err(|e| {
-                env.special_vars().set_last_exitcode(e.exitcode);
-                CommandError::Builtin(BuiltinError::Other(e.err.unwrap().compat()))
-            })
+        ).map_err(|e| {
+            env.special_vars().set_last_exitcode(e.exitcode);
+            CommandError::Builtin(BuiltinError::Other(e.err.unwrap().compat()))
+        })
     }
 }
 
