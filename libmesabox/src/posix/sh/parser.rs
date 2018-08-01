@@ -404,12 +404,15 @@ where
     Ok((input, vec_to_osstring(buffer)))
 }
 
-fn take_until_value0<'a>(mut input: ParseInput<'a>, value: &'static str) -> ParseResult<'a, OsString> {
+fn take_until_consuming_value0<'a>(mut input: ParseInput<'a>, value: &'static str) -> ParseResult<'a, OsString> {
     let mut not_eof = true;
 
     let mut buffer = vec![];
     while not_eof {
         if let Ok(_) = is_next(input.clone(), value) {
+            // consume the match
+            let (inp, _) = is_next(input, value)?;
+            input = inp;
             break;
         }
         if let Some(&unit) = input.next() {
@@ -790,7 +793,7 @@ fn command<'a>(input: ParseInput<'a>, parser: &mut Parser) -> ParseResult<'a, Co
             // the item must be a simple command, a brace group, OR a subshell if it is valid
             if let Ok((input, _)) = is_token(orig_input.clone(), "(") {
                 subshell(input, parser)
-            } else if let Ok((input, _)) = is_token(orig_input.clone(), "{") {
+            } else if let Ok((input, _)) = is_keyword(orig_input.clone(), "{") {
                 brace_group(input, parser)
             } else {
                 simple_command(orig_input, parser).map(|(input, cmd)| (input, cmd.into()))
@@ -829,7 +832,7 @@ fn compound_command<'a>(input: ParseInput<'a>, parser: &mut Parser) -> ParseResu
 
     if let Ok((input, _)) = is_token(input.clone(), "(") {
         subshell(input, parser)
-    } else if let Ok((input, _)) = is_token(input.clone(), "{") {
+    } else if let Ok((input, _)) = is_keyword(input.clone(), "{") {
         brace_group(input, parser)
     } else {
         fname(input)
@@ -1429,9 +1432,8 @@ fn single_quote<'a>(input: ParseInput<'a>) -> ParseResult<'a, Word> {
 
     is_next(input, "'")
         .and_then(|(input, _)| {
-            let (input, res) = take_until_value0(input, "'")?;
-            is_next(input, "'")
-                .map(|(input, _)| (input, Word::SingleQuote(res)))
+            take_until_consuming_value0(input, "'")
+                .map(|(input, res)| (input, Word::SingleQuote(res)))
         })
         .map_err(|mut e| {
             e.errors.push(ParserErrorKind::SingleQuote);
@@ -1644,15 +1646,14 @@ where
     loop {
         match word_part(input.clone(), parser, delim.clone()) {
             Ok((inp, second)) => {
+                input = inp;
+
                 let second = combine_simple_words(second, prev);
                 if let Some(second) = second {
                     return (input, Some(second));
                 }
-
-                input = inp;
             }
             Err(_) => {
-                let (input, _) = ignore(input).unwrap();
                 return (input, None);
             }
         }
@@ -1812,7 +1813,7 @@ fn op<'a>(input: ParseInput<'a>) -> ParseResult<'a, ()> {
 
     match is_one_of(input.clone(), &["|", "&", ";", "<", ">", "(", ")", "$", "`", r"\", "\"", "'"]) {
         Ok(_) => Ok((input, ())),
-        Err(_) => newline(input),
+        Err(_) => newline(input.clone()).map(|_| (input, ())),
     }
 }
 
