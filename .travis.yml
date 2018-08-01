@@ -1,7 +1,6 @@
 language: rust
 cache: cargo
 rust:
-  - 1.26.2
   - stable
   - nightly
 env:
@@ -11,6 +10,8 @@ env:
   - TARGET=arm-unknown-linux-gnueabi RUSTFLAGS="-C linker=arm-linux-gnueabi-gcc"
 matrix:
   include:
+    - rust: 1.26.2
+      env: TARGET=x86_64-unknown-linux-gnu TEST=1
     - os: osx
       rust: stable
       env: TARGET=x86_64-apple-darwin
@@ -25,21 +26,15 @@ matrix:
       script:
         - ./ci/run-cov
         - bash <(curl -s https://codecov.io/bash) -f final.info
-    - rust: stable
-      env: TARGET=x86_64-unknown-linux-gnu FMT=1
+    - rust: nightly
+      env: TARGET=x86_64-unknown-linux-gnu FMT=1 CLIPPY=1
       before_install:
       install:
       before_script:
         - rustup component add rustfmt-preview
+        - rustup component add clippy-preview
       script:
-        - cargo fmt -- --write-mode check
-    - rust: nightly
-      env: TARGET=x86_64-unknown-linux-gnu CLIPPY=1
-      before_install:
-      install:
-      before_script:
-        - rustup component add clippy-preview --toolchain=nightly
-      script:
+        - cargo fmt --all -- --check `find libmesabox src -iname "*.rs"`
         - cargo clippy
   allow_failures:
     - rust: nightly
