@@ -1,12 +1,14 @@
 //
 // Copyright (c) 2018, The MesaLock Linux Project Contributors
 // All rights reserved.
-// 
+//
 // This work is licensed under the terms of the BSD 3-Clause License.
 // For a copy, see the LICENSE file.
 //
 
-use util::*;
+use assert_cmd::prelude::*;
+use predicates::prelude::*;
+use std::process::Command;
 
 const NAME: &str = "sh";
 
@@ -18,27 +20,32 @@ mod stdin {
 
     #[test]
     fn test_pipeline() {
-        new_ucmd!()
-            .pipe_in_fixture(input_fixture(PIPELINE))
-            .run()
-            .stdout_is_fixture(expected_fixture(PIPELINE));
+        new_cmd!()
+            .with_stdin().path(fixtures_path!(input_fixture(PIPELINE))).unwrap()
+            .assert()
+            .success()
+            .stdout(pred_eq_file!(expected_fixture(PIPELINE)))
+            .stderr("");
     }
 
     #[test]
     fn test_pipeline_subshell() {
-        new_ucmd!()
-            .pipe_in_fixture(input_fixture(PIPELINE_SUBSHELL))
-            .run()
-            .stdout_is_fixture(expected_fixture(PIPELINE_SUBSHELL));
+        new_cmd!()
+            .with_stdin().path(fixtures_path!(input_fixture(PIPELINE_SUBSHELL))).unwrap()
+            .assert()
+            .success()
+            .stdout(pred_eq_file!(expected_fixture(PIPELINE_SUBSHELL)))
+            .stderr("");
     }
 
     // XXX: this is likely a parser issue (again)
     #[test]
     #[ignore]
     fn test_invalid_subshell_loc() {
-        new_ucmd!()
-            .pipe_in("echo hi | echo hello (echo hi; cat) | cat")
-            .fails();
+        new_cmd!()
+            .with_stdin().buffer("echo hi | echo hello (echo hi; cat) | cat")
+            .assert()
+            .failure();
     }
 }
 
@@ -47,18 +54,22 @@ mod script {
 
     #[test]
     fn test_pipeline() {
-        new_ucmd!()
-            .arg(input_fixture(PIPELINE))
-            .run()
-            .stdout_is_fixture(expected_fixture(PIPELINE));
+        new_cmd!()
+            .arg(fixtures_path!(input_fixture(PIPELINE)))
+            .assert()
+            .success()
+            .stdout(pred_eq_file!(expected_fixture(PIPELINE)))
+            .stderr("");
     }
 
     #[test]
     fn test_pipeline_subshell() {
-        new_ucmd!()
-            .arg(input_fixture(PIPELINE_SUBSHELL))
-            .run()
-            .stdout_is_fixture(expected_fixture(PIPELINE_SUBSHELL));
+        new_cmd!()
+            .arg(fixtures_path!(input_fixture(PIPELINE_SUBSHELL)))
+            .assert()
+            .success()
+            .stdout(pred_eq_file!(expected_fixture(PIPELINE_SUBSHELL)))
+            .stderr("");
     }
 }
 

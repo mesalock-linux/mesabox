@@ -1,40 +1,42 @@
 //
 // Copyright (c) 2018, The MesaLock Linux Project Contributors
 // All rights reserved.
-// 
+//
 // This work is licensed under the terms of the BSD 3-Clause License.
 // For a copy, see the LICENSE file.
 //
 
-use util::*;
-
+use assert_cmd::prelude::*;
+use std::process::Command;
 use std::time::{Duration, Instant};
 
 const NAME: &str = "sleep";
 
-const SLEEP_TIME: f32 = 1.75;
-const DIFF: f32 = 0.5;
+const SLEEP_TIME: f32 = 5.75;
+const DIFF: f32 = 1.5;
 
 #[test]
 fn test_one_param() {
     let now = Instant::now();
 
-    new_ucmd!()
+    new_cmd!()
         .args(&[SLEEP_TIME.to_string()])
-        .succeeds();
+        .assert()
+        .success();
 
-    validate_duration(now.elapsed(), SLEEP_TIME); 
+    validate_duration(now.elapsed(), SLEEP_TIME);
 }
 
 #[test]
 fn test_many_params() {
     let now = Instant::now();
 
-    new_ucmd!()
+    new_cmd!()
         .args(&[(SLEEP_TIME / 4.0).to_string(), (SLEEP_TIME / 2.0).to_string(), (SLEEP_TIME / 8.0).to_string(), (SLEEP_TIME / 8.0).to_string()])
-        .succeeds();
+        .assert()
+        .success();
 
-    validate_duration(now.elapsed(), SLEEP_TIME); 
+    validate_duration(now.elapsed(), SLEEP_TIME);
 }
 
 fn validate_duration(duration: Duration, sleep_time: f32) {

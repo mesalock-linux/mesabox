@@ -2,7 +2,6 @@
 
 for path in /usr/lib/llvm-3.8/lib/clang/3.8.[0-9]/lib/linux/; do LLVM_PATH=$path; done
 export COVERAGE_OPTIONS="-Ccodegen-units=1 -Copt-level=0 -Clink-dead-code -Cpasses=insert-gcov-profiling -Zno-landing-pads -L$LLVM_PATH -lclang_rt.profile-x86_64"
-export RUSTC_WRAPPER="./ci/cov-rustc"
 export CARGO_INCREMENTAL=0
 
 LCOVOPT="--gcov-tool ./ci/llvm-gcov --rc lcov_branch_coverage=1 --rc lcov_excl_line=assert"
@@ -12,25 +11,27 @@ LCOV="/usr/local/bin/lcov"
 rm -rf *.info *.gcda *.gcno
 cargo clean
 
-# unit tests
-cargo rustc --all-features --profile test --lib
-rm ./target/debug/mesabox-*.d
-./target/debug/mesabox-*
-${LCOV} ${LCOVOPT} --capture --directory . --base-directory . -o mesabox.info
+# unit tests of libmesabox
+export RUSTC_WRAPPER="./ci/libmesabox-cov-rustc"
+cargo rustc --package libmesabox --all-features --profile test --lib
+rm ./target/debug/libmesabox-*.d
+./target/debug/libmesabox-*
+${LCOV} ${LCOVOPT} --capture --directory . --base-directory . -o libmesabox.info
 
 # cleanup target
 rm -rf *.gcda *.gcno
 cargo clean
 
 # integration tests
+export RUSTC_WRAPPER="./ci/mesabox-cov-rustc"
 cargo rustc --all-features --test tests
 rm ./target/debug/tests-*.d
 ./target/debug/tests-*
 ${LCOV} ${LCOVOPT} --capture --directory . --base-directory . -o tests.info
 
 # combining and filtering
-${LCOV} ${LCOVOPT} --add mesabox.info --add tests.info -o coverage.info
-${LCOV} ${LCOVOPT} --extract coverage.info `find "$(cd src; pwd)" -name "*.rs"` -o final.info
+${LCOV} ${LCOVOPT} --add libmesabox.info --add tests.info -o coverage.info
+${LCOV} ${LCOVOPT} --extract coverage.info `find "$(cd src; pwd)" "$(cd libmesabox; pwd)" -name "*.rs"` -o final.info
 
 # generate report if not in CI
 if [[ "$CI" != true ]]; then

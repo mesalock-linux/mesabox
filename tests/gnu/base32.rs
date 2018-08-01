@@ -1,7 +1,7 @@
 //
 // Copyright (c) 2018, The MesaLock Linux Project Contributors
 // All rights reserved.
-// 
+//
 // This work is licensed under the terms of the BSD 3-Clause License.
 // For a copy, see the LICENSE file.
 //
@@ -32,52 +32,60 @@
 //     SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 //
 
-use util::*;
+use assert_cmd::prelude::*;
+use predicates::prelude::*;
+use std::process::Command;
 
 const NAME: &str = "base32";
 
 #[test]
 fn test_encode() {
     let input = "Hello, World!";
-    new_ucmd!()
-        .pipe_in(input)
-        .succeeds()
-        .stdout_only("JBSWY3DPFQQFO33SNRSCC===\n");
+     new_cmd!()
+        .with_stdin().buffer(input)
+        .assert()
+        .success()
+        .stdout("JBSWY3DPFQQFO33SNRSCC===\n")
+        .stderr("");
 }
 
 #[test]
 fn test_decode() {
     for decode_param in vec!["-d", "--decode"] {
         let input = "JBSWY3DPFQQFO33SNRSCC===\n";
-        new_ucmd!()
+        new_cmd!()
             .arg(decode_param)
-            .pipe_in(input)
-            .succeeds()
-            .stdout_only("Hello, World!");
+            .with_stdin().buffer(input)
+            .assert()
+            .success()
+            .stdout("Hello, World!")
+            .stderr("");
     }
 }
 
 #[test]
 fn test_garbage() {
     let input = "aGVsbG8sIHdvcmxkIQ==\0";
-    new_ucmd!()
+    new_cmd!()
         .arg("-d")
-        .pipe_in(input)
-        .fails()
-        .no_stdout()
-        .stderr_contains("invalid length at 16");
+        .with_stdin().buffer(input)
+        .assert()
+        .failure()
+        .stdout("")
+        .stderr(predicate::str::contains("invalid length at 16").from_utf8());
 }
 
 #[test]
 fn test_ignore_garbage() {
     for ignore_garbage_param in vec!["-i", "--ignore-garbage"] {
         let input = "JBSWY\x013DPFQ\x02QFO33SNRSCC===\n";
-        new_ucmd!()
-            .arg("-d")
-            .arg(ignore_garbage_param)
-            .pipe_in(input)
-            .succeeds()
-            .stdout_only("Hello, World!");
+        new_cmd!()
+            .args(&["-d", ignore_garbage_param])
+            .with_stdin().buffer(input)
+            .assert()
+            .success()
+            .stdout("Hello, World!")
+            .stderr("");
     }
 }
 
@@ -85,33 +93,36 @@ fn test_ignore_garbage() {
 fn test_wrap() {
     for wrap_param in vec!["-w", "--wrap"] {
         let input = "The quick brown fox jumps over the lazy dog.";
-        new_ucmd!()
-            .arg(wrap_param)
-            .arg("20")
-            .pipe_in(input)
-            .succeeds()
-            .stdout_only("KRUGKIDROVUWG2ZAMJZG\n653OEBTG66BANJ2W24DT\nEBXXMZLSEB2GQZJANRQX\nU6JAMRXWOLQ=\n");
+        new_cmd!()
+            .args(&[wrap_param, "20"])
+            .with_stdin().buffer(input)
+            .assert()
+            .success()
+            .stdout("KRUGKIDROVUWG2ZAMJZG\n653OEBTG66BANJ2W24DT\nEBXXMZLSEB2GQZJANRQX\nU6JAMRXWOLQ=\n")
+            .stderr("");
     }
 }
 
 #[test]
 fn test_wrap_no_arg() {
     for wrap_param in vec!["-w", "--wrap"] {
-        new_ucmd!()
+        new_cmd!()
             .arg(wrap_param)
-            .fails()
-            .no_stdout()
-            .stderr_contains("requires a value but none was supplied\n");
+            .assert()
+            .failure()
+            .stdout("")
+            .stderr(predicate::str::contains("requires a value but none was supplied\n").from_utf8());
     }
 }
 
 #[test]
 fn test_wrap_bad_arg() {
     for wrap_param in vec!["-w", "--wrap"] {
-        new_ucmd!()
-            .arg(wrap_param).arg("b")
-            .fails()
-            .no_stdout()
-            .stderr_contains("'b' is not a number\n");
+        new_cmd!()
+            .args(&[wrap_param, "b"])
+            .assert()
+            .failure()
+            .stdout("")
+            .stderr(predicate::str::contains("'b' is not a number\n").from_utf8());
     }
 }

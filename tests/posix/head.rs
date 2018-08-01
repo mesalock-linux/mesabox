@@ -31,7 +31,9 @@
 //     SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 //
 
-use util::*;
+use assert_cmd::prelude::*;
+use predicates::prelude::*;
+use std::process::Command;
 
 const NAME: &str = "head";
 
@@ -40,87 +42,131 @@ const INPUT2: &str = "lorem_ipsum_reverse.txt";
 
 #[test]
 fn test_stdin_default() {
-    new_ucmd!()
-        .pipe_in_fixture(INPUT)
-        .run().stdout_is_fixture("lorem_ipsum_default.expected");
+    new_cmd!()
+        .with_stdin().path(fixtures_path!(INPUT)).unwrap()
+        .assert()
+        .success()
+        .stdout(pred_eq_file!("lorem_ipsum_default.expected"))
+        .stderr("");
 }
 
 #[test]
 fn test_stdin_1_line_obsolete() {
-    new_ucmd!()
+    new_cmd!()
         .args(&["-1"])
-        .pipe_in_fixture(INPUT)
-        .run().stdout_is_fixture("lorem_ipsum_1_line.expected");
+        .with_stdin().path(fixtures_path!(INPUT)).unwrap()
+        .assert()
+        .success()
+        .stdout(pred_eq_file!("lorem_ipsum_1_line.expected"))
+        .stderr("");
 }
 
 #[test]
 fn test_stdin_1_line() {
-    new_ucmd!()
+    new_cmd!()
         .args(&["-n", "1"])
-        .pipe_in_fixture(INPUT)
-        .run().stdout_is_fixture("lorem_ipsum_1_line.expected");
+        .with_stdin().path(fixtures_path!(INPUT)).unwrap()
+        .assert()
+        .success()
+        .stdout(pred_eq_file!("lorem_ipsum_1_line.expected"))
+        .stderr("");
 }
 
 #[test]
 fn test_stdin_5_chars() {
-    new_ucmd!()
+    new_cmd!()
         .args(&["-c", "5"])
-        .pipe_in_fixture(INPUT)
-        .run().stdout_is_fixture("lorem_ipsum_5_chars.expected");
+        .with_stdin().path(fixtures_path!(INPUT)).unwrap()
+        .assert()
+        .success()
+        .stdout(pred_eq_file!("lorem_ipsum_5_chars.expected"))
+        .stderr("");
 }
 
 #[test]
 fn test_single_default() {
-    new_ucmd!()
+    new_cmd!()
+        .current_dir(fixtures_dir!())
         .arg(INPUT)
-        .run().stdout_is_fixture("lorem_ipsum_default.expected");
+        .assert()
+        .success()
+        .stdout(pred_eq_file!("lorem_ipsum_default.expected"))
+        .stderr("");
 }
 
 #[test]
 fn test_single_1_line_obsolete() {
-    new_ucmd!()
+    new_cmd!()
+        .current_dir(fixtures_dir!())
         .args(&["-1", INPUT])
-        .run().stdout_is_fixture("lorem_ipsum_1_line.expected");
+        .assert()
+        .success()
+        .stdout(pred_eq_file!("lorem_ipsum_1_line.expected"))
+        .stderr("");
 }
 
 #[test]
 fn test_single_1_line() {
-    new_ucmd!()
+    new_cmd!()
+        .current_dir(fixtures_dir!())
         .args(&["-n", "1", INPUT])
-        .run().stdout_is_fixture("lorem_ipsum_1_line.expected");
+        .assert()
+        .success()
+        .stdout(pred_eq_file!("lorem_ipsum_1_line.expected"))
+        .stderr("");
 }
 
 #[test]
 fn test_single_5_chars() {
-    new_ucmd!()
+    new_cmd!()
+        .current_dir(fixtures_dir!())
         .args(&["-c", "5", INPUT])
-        .run().stdout_is_fixture("lorem_ipsum_5_chars.expected");
+        .assert()
+        .success()
+        .stdout(pred_eq_file!("lorem_ipsum_5_chars.expected"))
+        .stderr("");
 }
 
 #[test]
 fn test_minus_1_line() {
-    new_ucmd!()
+    new_cmd!()
+        .current_dir(fixtures_dir!())
         .args(&["-n", "-1", INPUT])
-        .run().stdout_is_fixture("lorem_ipsum_minus_1_line.expected");
+        .assert()
+        .success()
+        .stdout(pred_eq_file!("lorem_ipsum_minus_1_line.expected"))
+        .stderr("");
 }
 
 #[test]
 fn test_minus_5_chars() {
-    new_ucmd!()
+    new_cmd!()
+        .current_dir(fixtures_dir!())
         .args(&["-c", "-5", INPUT])
-        .run().stdout_is_fixture("lorem_ipsum_minus_5_chars.expected");
+        .assert()
+        .success()
+        .stdout(pred_eq_file!("lorem_ipsum_minus_5_chars.expected"))
+        .stderr("");
 }
 
 #[test]
 fn test_multiple_input_files() {
-    new_ucmd!()
+    new_cmd!()
+        .current_dir(fixtures_dir!())
         .args(&[INPUT, INPUT2])
-        .run().stdout_is_fixture("lorem_ipsum_multiple_input_files.expected");
+        .assert()
+        .success()
+        .stdout(pred_eq_file!("lorem_ipsum_multiple_input_files.expected"))
+        .stderr("");
 }
 
 #[test]
 fn test_verbose() {
-    new_ucmd!()
+    new_cmd!()
+        .current_dir(fixtures_dir!())
         .args(&["-v", INPUT])
-        .run().stdout_is_fixture("lorem_ipsum_verbose.expected");
+        .assert()
+        .success()
+        .stdout(pred_eq_file!("lorem_ipsum_verbose.expected"))
+        .stderr("");
 }
