@@ -472,12 +472,13 @@ impl CommandInner {
             Case(ref clause) => Ok(clause.execute(data)),
             FunctionDef(ref def) => Ok(def.execute(data)),
             AndOr(ref and_ors) => Ok(exec_list(data, and_ors)),
-            SubShell(_) => {
+            SubShell(ref and_ors) => {
                 // XXX: this would be a use case for variable locality, but for now fork
-                // FIXME: need to set up so that it dumps to stdout (currently will just make a pipe to nowhere)
-                self.spawn(data, None)
+                InProcessChild::spawn(data, |data| {
+                    Ok(exec_list(data, and_ors))
+                })
+                    .map_err(|e| ShellError::Spawn(e))
                     .and_then(|mut child| child.wait().map_err(|e| ShellError::SubShell(e)))
-                    .map(|status| status.code())
             }
             Simple(ref cmd) => cmd.execute(data),
         }
@@ -497,9 +498,23 @@ impl CommandInner {
         match self {
             SubShell(ref and_ors) => {
                 // XXX: maybe make a Block node to share code between SubShell, AndOr (in Command, so compound_list) and FunctionBody?
-                InProcessChild::spawn(data, |data| Ok(exec_list(data, and_ors)))
+                // FIXME: should this use fake_subshell() or is this unnecessary?
+                data.env.enter_scope();
+
+                data.env.set_fd(1, EnvFd::Pipeline);
+                let inproc_child = InProcessChild::spawn(data, |data| {
+                    if let Some(prev) = prev_child {
+                        data.env.set_fd(0, prev.output());
+                    }
+                    Ok(exec_list(data, and_ors))
+                })
                     .map(|child| ShellChild::InProcess(child))
-                    .map_err(|e| ShellError::Spawn(e))
+                    .map_err(|e| ShellError::Spawn(e));
+
+                // XXX: fake_subshell????
+                data.env.exit_scope();
+
+                inproc_child
             }
             Simple(ref cmd) => cmd.spawn(data, prev_child),
             _ => InProcessChild::spawn(data, |data| {
