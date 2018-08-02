@@ -16,7 +16,7 @@ macro_rules! util_name {
 #[macro_export]
 macro_rules! new_cmd {
     () => {
-        Command::main_binary().unwrap().arg(util_name!())
+        Command::new(&*::BIN_PATH).arg(util_name!())
     };
 }
 

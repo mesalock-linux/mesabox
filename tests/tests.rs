@@ -18,6 +18,12 @@ extern crate predicates;
 #[macro_use]
 mod macros;
 
+use std::path::PathBuf;
+use assert_cmd::cargo;
+
+lazy_static! {
+    pub static ref BIN_PATH: PathBuf = cargo::main_binary_path().unwrap();
+}
 include!("../libmesabox/src/util/build/import.rs");
 
 macro_rules! generate_fns {
