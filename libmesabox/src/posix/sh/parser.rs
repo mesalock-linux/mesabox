@@ -76,6 +76,7 @@ pub enum ParserErrorKind {
     AndOrSep,
     Not,
     TakeUntil,
+    HereDocMarker,
     OneOf(&'static [&'static str]),
     CmdNameKeyword(&'static str),
     CompoundCommandKeyword,
@@ -117,6 +118,7 @@ impl fmt::Display for ParserErrorKind {
             AndOrSep => "expected && or ||",
             Not => "unexpected value (not)",
             TakeUntil => "unexpected value (take until)",
+            HereDocMarker => "expected heredoc end marker",
             OneOf(values) => return write!(f, "expected one of {:?}", values),
             CmdNameKeyword(keyword) => return write!(f, "expected command name but found keyword {}", keyword),
             CompoundCommandKeyword => "expected one of {, for, if, case, while, until",
@@ -184,26 +186,6 @@ impl Parser {
                     }
                 }
             };
-
-            /*
-            let mut input = skip_whitespace0(input);
-
-            loop {
-                match separator(input.clone(), self) {
-                    Ok((inp, val)) => {
-                        let (inp, val) = list(inp, self)?;
-                        result.push(val);
-                        input = skip_whitespace0(input);
-                    }
-                    Err(f) => {
-                        if input.clone().next().is_some() {
-                            return Err(f);
-                        } else {
-                            break;
-                        }
-                    }
-                }
-            }*/
 
             (input, result)
         };
@@ -331,7 +313,18 @@ fn is_one_of<'a>(mut input: ParseInput<'a>, values: &'static [&'static str]) -> 
 
 fn is_heredoc_marker<'a>(mut input: ParseInput<'a>, value: &OsStr) -> ParseResult<'a, ()> {
     // TODO
-    unimplemented!()
+    debug!("is_heredoc_marker");
+
+    for ch in token_to_input(value) {
+        match input.next() {
+            Some(val) if val == ch => {}
+            _ => {
+                return Err(ParserError::with_kind(ParserErrorKind::HereDocMarker));
+            }
+        }
+    }
+
+    Ok((input, ()))
 }
 
 /// Skip a value that may or may not exist in the input.
@@ -372,21 +365,14 @@ where
     Ok((input, vec_to_osstring(buffer)))
 }
 
-fn take_until_consuming_matches1<'a, F, R>(mut input: ParseInput<'a>, mut func: F) -> ParseResult<'a, OsString>
+/// Takes 0 or more units from the input, but MUST match `func` at least once or hit EOF.
+fn take_until_consuming_matches0<'a, F, R>(mut input: ParseInput<'a>, mut func: F) -> ParseResult<'a, OsString>
 where
     F: FnMut(ParseInput<'a>) -> ParseResult<'a, R>,
 {
-    if let Ok(_) = func(input.clone()) {
-        // TODO: give more info
-        return Err(ParserError::with_kind(ParserErrorKind::TakeUntil));
-    }
-
-    let mut buffer = match input.next() {
-        Some(&unit) => vec![unit],
-        None => return Err(ParserError::with_kind(ParserErrorKind::TakeUntil)),
-    };
-
     let mut not_eof = true;
+
+    let mut buffer = vec![];
     while not_eof {
         if let Ok(_) = func(input.clone()) {
             // consume the match
@@ -1351,9 +1337,10 @@ fn here_end<'a>(input: ParseInput<'a>) -> ParseResult<'a, HereDocWord> {
     //        the other hand, zsh allows stuff like $(printf hi) where the literal word that needs
     //        to be matched is "$(printf hi)".  because it's so unclear, i am just going with the
     //        definition that it must be a "simple" word (i.e. Word::Simple) or a quote with no
-    //        inner expansions/substitutions
+    //        inner expansions/substitutions (meaning that double quotes will act like single
+    //        quotes)
 
-    unimplemented!()
+    name(input)
     //map!(input, fix_error!(ParserError, alphanumeric1), |res| OsString::from_vec(res.to_owned()))
 }
 
@@ -1362,19 +1349,42 @@ fn here_end<'a>(input: ParseInput<'a>) -> ParseResult<'a, HereDocWord> {
 fn parse_heredoc<'a>(mut input: ParseInput<'a>, parser: &mut Parser) -> ParseResult<'a, ()> {
     debug!("parse_heredoc");
 
+    // TODO: this needs to check for parameter expansion, command substitution, and arithmetic
+    //       expansion if the end marker was NOT surrounded in quotes
+    let mut first = true;
+    let mut very_first = true;
     for marker in &mut parser.heredoc_markers {
         let mut heredoc = marker.heredoc.borrow_mut();
 
-        let (inp, res) = take_until_consuming_matches1(input, |input| {
-            newline(input)
-                .and_then(|(input, _)| is_heredoc_marker(input, &marker.marker))
-                .and_then(|(input, _)| newline(input))
+        let (inp, res) = take_until_consuming_matches0(input, |input| {
+            let start = if first && !very_first {
+                newline(input)
+            } else {
+                Ok((input, ()))
+            };
+            very_first = false;
+            let res = start.and_then(|(input, _)| is_heredoc_marker(input, &marker.marker))
+                .and_then(|(input, _)|
+                    newline(input.clone())
+                        .or_else(|f| {
+                            if input.clone().next().is_none() {
+                                Ok((input, ()))
+                            } else {
+                                Err(f)
+                            }
+                        })
+                );
+            first = false;
+            res
         })?;
 
         input = inp;
-        unimplemented!();
-        // FIXME: below
-        //heredoc.data = res;
+        // FIXME: ugly hack for unix (need to figure out what to do for windows)
+        heredoc.data = {
+            use std::os::unix::ffi::OsStringExt;
+
+            res.into_vec()
+        };
     }
     parser.heredoc_markers.clear();
 
@@ -1760,7 +1770,7 @@ fn io_number<'a>(mut input: ParseInput<'a>) -> ParseResult<'a, RawFd> {
             delimiter(input.clone())?;
             let (input, _) = ignore(input)?;
 
-            return Ok((input, unit as _));
+            return Ok((input, (unit as RawFd) - (b'0' as RawFd)));
         }
     }
 

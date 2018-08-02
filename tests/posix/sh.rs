@@ -401,6 +401,36 @@ mod stdin {
                 .stderr("");
         }, 5000);
     }
+
+    #[test]
+    fn test_heredoc_simple() {
+        new_cmd!()
+            .with_stdin().buffer("cat <<eof1\nHello,\nMore stuff\neof1")
+            .assert()
+            .success()
+            .stdout("Hello,\nMore stuff\n")
+            .stderr("");
+    }
+
+    #[test]
+    fn test_heredoc_multiple() {
+        new_cmd!()
+            .with_stdin().buffer("cat <<eof1; cat <<eof2\nHello,\nMore stuff\neof1\nother data\nmore data\neof2")
+            .assert()
+            .success()
+            .stdout("Hello,\nMore stuff\nother data\nmore data\n")
+            .stderr("");
+    }
+
+    #[test]
+    fn test_heredoc_multiple_no_data() {
+        new_cmd!()
+            .with_stdin().buffer("cat <<eof1; cat <<eof2\neof1\neof2")
+            .assert()
+            .success()
+            .stdout("")
+            .stderr("");
+    }
 }
 
 mod script {
