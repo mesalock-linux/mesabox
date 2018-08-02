@@ -6,6 +6,9 @@
 // For a copy, see the LICENSE file.
 //
 
+// NOTE: the compiler claims this is unused, but that's a lie and removing this line will cause
+//       compilation to fail
+#[allow(unused_imports)]
 use assert_cmd::prelude::*;
 use predicates::prelude::*;
 use timebomb;

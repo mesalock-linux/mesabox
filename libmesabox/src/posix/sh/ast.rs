@@ -1533,8 +1533,8 @@ impl ParamExpr {
         }
 
         match self.kind {
-            Alternate(ref word) if not_null => word.eval(data),
-            AlternateNull(ref word) if pval_valid => word.eval(data),
+            Alternate(ref word) if pval_valid => word.eval(data),
+            AlternateNull(ref word) if not_null => word.eval(data),
             Alternate(_) | AlternateNull(_) => OsString::from(""),
 
             Assign(ref word) | AssignNull(ref word) => {
