@@ -19,6 +19,7 @@ case $(get_crate_name "$@") in
     EXTRA=$COVERAGE_OPTIONS
     ;;
   *)
+    EXTRA=$OPTIONS
     ;;
 esac
 
