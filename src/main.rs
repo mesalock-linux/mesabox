@@ -11,9 +11,15 @@ extern crate env_logger;
 extern crate libmesabox as mesabox;
 
 use mesabox::UtilData;
+#[cfg(feature = "system-alloc")]
+use std::alloc::System;
 use std::env;
 use std::io::{self, Write};
 use std::process;
+
+#[cfg(feature = "system-alloc")]
+#[global_allocator]
+static GLOBAL: System = System;
 
 // this is just a thin wrapper around the library
 fn main() {

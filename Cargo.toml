@@ -91,6 +91,7 @@ latency = ["libmesabox/latency"]
 full-dynamic = ["libmesabox/full-dynamic"]
 # only use static dispatch (this will lead to dramatically larger compile times and binary sizes)
 no-dynamic = ["libmesabox/no-dynamic"]
+system-alloc = []
 
 default = ["unix"]
 
