@@ -376,8 +376,6 @@ mod stdin {
             .stderr("");
     }
 
-    // FIXME: currently never finishes parsing (would be ideal if there was a way to just set a max
-    //        time for all tests, but it doesn't seem like there is)
     #[test]
     fn test_word_inner_single_quote() {
         timebomb::timeout_ms(|| {

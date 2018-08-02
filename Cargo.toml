@@ -98,7 +98,7 @@ default = ["unix"]
 
 [dependencies]
 libmesabox = { path = "libmesabox", default-features = false }
-env_logger = { version = "0.5.11", optional = true }
+env_logger = { version = "0.5.11", optional = true, default-features = false }
 
 [dev-dependencies]
 tempfile = "3.0.2"
