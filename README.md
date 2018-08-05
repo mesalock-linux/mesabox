@@ -4,10 +4,10 @@ MesaBox
 [![Build Status](https://api.travis-ci.org/mesalock-linux/mesabox.svg?branch=master)](https://travis-ci.org/mesalock-linux/mesabox)
 [![License](https://img.shields.io/badge/license-BSD-blue.svg)](LICENSE)
 [![Coverage Status](https://codecov.io/gh/mesalock-linux/mesabox/branch/master/graphs/badge.svg)](https://codecov.io/gh/mesalock-linux/mesabox/branch/master)
-[![](https://tokei.rs/b1/github/mesalock-linux/mesabox)](https://github.com/mesalock-linux/mesabox).
+[![](https://tokei.rs/b1/github/mesalock-linux/mesabox)](https://github.com/mesalock-linux/mesabox)
 
 MesaBox is a collection of core system utilities written in Rust for Unix-like
-systems.  
+systems.
 
 Like the well-known [BusyBox][] and [Toybox][] sets of utilities popular on
 embedded devices, MesaBox seeks to provide a fully functioning command-line
@@ -42,8 +42,8 @@ sleep   | POSIX | **Complete**
 Maintainer
 ----------
 
-  - Alex Lyon `<alexlyon@baidu.com>` [@Arcterus](https://github.com/Arcterus)
-  - Mingshen Sun `<mssun@mesalock-linux.org>` [@mssun](https://github.com/mssun)
+  - Alex Lyon [@Arcterus](https://github.com/Arcterus)
+  - Mingshen Sun [@mssun](https://github.com/mssun)
 
 [BusyBox]: https://busybox.net/about
 [Toybox]: https://landley.net/toybox/about.html
