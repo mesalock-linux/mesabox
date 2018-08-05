@@ -72,7 +72,7 @@ fn test_garbage() {
         .assert()
         .failure()
         .stdout("")
-        .stderr(predicate::str::contains("invalid length at 16").from_utf8());
+        .stderr(pred_str_contains!("invalid length at 16"));
 }
 
 #[test]
@@ -111,7 +111,7 @@ fn test_wrap_no_arg() {
             .assert()
             .failure()
             .stdout("")
-            .stderr(predicate::str::contains("requires a value but none was supplied\n").from_utf8());
+            .stderr(pred_str_contains!("requires a value but none was supplied\n"));
     }
 }
 
@@ -123,7 +123,7 @@ fn test_wrap_bad_arg() {
             .assert()
             .failure()
             .stdout("")
-            .stderr(predicate::str::contains("'b' is not a number\n").from_utf8());
+            .stderr(pred_str_contains!("'b' is not a number\n"));
     }
 }
 

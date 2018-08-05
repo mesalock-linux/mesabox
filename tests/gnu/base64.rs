@@ -71,7 +71,7 @@ fn test_garbage() {
         .with_stdin().buffer(input)
         .assert()
         .failure()
-        .stderr(predicate::str::contains("invalid length at 20").from_utf8())
+        .stderr(pred_str_contains!("invalid length at 20"))
         .stdout("");
 }
 
