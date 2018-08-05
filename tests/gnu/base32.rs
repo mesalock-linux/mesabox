@@ -126,3 +126,25 @@ fn test_wrap_bad_arg() {
             .stderr(predicate::str::contains("'b' is not a number\n").from_utf8());
     }
 }
+
+#[test]
+fn test_encode_file() {
+    new_cmd!()
+        .current_dir(fixtures_dir!())
+        .arg("plain.txt")
+        .assert()
+        .success()
+        .stdout("JBSWY3DPFQQFO33SNRSCCCQ=\n")
+        .stderr("");
+}
+
+#[test]
+fn test_decode_file() {
+    new_cmd!()
+        .current_dir(fixtures_dir!())
+        .args(&["-d", "encoded.txt"])
+        .assert()
+        .success()
+        .stdout("The quick brown fox jumps over the lazy dog.\n")
+        .stderr("");
+}
