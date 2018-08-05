@@ -170,3 +170,22 @@ fn test_verbose() {
         .stdout(pred_eq_file!("lorem_ipsum_verbose.expected"))
         .stderr("");
 }
+
+#[test]
+fn test_invalid_numbers() {
+    new_cmd!()
+        .args(&["-c", "a"])
+        .with_stdin().path(fixtures_path!(INPUT)).unwrap()
+        .assert()
+        .failure()
+        .stdout("")
+        .stderr(pred_str_contains!("'a' is not a number or is too large"));
+
+    new_cmd!()
+        .current_dir(fixtures_dir!())
+        .args(&["-n", "a", INPUT])
+        .assert()
+        .failure()
+        .stdout("")
+        .stderr(pred_str_contains!("'a' is not a number or is too large"));
+}
