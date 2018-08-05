@@ -148,3 +148,17 @@ fn test_decode_file() {
         .stdout("The quick brown fox jumps over the lazy dog.\n")
         .stderr("");
 }
+
+#[test]
+fn test_invalid_wrap() {
+    for wrap_param in vec!["-w", "--wrap"] {
+        let input = "The quick brown fox jumps over the lazy dog.";
+        new_cmd!()
+            .args(&[wrap_param, "a"])
+            .with_stdin().buffer(input)
+            .assert()
+            .failure()
+            .stdout("")
+            .stderr(pred_str_contains!("'a' is not a number"));
+    }
+}
