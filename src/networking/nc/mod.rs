@@ -20,7 +20,7 @@ use std::os::unix::io::RawFd;
 use std::time::Duration;
 use std::net::{ToSocketAddrs};
 use socket2::{Socket, Domain};
-use super::{UtilSetup, ArgsIter};
+use super::{UtilSetup, UtilRead, ArgsIter};
 use super::{MesaError};
 
 
@@ -48,6 +48,8 @@ struct NcOptions {
     zflag: bool,
     timeout: Option<Duration>,
     unix_dg_tmp_socket: String,
+    stdin_fd: i32,
+    stderr:
 }
 
 fn mesaerr_result<T>(err_msg: &str) -> Result<T, MesaError> {
@@ -66,6 +68,10 @@ fn build_ports(ports: &str) -> Result<Vec<u16>, MesaError>{
     };
 
     Ok(vec!(port_list))
+}
+
+fn warn<S: UtilSetup>(setup: &mut S, msg: &str) {
+    let _ = write!(setup.error(), "{}", msg);
 }
 
 fn warn(msg: &str) {
@@ -96,7 +102,7 @@ impl NcOptions {
         let zflag = matches.is_present("z");
         let kflag = matches.is_present("k");
 
-        /* Cruft to make sure options are clean, and used properly. */
+        // Cruft to make sure options are clean, and used properly. 
         let positionals:Vec<&str> = matches.values_of("positionals").unwrap().collect();
 
         let family = if matches.is_present("U") {
@@ -155,7 +161,7 @@ impl NcOptions {
 
         let mut unix_dg_tmp_socket = String::new();
 
-        /* Get name of temporary socket for unix datagram client */
+        // Get name of temporary socket for unix datagram client 
         if family == AF_UNIX && uflag && !lflag {
             unix_dg_tmp_socket = if s_addr.is_some() {
                 s_addr.clone().unwrap()
@@ -183,6 +189,7 @@ impl NcOptions {
             timeout: timeout,
             unix_dg_tmp_socket: unix_dg_tmp_socket,
             zflag: zflag,
+            stdin_fd: 0
         };
 
         return Ok(ret);
@@ -231,7 +238,7 @@ impl <'a> NcCore<'a> {
 
             poll: Poll::new()?,
             net_interest: Ready::readable(),
-            event_stdin: EventedFd(&0),
+            event_stdin: EventedFd(&opts.stdin_fd),
             event_net: EventedFd(net_fd),
             event_stdout: EventedFd(&1),
             stdinbuf: [0; BUFSIZE],
@@ -267,20 +274,20 @@ impl <'a> NcCore<'a> {
         let mut last_ready_end = -1;
 
         loop {
-            /* both inputs are gone, buffers are empty, we are done */
+            // both inputs are gone, buffers are empty, we are done 
             if self.stdin_gone() && self.netin_gone() &&
                 self.stdinbuf_empty() && self.netinbuf_empty() {
                 // TODO: self.sock.shutdown(std::net::Shutdown::Both)?;
                 return Ok(());
             }
 
-            /* both outputs are gone, we can't continue */
+            // both outputs are gone, we can't continue 
             if self.stdout_gone() && self.netout_gone() {
                 // TODO: self.sock.shutdown(std::net::Shutdown::Both)?;
                 return Ok(());
             }
 
-            /* listen and net in gone, queues empty, done */
+            // listen and net in gone, queues empty, done 
             if self.opts.lflag && self.netin_gone() &&
                 self.stdinbuf_empty() && self.netinbuf_empty() {
                 // TODO: self.sock.shutdown(std::net::Shutdown::Both)?;
@@ -298,7 +305,7 @@ impl <'a> NcCore<'a> {
                 return mesaerr_result("polling error");
             }
 
-            /* timeout happened */
+            // timeout happened 
             if events.is_empty() {
                 return Ok(());
             }
@@ -888,7 +895,7 @@ fn nonunix_client(opts: &NcOptions) -> Result<(), MesaError> {
     Ok(())
 }
 
-pub fn execute<S, T>(_setup: &mut S, args: T) -> Result<(), MesaError>
+pub fn execute<S, T>(setup: &mut S, args: T) -> Result<(), MesaError>
 where
     S: UtilSetup,
     T: ArgsIter,
@@ -936,7 +943,18 @@ where
     let matches = app.get_matches_from_safe(args)?;
 
     debug_info(&format!("matches = {:?}", matches));
-    let opts = NcOptions::parse(matches, &help_msg)?;
+    let mut opts = NcOptions::parse(matches, &help_msg)?;
+
+    // adjust stdin_fd for UtilSetup
+    // invalid fd is treated as dflag
+    let stdin_fd = match setup.input().raw_fd() {
+        Some(fd) => fd,
+        _ => {
+            opts.dflag = true;
+            0
+        }
+    };
+    opts.stdin_fd = stdin_fd;
 
     if opts.lflag {
         return server(&opts);
