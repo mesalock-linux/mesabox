@@ -2,6 +2,7 @@ extern crate mio;
 extern crate clap;
 extern crate socket2;
 
+use regex::Regex;
 use std;
 use failure;
 use tempfile::NamedTempFile;
@@ -57,15 +58,35 @@ fn mesaerr_result<T>(err_msg: &str) -> Result<T, MesaError> {
 }
 
 fn build_ports(ports: &str) -> Result<Vec<u16>, MesaError>{
-    // TODO: suport XX-XX
-    let port_list = match ports.parse::<u16>() {
-        Ok(port) => port,
-        Err(_) => {
-            return mesaerr_result(&format!("invalid port[s] {}", ports));
+    let re = Regex::new(r"^(?P<start>\d{1,5})(-(?P<end>\d{1,5}))?$").unwrap();
+    let caps = re.captures(ports);
+    if caps.is_some() {
+        let caps = caps.unwrap();
+        let start = caps.name("start").unwrap().as_str().parse::<u32>().unwrap();
+        let mut end = 0;
+        match caps.name("end") {
+            Some(match_end) => end = match_end.as_str().parse::<u32>().unwrap(),
+            None => end = start
         }
-    };
+        if start <= 65535 && end <= 65535 {
+            let ret = if start <= end {
+                ((start as u16)..=((end) as u16)).collect()
+            } else {
+                ((end as u16)..=((start) as u16)).collect()
+            };
+            return Ok(ret);
+        }
+    }
+    return mesaerr_result(&format!("invalid port[s] {}", ports));
 
-    Ok(vec!(port_list))
+    // let port_list = match ports.parse::<u16>() {
+    //     Ok(port) => port,
+    //     Err(_) => {
+    //         return mesaerr_result(&format!("invalid port[s] {}", ports));
+    //     }
+    // };
+
+    // Ok(vec!(port_list))
 }
 
 // fn warn<S: UtilSetup>(setup: &mut S, msg: &str) {
@@ -99,6 +120,7 @@ impl NcOptions {
 
         let zflag = matches.is_present("z");
         let kflag = matches.is_present("k");
+        let unixflag = matches.is_present("U");
 
         // Cruft to make sure options are clean, and used properly. 
         let positionals:Vec<&str> = matches.values_of("positionals").unwrap().collect();
@@ -139,6 +161,9 @@ impl NcOptions {
         if lflag && zflag {
             return mesaerr_result("cannot use -z and -l");
         }
+        if unixflag && zflag {
+            return mesaerr_result("cannot use -z and -U");
+        }
         if !lflag && kflag {
             return mesaerr_result("must use -l with -k");
         }
@@ -175,7 +200,7 @@ impl NcOptions {
             iflag: matches.is_present("i"),
             interval: interval,
             lflag: matches.is_present("l"),
-            unixflag: matches.is_present("U"),
+            unixflag: unixflag,
             uflag: uflag,
             host: host,
             portlist: portlist,
@@ -275,20 +300,17 @@ impl <'a> NcCore<'a> {
             // both inputs are gone, buffers are empty, we are done 
             if self.stdin_gone() && self.netin_gone() &&
                 self.stdinbuf_empty() && self.netinbuf_empty() {
-                // TODO: self.sock.shutdown(std::net::Shutdown::Both)?;
                 return Ok(());
             }
 
             // both outputs are gone, we can't continue 
             if self.stdout_gone() && self.netout_gone() {
-                // TODO: self.sock.shutdown(std::net::Shutdown::Both)?;
                 return Ok(());
             }
 
             // listen and net in gone, queues empty, done 
             if self.opts.lflag && self.netin_gone() &&
                 self.stdinbuf_empty() && self.netinbuf_empty() {
-                // TODO: self.sock.shutdown(std::net::Shutdown::Both)?;
                 return Ok(());
             }
 
@@ -328,7 +350,6 @@ impl <'a> NcCore<'a> {
                 // if no stdout, stop watching net in
                 if self.stdout_gone() {
                     if !self.netin_gone() {
-                        // TODO: self.sock.shutdown(std::net::Shutdown::Read)?;
                     }
                     self.remove_stdin()?;
                 }
@@ -390,10 +411,6 @@ impl <'a> NcCore<'a> {
 
                 // if stdin gone and stdinbuf empty, remove netout
                 if self.stdin_gone() && self.stdinbuf_empty() {
-                    if !self.netout_gone() {
-                        // TODO: check && opts.Nflag {
-                        // TODO: self.sock.shutdown(std::net::Shutdown::Write)?;
-                    }
                     self.remove_netout()?;
                 }
 
@@ -636,8 +653,6 @@ impl <'a> NcCore<'a> {
 
         if event.token() == NcCore::TK_NET {
             debug_info("STDOUT HUP");
-            // TODO: check Nflag
-            // TODO: self.sock.shutdown(std::net::Shutdown::Write)?;
             self.remove_netout()?
         }
 
@@ -824,7 +839,6 @@ fn server(opts: &NcOptions) -> Result<(), MesaError> {
             }
 
             NcCore::run(&mut sock_conn, opts)?;
-            // TODO: sock_conn.shutdown(std::net::Shutdown::Both);
         }
 
         // TODO: implement
@@ -863,10 +877,9 @@ fn unix_client(opts: &NcOptions) -> Result<(), MesaError> {
     let mut sock = unix_connect(&opts.host, opts)?;
 
     if !opts.zflag {
-        // readwrite(&mut sock, &opts);
         NcCore::run(&mut sock, opts)?;
     } else {
-        return mesaerr_result("TODO: unknown error");
+        return mesaerr_result("doesn't support -z for unix socket");
     }
 
     if opts.uflag {
@@ -876,6 +889,10 @@ fn unix_client(opts: &NcOptions) -> Result<(), MesaError> {
     Ok(())
 }
 
+fn udptest(sock: &mut Socket) -> i32 {
+    0
+}
+
 fn nonunix_client(opts: &NcOptions) -> Result<(), MesaError> {
     for port in &opts.portlist {
         let mut sock = match remote_connect(opts, *port) {
@@ -883,9 +900,17 @@ fn nonunix_client(opts: &NcOptions) -> Result<(), MesaError> {
             Err(_) => continue,
         };
 
-        // if opts.vflag || opts.zflag {
-        //     // TODO: implement
-        // }
+        if opts.vflag || opts.zflag {
+            // For UDP, make sure we are connected.
+            if opts.uflag {
+                if udptest(&mut sock) != 0 {
+                    continue;
+                }
+            }
+
+            // Don't look up port if -n.
+
+        }
 
         // TODO: Fflag && !zflag
         NcCore::run(&mut sock, opts)?;
