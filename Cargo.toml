@@ -30,7 +30,7 @@ lsb = [
 ]
 
 ping = ["libmesabox/ping"]
-nc = []
+nc = ["libmesabox/nc"]
 networking = [
     "ping",
     "nc"

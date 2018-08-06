@@ -481,6 +481,7 @@ dependencies = [
  "rustyline 2.0.0-alpha (git+https://github.com/kkawakam/rustyline)",
  "socket2 0.3.7 (registry+https://github.com/rust-lang/crates.io-index)",
  "tar 0.4.16 (registry+https://github.com/rust-lang/crates.io-index)",
+ "tempfile 3.0.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "trust-dns-resolver 0.9.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "uucore 0.0.1 (git+https://github.com/uutils/coreutils)",
  "walkdir 2.1.4 (registry+https://github.com/rust-lang/crates.io-index)",

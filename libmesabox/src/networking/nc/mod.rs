@@ -20,8 +20,7 @@ use std::os::unix::io::RawFd;
 use std::time::Duration;
 use std::net::{ToSocketAddrs};
 use socket2::{Socket, Domain};
-use super::{UtilSetup, UtilRead, ArgsIter};
-use super::{MesaError};
+use {UtilSetup, UtilRead, ArgsIter, MesaError};
 
 
 pub(crate) const NAME: &str = "nc";
@@ -48,8 +47,7 @@ struct NcOptions {
     zflag: bool,
     timeout: Option<Duration>,
     unix_dg_tmp_socket: String,
-    stdin_fd: i32,
-    stderr:
+    stdin_fd: i32
 }
 
 fn mesaerr_result<T>(err_msg: &str) -> Result<T, MesaError> {
@@ -70,9 +68,9 @@ fn build_ports(ports: &str) -> Result<Vec<u16>, MesaError>{
     Ok(vec!(port_list))
 }
 
-fn warn<S: UtilSetup>(setup: &mut S, msg: &str) {
-    let _ = write!(setup.error(), "{}", msg);
-}
+// fn warn<S: UtilSetup>(setup: &mut S, msg: &str) {
+//     let _ = write!(setup.error(), "{}", msg);
+// }
 
 fn warn(msg: &str) {
     eprint!("{}", msg);
@@ -947,8 +945,8 @@ where
 
     // adjust stdin_fd for UtilSetup
     // invalid fd is treated as dflag
-    let stdin_fd = match setup.input().raw_fd() {
-        Some(fd) => fd,
+    let stdin_fd = match setup.input().raw_object() {
+        Some(fd) => fd.raw_value(),
         _ => {
             opts.dflag = true;
             0
