@@ -126,3 +126,25 @@ fn test_wrap_bad_arg() {
             .stderr(pred_str_contains!("'b' is not a number\n"));
     }
 }
+
+#[test]
+fn test_encode_file() {
+    new_cmd!()
+        .current_dir(fixtures_dir!())
+        .arg("plain.txt")
+        .assert()
+        .success()
+        .stdout("aGVsbG8sIHdvcmxkIQo=\n")
+        .stderr("");
+}
+
+#[test]
+fn test_decode_file() {
+    new_cmd!()
+        .current_dir(fixtures_dir!())
+        .args(&["-d", "encoded.txt"])
+        .assert()
+        .success()
+        .stdout("The quick brown fox jumps over the lazy dog.\n")
+        .stderr("");
+}
