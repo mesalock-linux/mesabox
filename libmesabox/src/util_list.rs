@@ -12,7 +12,8 @@ generate_fns! {
         (tar, "tar_util")
     },
     networking {
-        (ping, "ping")
+        (ping, "ping"),
+        (nc, "nc")
     },
     posix {
         (cat, "cat"),

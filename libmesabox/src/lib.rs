@@ -55,6 +55,10 @@ extern crate rustyline;
 #[cfg(feature = "log")]
 #[macro_use]
 extern crate log;
+#[cfg(feature = "tempfile")]
+extern crate tempfile;
+#[cfg(feature = "regex")]
+extern crate regex;
 
 use clap::{App, SubCommand};
 use std::env::{self, VarsOs};
