@@ -4,22 +4,18 @@ extern crate socket2;
 
 use regex::Regex;
 use std;
-use failure;
 use tempfile::NamedTempFile;
 use clap::{Arg, ArgMatches};
 use mio::{Events, Event, Poll, Ready, PollOpt, Token};
+use mio::unix::{EventedFd, UnixReady};
 use libc::{AF_UNSPEC, AF_INET, AF_INET6, AF_UNIX};
-use std::io;
-use std::net::SocketAddr;
-use mio::unix::EventedFd;
-use std::io::{Read,Write, ErrorKind};
-use mio::unix::UnixReady;
+use std::io::{self, Read,Write, ErrorKind};
 use std::thread::sleep;
 use std::fmt::Debug;
-use std::os::unix::io::AsRawFd;
-use std::os::unix::io::RawFd;
+use std::os::unix::io::{AsRawFd, RawFd};
 use std::time::Duration;
-use std::net::{ToSocketAddrs};
+use std::net::{ToSocketAddrs, SocketAddr};
+use std::path::{Path, PathBuf};
 use socket2::{Socket, Domain};
 use {UtilSetup, UtilRead, ArgsIter, MesaError};
 
@@ -30,8 +26,44 @@ pub(crate) const DESCRIPTION: &str = "arbitrary TCP and UDP connections and list
 const BUFSIZE: usize = 16384;
 const PRINT_DEBUG_INFO: bool = false;
 
+#[derive(Fail, Debug)]
+enum NetcatError {
+    #[fail(display = "{}: {}", path, err)]
+    Input {
+        #[cause]
+        err: io::Error,
+        path: String,
+    },
+
+    #[fail(display = "local_listen failed")]
+    LocalListenErr,
+
+    #[fail(display = "invalid port[s] {}", _0)]
+    InvalidPortErr(String),
+
+    #[fail(display = "poll error")]
+    PollErr,
+
+    #[fail(display = "{}", _0)]
+    UsageErr(String),
+}
+
+
+// struct Cat<'a, I, O, E>
+// where
+//     I: BufRead,
+//     O: Write,
+//     E: Write,
+// {
+//     stdin: I,
+//     stdout: O,
+//     stderr: E,
+//     current_dir: Option<&'a Path>,
+//     interactive: bool,
+// }
+
 #[derive(Debug)]
-struct NcOptions {
+struct NcOptions<E:Write>{
     dflag: bool,
     iflag: bool,
     interval: Option<Duration>,
@@ -47,14 +79,9 @@ struct NcOptions {
     vflag: bool,
     zflag: bool,
     timeout: Option<Duration>,
-    unix_dg_tmp_socket: String,
-    stdin_fd: i32
-}
-
-fn mesaerr_result<T>(err_msg: &str) -> Result<T, MesaError> {
-    Err(MesaError::from(
-        failure::err_msg(format!("{}", err_msg)).compat()
-        ))
+    unix_dg_tmp_socket: PathBuf,
+    stdin_fd: i32,
+    nflag: bool
 }
 
 fn build_ports(ports: &str) -> Result<Vec<u16>, MesaError>{
@@ -77,16 +104,7 @@ fn build_ports(ports: &str) -> Result<Vec<u16>, MesaError>{
             return Ok(ret);
         }
     }
-    return mesaerr_result(&format!("invalid port[s] {}", ports));
-
-    // let port_list = match ports.parse::<u16>() {
-    //     Ok(port) => port,
-    //     Err(_) => {
-    //         return mesaerr_result(&format!("invalid port[s] {}", ports));
-    //     }
-    // };
-
-    // Ok(vec!(port_list))
+    return Err(NetcatError::InvalidPortErr(String::from(ports)))?;
 }
 
 // fn warn<S: UtilSetup>(setup: &mut S, msg: &str) {
@@ -141,7 +159,7 @@ impl NcOptions {
                 uport = String::new();
             } else {
                 if !lflag {
-                    return mesaerr_result(msg);
+                    return Err(NetcatError::UsageErr(String::from(msg)))?;
                 }
                 uport = String::from(positionals[0]);
             }
@@ -150,22 +168,6 @@ impl NcOptions {
             uport = String::from(positionals[1]);
         } else {
             unreachable!()
-        }
-
-        if lflag && s_addr.is_some() {
-            return mesaerr_result("cannot use -s and -l");
-        }
-        if lflag && pflag {
-            return mesaerr_result("cannot use -p and -l");
-        }
-        if lflag && zflag {
-            return mesaerr_result("cannot use -z and -l");
-        }
-        if unixflag && zflag {
-            return mesaerr_result("cannot use -z and -U");
-        }
-        if !lflag && kflag {
-            return mesaerr_result("must use -l with -k");
         }
 
         if !uport.is_empty() {
@@ -182,16 +184,16 @@ impl NcOptions {
             timeout = Some(Duration::new(sec, 0));
         }
 
-        let mut unix_dg_tmp_socket = String::new();
+        let mut unix_dg_tmp_socket = PathBuf::new();
 
         // Get name of temporary socket for unix datagram client 
         if family == AF_UNIX && uflag && !lflag {
-            unix_dg_tmp_socket = if s_addr.is_some() {
-                s_addr.clone().unwrap()
-            } else {
-                let nf = NamedTempFile::new()?;
-                let path = String::from(nf.path().to_str().unwrap());
-                path
+            unix_dg_tmp_socket = match s_addr {
+                Some(ref addr) => addr.into(),
+                None => {
+                    let nf = NamedTempFile::new()?;
+                    nf.path().into()
+                }
             };
         }
 
@@ -212,7 +214,8 @@ impl NcOptions {
             timeout: timeout,
             unix_dg_tmp_socket: unix_dg_tmp_socket,
             zflag: zflag,
-            stdin_fd: 0
+            stdin_fd: 0,
+            nflag: matches.is_present("n")
         };
 
         return Ok(ret);
@@ -317,12 +320,12 @@ impl <'a> NcCore<'a> {
             /* help says -i is for "wait between lines sent". We read and
              * write arbitrary amounts of data, and we don't want to start
              * scanning for newlines, so this is as good as it gets */
-             if self.opts.iflag {
+            if self.opts.iflag {
                 sleep(self.opts.interval.unwrap());
             }
 
             if let Err(_) = self.poll.poll(&mut events, None) {
-                return mesaerr_result("polling error");
+                return Err(NetcatError::PollErr)?;
             }
 
             // timeout happened 
@@ -722,7 +725,7 @@ fn local_listen(opts: &NcOptions) -> Result<Socket, MesaError> {
         };
     }
 
-    return mesaerr_result("local_listen failed");
+    return Err(NetcatError::LocalListenErr)?;
 }
 
 fn remote_connect(opts: &NcOptions, port: u16) -> Result<Socket, MesaError>{
@@ -762,14 +765,14 @@ fn remote_connect(opts: &NcOptions, port: u16) -> Result<Socket, MesaError>{
             }
         }
     }
-    mesaerr_result("local_listen failed")
+    return Err(NetcatError::LocalListenErr)?;
 }
 
 /*
  * unix_bind()
  * Returns a unix socket bound to the given path
  */
-fn unix_bind(path: &str, opts: &NcOptions) -> Result<Socket, MesaError> {
+fn unix_bind<P: AsRef<Path>>(path: P, opts: &NcOptions) -> Result<Socket, MesaError> {
     let sock_type = if opts.uflag {
         socket2::Type::dgram()
     } else {
@@ -785,7 +788,7 @@ fn unix_bind(path: &str, opts: &NcOptions) -> Result<Socket, MesaError> {
  * unix_listen()
  * Create a unix domain socket, and listen on it.
  */
-fn unix_listen(path: &str) -> Result<Socket, MesaError> {
+fn unix_listen<P: AsRef<Path>>(path: P) -> Result<Socket, MesaError> {
     let sock = Socket::new(Domain::unix(), socket2::Type::stream(), None)?;
     sock.bind(&socket2::SockAddr::unix(path)?)?;
     sock.listen(5)?;
@@ -876,11 +879,7 @@ fn unix_client(opts: &NcOptions) -> Result<(), MesaError> {
 
     let mut sock = unix_connect(&opts.host, opts)?;
 
-    if !opts.zflag {
-        NcCore::run(&mut sock, opts)?;
-    } else {
-        return mesaerr_result("doesn't support -z for unix socket");
-    }
+    NcCore::run(&mut sock, opts)?;
 
     if opts.uflag {
         std::fs::remove_file(&opts.unix_dg_tmp_socket)?;
@@ -908,7 +907,14 @@ fn nonunix_client(opts: &NcOptions) -> Result<(), MesaError> {
                 }
             }
 
-            // Don't look up port if -n.
+            let mut service_name = "";
+            // if nflag doesn't exits, look up the service name
+            if !opts.nflag {
+                // TODO: parse /etc/services
+                service_name = "";
+            }
+
+
 
         }
 
@@ -927,7 +933,11 @@ where
     let app = util_app!(NAME)
         .arg(Arg::with_name("l")
             .short("l")
-            .help("Used to specify that nc should listen for an incoming connection rather than initiate a connection to a remote host.  It is an error to use this option in conjunction with the -p, -s, or -z options.  Additionally, any timeouts specified with the -w option are ignored."))
+            .help("Used to specify that nc should listen for an incoming connection rather than initiate a connection to a remote host.  It is an error to use this option in conjunction with the -p, -s, or -z options.  Additionally, any timeouts specified with the -w option are ignored.")
+            .conflicts_with("s")
+            .conflicts_with("p")
+            .conflicts_with("z")
+            .conflicts_with("k"))
         .arg(Arg::with_name("i")
             .short("i")
             .value_name("interval")
@@ -943,7 +953,8 @@ where
             .help("Do not attempt to read from stdin."))
         .arg(Arg::with_name("U")
             .short("U")
-            .help("Specifies to use Unix Domain Sockets."))
+            .help("Specifies to use Unix Domain Sockets.")
+            .conflicts_with("z"))
         .arg(Arg::with_name("u")
             .short("u")
             .help("Use UDP instead of the default option of TCP."))
@@ -953,6 +964,9 @@ where
         .arg(Arg::with_name("k")
             .short("k")
             .help("Forces nc to stay listening for another connection after its current connection is completed.  It is an error to use this option without the -l option."))
+        .arg(Arg::with_name("n")
+            .short("n")
+            .help("Do not do any DNS or service lookups on any specified addresses, hostnames or ports."))
         .arg(Arg::with_name("z")
             .short("z")
             .help("Specifies that nc should just scan for listening daemons, without sending any data to them.  It is an error to use this option in conjunction with the -l option."))
@@ -970,7 +984,12 @@ where
 
     // adjust stdin_fd for UtilSetup
     // invalid fd is treated as dflag
-    let stdin_fd = match setup.input().raw_object() {
+    let (input, output, error) = setup.stdio();
+    let stdin = input.lock()?;
+    let stdout = output.lock()?;
+    let stderr = error.lock()?;
+    
+    let stdin_fd = match stdin.raw_object() {
         Some(fd) => fd.raw_value(),
         _ => {
             opts.dflag = true;
