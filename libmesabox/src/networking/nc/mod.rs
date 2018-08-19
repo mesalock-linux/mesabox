@@ -63,7 +63,7 @@ enum NetcatError {
 // }
 
 #[derive(Debug)]
-struct NcOptions<E:Write>{
+struct NcOptions {
     dflag: bool,
     iflag: bool,
     interval: Option<Duration>,
@@ -81,6 +81,7 @@ struct NcOptions<E:Write>{
     timeout: Option<Duration>,
     unix_dg_tmp_socket: PathBuf,
     stdin_fd: i32,
+    stderr_fd: i32,
     nflag: bool
 }
 
@@ -215,10 +216,23 @@ impl NcOptions {
             unix_dg_tmp_socket: unix_dg_tmp_socket,
             zflag: zflag,
             stdin_fd: 0,
+            stderr_fd: 2,
             nflag: matches.is_present("n")
         };
 
         return Ok(ret);
+    }
+
+    pub fn setup_stdio<T: UtilSetup>(&mut self, setup: T) {
+        self.stdin_fd = match setup.input().raw_object() {
+            Some(fd) => fd.raw_value(),
+            _ => {
+                self.dflag = true;
+                0
+            }
+        };
+        // self.
+        // opts.stdin_fd = stdin_fd;
     }
 }
 
@@ -750,8 +764,12 @@ fn remote_connect(opts: &NcOptions, port: u16) -> Result<Socket, MesaError>{
             unimplemented!();
         }
 
-        // TODO: maybe sometimes no timeout
-        match sock.connect_timeout(&socket2::SockAddr::from(addr), Duration::new(1, 0)) {
+        let connect_res = match opts.timeout {
+            Some(t) => sock.connect_timeout(&socket2::SockAddr::from(addr), t),
+            None => sock.connect(&socket2::SockAddr::from(addr))
+        };
+
+        match connect_res {
             Ok(_) => return Ok(sock),
             Err(_) => {
                 if opts.vflag {
@@ -941,8 +959,13 @@ where
         .arg(Arg::with_name("i")
             .short("i")
             .value_name("interval")
-            .help("Specifies a delay time interval between lines of text sent and received.  Also causes a delay time between connections to multiple ports.")
             .takes_value(true))
+            .help("Specifies a delay time interval between lines of text sent and received.  Also causes a delay time between connections to multiple ports.")
+        .arg(Arg::with_name("w")
+            .short("w")
+            .value_name("timeout")
+            .takes_value(true))
+            .help("If a connection and stdin are idle for more than timeout seconds, then the connection is silently closed.  The -w flag has no effect on the -l option, i.e. nc will listen forever for a connection, with or without the -w flag. The default is no timeout.")
         .arg(Arg::with_name("s")
             .short("s")
             .value_name("source_ip_address")
@@ -982,14 +1005,7 @@ where
     debug_info(&format!("matches = {:?}", matches));
     let mut opts = NcOptions::parse(matches, &help_msg)?;
 
-    // adjust stdin_fd for UtilSetup
-    // invalid fd is treated as dflag
-    let (input, output, error) = setup.stdio();
-    let stdin = input.lock()?;
-    let stdout = output.lock()?;
-    let stderr = error.lock()?;
-    
-    let stdin_fd = match stdin.raw_object() {
+    let stdin_fd = match setup.input().raw_object() {
         Some(fd) => fd.raw_value(),
         _ => {
             opts.dflag = true;
