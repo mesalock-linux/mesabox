@@ -22,9 +22,10 @@ loginutils = [
 ]
 
 # XXX: temporary until renaming dependencies is supported
+mount = ["libc"]
 tar_util = ["tar", "globset"]
 lsb = [
-    "tar"
+    "mount", "tar"
 ]
 
 ping = ["chrono", "crossbeam", "libc", "pnet", "byteorder", "trust-dns-resolver", "mio", "socket2"]
