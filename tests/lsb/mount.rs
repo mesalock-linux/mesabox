@@ -10,8 +10,11 @@
 // use command `sudo cargo test root_test_mount -- --ignored --test-threads 1`
 
 use assert_cmd::prelude::*;
+use assert_fs;
+use assert_fs::prelude::*;
 use predicates::prelude::*;
 use std::fs;
+use std::io::prelude::*;
 use std::io::{BufRead, BufReader, Read};
 use std::process::Command;
 
@@ -69,9 +72,10 @@ fn test_mount_no_arg() {
 
 #[test]
 fn test_mount_without_root() {
+    let temp_dir = assert_fs::TempDir::new().unwrap();
+    let mnt = temp_dir.path().to_str().unwrap();
     new_cmd!()
-        .current_dir(fixtures_dir!())
-        .args(&["/dev/loop0", "mnt"])
+        .args(&["/dev/loop0", mnt])
         .assert()
         .failure()
         .stdout("")
@@ -81,9 +85,10 @@ fn test_mount_without_root() {
 #[test]
 #[ignore]
 fn root_test_mount_nonexistent_dev() {
+    let temp_dir = assert_fs::TempDir::new().unwrap();
+    let mnt = temp_dir.path().to_str().unwrap();
     new_cmd!()
-        .current_dir(fixtures_dir!())
-        .args(&["/dev/this_device_should_not_exist", "mnt"])
+        .args(&["/dev/this_device_should_not_exist", mnt])
         .assert()
         .failure()
         .stdout("")
@@ -98,7 +103,6 @@ fn root_test_mount_nonexistent_dev() {
 #[ignore]
 fn root_test_mount_nonexistent_mount_point() {
     new_cmd!()
-        .current_dir(fixtures_dir!())
         .args(&["/dev/loop0", "this_target_should_not_exist"])
         .assert()
         .failure()
@@ -109,13 +113,14 @@ fn root_test_mount_nonexistent_mount_point() {
 #[test]
 #[ignore]
 fn root_test_mount_unknown_filesystem_type() {
+    let temp_dir = assert_fs::TempDir::new().unwrap();
+    let mnt = temp_dir.path().to_str().unwrap();
     new_cmd!()
-        .current_dir(fixtures_dir!())
         .args(&[
             "-t",
             "this_filesystem_type_should_not_exist",
             "/dev/loop0",
-            "mnt",
+            mnt,
         ])
         .assert()
         .failure()
@@ -130,9 +135,10 @@ fn root_test_mount_unknown_filesystem_type() {
 #[test]
 #[ignore]
 fn root_test_mount_unknown_uuid() {
+    let temp_dir = assert_fs::TempDir::new().unwrap();
+    let mnt = temp_dir.path().to_str().unwrap();
     new_cmd!()
-        .current_dir(fixtures_dir!())
-        .args(&["-U", "this_uuid_should_not_exist", "mnt"])
+        .args(&["-U", "this_uuid_should_not_exist", mnt])
         .assert()
         .failure()
         .stdout("")
@@ -144,38 +150,71 @@ fn root_test_mount_unknown_uuid() {
 #[test]
 #[ignore]
 fn root_test_mount_create_mount_point() {
+    let temp_dir = assert_fs::TempDir::new().unwrap();
+    // let device_image = temp_dir.child("device.img");
+    let mount_point = temp_dir.child("mnt");
+    let mount_point_path = mount_point.path();
+    //let device_image_path = device_image.path();
+    // create mount point directory
+    fs::create_dir(mount_point_path).unwrap();
+    // create device image
+    Command::new("dd")
+        .current_dir(&temp_dir)
+        .args(&["if=/dev/zero", "of=device.img", "bs=128", "count=1024"])
+        .assert()
+        .success();
+
+    Command::new("mkfs.ext4")
+        .current_dir(&temp_dir)
+        .args(&["device.img"])
+        .assert()
+        .success();
+
+    Command::new("mount")
+        .current_dir(&temp_dir)
+        .args(&["device.img", "mnt"])
+        .assert()
+        .success();
+    let new_file_path = mount_point_path.join("new_file.txt");
+    let mut file = fs::File::create(new_file_path).unwrap();
+    file.write_all(b"Hello World!").unwrap();
+    drop(file);
+
+    Command::new("umount")
+        .current_dir(&temp_dir)
+        .args(&["mnt"])
+        .assert()
+        .success();
+
     Command::new("losetup")
-        .current_dir(fixtures_dir!())
-        .args(&["/dev/loop0", "dev.img"])
+        .current_dir(&temp_dir)
+        .args(&["/dev/loop0", "device.img"])
         .assert()
         .success()
         .stdout("")
         .stderr("");
 
     new_cmd!()
-        .current_dir(fixtures_dir!())
+        .current_dir(&temp_dir)
         .args(&["/dev/loop0", "mnt"])
         .assert()
         .success();
 
-    let mut path = fixtures_dir!();
-    path.push("mnt/read_file_from_device.txt");
+    let path = temp_dir.path().join("mnt/new_file.txt");
     let mut file = fs::File::open(path).unwrap();
     let mut contents = String::new();
     file.read_to_string(&mut contents).unwrap();
-    assert_eq!(contents, "Hello World!\n");
+    assert_eq!(contents, "Hello World!");
     drop(file);
 
     Command::new("umount")
-        .current_dir(fixtures_dir!())
+        .current_dir(&temp_dir)
         .args(&["mnt"])
         .assert()
-        .success()
-        .stdout("")
-        .stderr("");
+        .success();
 
     Command::new("losetup")
-        .current_dir(fixtures_dir!())
+        .current_dir(&temp_dir)
         .args(&["-d", "/dev/loop0"])
         .assert()
         .success()
@@ -186,30 +225,47 @@ fn root_test_mount_create_mount_point() {
 #[test]
 #[ignore]
 fn root_test_mount_remount() {
+    let temp_dir = assert_fs::TempDir::new().unwrap();
+    let mount_point = temp_dir.child("mnt");
+    let mount_point_path = mount_point.path();
+    // create mount point directory
+    fs::create_dir(mount_point_path).unwrap();
+    // create device image
+    Command::new("dd")
+        .current_dir(&temp_dir)
+        .args(&["if=/dev/zero", "of=device.img", "bs=128", "count=1024"])
+        .assert()
+        .success();
+
+    Command::new("mkfs.ext4")
+        .current_dir(&temp_dir)
+        .args(&["device.img"])
+        .assert()
+        .success();
+
     Command::new("losetup")
-        .current_dir(fixtures_dir!())
-        .args(&["/dev/loop0", "dev.img"])
+        .current_dir(&temp_dir)
+        .args(&["/dev/loop1", "device.img"])
         .assert()
         .success()
         .stdout("")
         .stderr("");
 
     new_cmd!()
-            .current_dir(fixtures_dir!())
+            .current_dir(&temp_dir)
             // mount it as read-write
-            .args(&["-o", "rw", "/dev/loop0", "mnt"])
+            .args(&["-o", "rw", "/dev/loop1", "mnt"])
             .assert()
             .success();
 
     new_cmd!()
-            .current_dir(fixtures_dir!())
+            .current_dir(&temp_dir)
             // then remount it as read-only
-            .args(&["-o", "remount,ro", "/dev/loop0", "mnt"])
+            .args(&["-o", "remount,ro", "/dev/loop1", "mnt"])
             .assert()
             .success();
 
-    let mut path = fixtures_dir!();
-    path.push("mnt/create_new_file.txt");
+    let path = temp_dir.path().join("mnt/create_new_file.txt");
     match fs::File::create(path) {
         // This operation should not succeed because it's read-only
         Ok(_) => assert!(false),
@@ -218,7 +274,7 @@ fn root_test_mount_remount() {
     }
 
     Command::new("umount")
-        .current_dir(fixtures_dir!())
+        .current_dir(&temp_dir)
         .args(&["mnt"])
         .assert()
         .success()
@@ -226,8 +282,8 @@ fn root_test_mount_remount() {
         .stderr("");
 
     Command::new("losetup")
-        .current_dir(fixtures_dir!())
-        .args(&["-d", "/dev/loop0"])
+        .current_dir(&temp_dir)
+        .args(&["-d", "/dev/loop1"])
         .assert()
         .success()
         .stdout("")
