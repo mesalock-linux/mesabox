@@ -280,7 +280,7 @@ impl FSDescFile {
     }
     fn print<O: Write>(&self, fs_type: OsString, output: &mut O) -> MountResult<()> {
         for item in &self.list {
-            if fs_type != "" {
+            if fs_type != *"" {
                 if fs_type != item.mnt_type {
                     continue;
                 }
@@ -403,12 +403,12 @@ impl<'a> MountCommand {
                 arg1 = OsString::from(String::from("Label=") + uuid);
             }
             // no argument
-            if arg1 == "" {
+            if arg1 == *"" {
                 let mut m = ShowMountPoints::new(fs_type, &mut stdout);
                 m.run()?;
             }
             // one argument
-            else if arg1 != "" && arg2 == "" {
+            else if arg1 != *"" && arg2 == *"" {
                 if options.contains(&"remount") {
                     let m = Remount::new(
                         property,
@@ -566,7 +566,7 @@ impl Mount for CreateMountPoint {
             return Err(MountError::DeviceNotExist(t, s));
         }
         // if type is not specified, auto detect filesystem type
-        if self.filesystem_type == "" || self.filesystem_type == "auto" {
+        if self.filesystem_type == *"" || self.filesystem_type == *"auto" {
             let file_name = "/proc/filesystems";
             let file = match fs::File::open(file_name) {
                 Ok(f) => f,
