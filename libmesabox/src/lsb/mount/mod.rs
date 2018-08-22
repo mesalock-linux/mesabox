@@ -52,8 +52,6 @@ enum MountError {
     MountPointNotExist(String),
     #[fail(display = "{}: special device {} does not exist.", _0, _1)]
     DeviceNotExist(String, String),
-    #[fail(display = "Invalid UTF-8 characters")]
-    InvalidCharError,
     // Denotes an error caused by one of stdin, stdout, or stderr failing to lock
     #[fail(display = "{}", _0)]
     Lock(#[cause] LockError),
@@ -106,10 +104,8 @@ impl Uuid {
         // OsString and OsStr lacks "starts_with" function
         // FIXME Maybe find a better way to test if input starts with "UUID="
         let dir;
-        let s = input
-            .clone()
-            .into_string()
-            .or(Err(MountError::InvalidCharError))?;
+        let s = input.clone();
+        let s = s.to_string_lossy();
         if s.starts_with("UUID=") {
             dir = OsString::from(&s[5..]);
         } else {
@@ -148,10 +144,8 @@ impl Label {
         // OsString and OsStr lacks "starts_with" function
         // FIXME Maybe find a better way to test if input starts with "Label="
         let dir;
-        let s = input
-            .clone()
-            .into_string()
-            .or(Err(MountError::InvalidCharError))?;
+        let s = input.clone();
+        let s = s.to_string_lossy();
         if s.starts_with("Label=") {
             dir = OsString::from(&s[6..]);
         } else {
@@ -210,10 +204,8 @@ impl Flag {
     }
 
     fn get_flag(options: &OsString) -> MountResult<MsFlags> {
-        let s = options
-            .clone()
-            .into_string()
-            .or(Err(MountError::InvalidCharError))?;
+        let s = options.clone();
+        let s = s.to_string_lossy();
         let mut options: Vec<&str> = s.split(",").collect();
         let mut flag = Flag::default();
         if options.contains(&"default") {
@@ -288,22 +280,10 @@ impl FSDescFile {
             writeln!(
                 output,
                 "{} on {} type {} ({})",
-                item.mnt_fsname
-                    .clone()
-                    .into_string()
-                    .or(Err(MountError::InvalidCharError))?,
-                item.mnt_dir
-                    .clone()
-                    .into_string()
-                    .or(Err(MountError::InvalidCharError))?,
-                item.mnt_type
-                    .clone()
-                    .into_string()
-                    .or(Err(MountError::InvalidCharError))?,
-                item.mnt_opts
-                    .clone()
-                    .into_string()
-                    .or(Err(MountError::InvalidCharError))?
+                item.mnt_fsname.to_string_lossy(),
+                item.mnt_dir.to_string_lossy(),
+                item.mnt_type.to_string_lossy(),
+                item.mnt_opts.to_string_lossy(),
             )?;
         }
         Ok(())
@@ -324,24 +304,16 @@ impl Default for Property {
 
 // OsString has limited methods, implement them
 trait OsStringExtend {
-    fn starts_with(&self, pat: &str) -> MountResult<bool>;
-    fn contains(&self, pat: &str) -> MountResult<bool>;
+    fn starts_with(&self, pat: &str) -> bool;
+    fn contains(&self, pat: &str) -> bool;
 }
 
 impl OsStringExtend for OsString {
-    fn starts_with(&self, pat: &str) -> MountResult<bool> {
-        Ok(self
-            .clone()
-            .into_string()
-            .or(Err(MountError::InvalidCharError))?
-            .starts_with(pat))
+    fn starts_with(&self, pat: &str) -> bool {
+        self.to_string_lossy().starts_with(pat)
     }
-    fn contains(&self, pat: &str) -> MountResult<bool> {
-        Ok(self
-            .clone()
-            .into_string()
-            .or(Err(MountError::InvalidCharError))?
-            .contains(pat))
+    fn contains(&self, pat: &str) -> bool {
+        self.to_string_lossy().contains(pat)
     }
 }
 
@@ -354,7 +326,7 @@ impl<'a> MountCommand {
         if matches.is_present("a") {
             let fstab = FSDescFile::new("/etc/fstab")?;
             for item in fstab.list {
-                if item.mnt_opts.contains("noauto")? {
+                if item.mnt_opts.contains("noauto") {
                     continue;
                 }
                 // In this case, all the mounts are of type "CreateMountPoint"
@@ -534,10 +506,10 @@ impl CreateMountPoint {
         })
     }
     fn parse_source(source: OsString) -> MountResult<PathBuf> {
-        if source.starts_with("UUID=")? {
+        if source.starts_with("UUID=") {
             let uuid = Uuid::new()?;
             Ok(PathBuf::from(uuid.to_dev(source)?))
-        } else if source.starts_with("Label=")? {
+        } else if source.starts_with("Label=") {
             let label = Label::new()?;
             Ok(PathBuf::from(label.to_dev(source)?))
         } else {
@@ -556,13 +528,13 @@ impl Mount for CreateMountPoint {
         // check if mount point exists
         if !self.target.exists() {
             return Err(MountError::MountPointNotExist(String::from(
-                self.target.to_str().ok_or(MountError::InvalidCharError)?,
+                self.target.to_string_lossy(),
             )));
         }
         // check if device exists
         if !self.source.exists() {
-            let s = String::from(self.source.to_str().ok_or(MountError::InvalidCharError)?);
-            let t = String::from(self.target.to_str().ok_or(MountError::InvalidCharError)?);
+            let s = String::from(self.source.to_string_lossy());
+            let t = String::from(self.target.to_string_lossy());
             return Err(MountError::DeviceNotExist(t, s));
         }
         // if type is not specified, auto detect filesystem type
@@ -619,12 +591,9 @@ impl Mount for CreateMountPoint {
                         // errno == 19 means "No such device"
                         // this happens if you provide a wrong filesystem type
                         if nix::errno::errno() == 19 {
-                            return Err(MountError::UnknownFSType(
-                                self.filesystem_type
-                                    .clone()
-                                    .into_string()
-                                    .or(Err(MountError::InvalidCharError))?,
-                            ));
+                            return Err(MountError::UnknownFSType(String::from(
+                                self.filesystem_type.to_string_lossy(),
+                            )));
                         }
                         return Err(MountError::from(io::Error::last_os_error()));
                     }
