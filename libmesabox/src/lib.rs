@@ -31,6 +31,9 @@ extern crate fnv;
 extern crate globset;
 #[cfg(feature = "libc")]
 extern crate libc;
+#[cfg(feature = "lazy_static")]
+#[macro_use]
+extern crate lazy_static;
 #[cfg(feature = "mio")]
 extern crate mio;
 #[cfg(feature = "pnet")]

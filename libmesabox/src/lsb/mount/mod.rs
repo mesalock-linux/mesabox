@@ -7,6 +7,7 @@
 //
 
 extern crate clap;
+extern crate lazy_static;
 extern crate libc;
 extern crate nix;
 use clap::Arg;
@@ -159,28 +160,9 @@ impl Label {
     }
 }
 
-struct Flag {
-    option_map: HashMap<&'static str, MsFlags>,
-    flag: MsFlags,
-}
-
-impl Default for Flag {
-    fn default() -> Self {
-        Self {
-            option_map: Self::get_option_map(),
-            flag: MsFlags::MS_SILENT,
-        }
-    }
-}
-
-impl Flag {
-    fn get_option_map() -> HashMap<&'static str, MsFlags> {
+lazy_static! {
+    static ref OPTION_MAP: HashMap<&'static str, MsFlags> = {
         let mut option_map = HashMap::new();
-        //option_map.insert("auto",MsFlags{bits: 0,}); // ignored
-        //option_map.insert("noauto", MsFlags{bits: 0,}); // ignored
-        //option_map.insert("defaults", MsFlags{bits: 0,}); // ignored
-        //option_map.insert("nouser", MsFlags{bits: 0,}); // ignored
-        //option_map.insert("user", MsFlags{bits: 0,}); // ignored
         option_map.insert("async", MsFlags::MS_SYNCHRONOUS);
         option_map.insert("atime", MsFlags::MS_NOATIME);
         option_map.insert("dev", MsFlags::MS_NODEV);
@@ -195,10 +177,24 @@ impl Flag {
         option_map.insert("suid", MsFlags::MS_NOSUID);
         option_map.insert("sync", MsFlags::MS_SYNCHRONOUS);
         option_map
-    }
+    };
+}
 
+struct Flag {
+    flag: MsFlags,
+}
+
+impl Default for Flag {
+    fn default() -> Self {
+        Self {
+            flag: MsFlags::MS_SILENT,
+        }
+    }
+}
+
+impl Flag {
     fn add_flag(&mut self, f: &str) -> MountResult<()> {
-        let flg = self.option_map.get(f).ok_or(MountError::UnsupportedOption)?;
+        let flg = OPTION_MAP.get(f).ok_or(MountError::UnsupportedOption)?;
         self.flag.insert(*flg);
         Ok(())
     }

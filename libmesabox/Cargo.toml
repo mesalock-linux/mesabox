@@ -22,7 +22,7 @@ loginutils = [
 ]
 
 # XXX: temporary until renaming dependencies is supported
-mount = ["libc"]
+mount = ["libc", "lazy_static"]
 tar_util = ["tar", "globset"]
 lsb = [
     "mount", "tar"
@@ -101,6 +101,7 @@ kernel32-sys = "0.2.2"
 winapi = { version = "0.3.5", features = ["namedpipeapi"] }
 nix = "0.10.0"
 
+lazy_static = { version = "1.0.1", optional = true }
 libc = { version = "0.2.40", optional = true }
 platform-info = { version = "0.0.1", optional = true }
 uucore = { git = "https://github.com/uutils/coreutils", features = ["encoding", "fs", "mode", "parse_time"], optional = true }
