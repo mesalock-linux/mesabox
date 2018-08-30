@@ -27,59 +27,83 @@ where
     // this is the program name, so just ignore it
     args.next();
 
-    let output = setup.output();
-    let mut output = output.lock()?;
-
-    let mut print_newline = true;
-
-    if let Some(s) = args.next() {
-        if write_str(&mut output, s.as_ref())? {
-            print_newline = false;
-        } else {
-            for s in args {
-                write!(output, " ")?;
-                if write_str(&mut output, s.as_ref())? {
-                    print_newline = false;
-                    break;
-                }
-            }
-        }
-    }
-
-    if print_newline {
-        writeln!(output)?;
-    }
+    let output = setup.output().lock()?;
+    let mut echo = Echo::new(output);
+    echo.echo(args)?;
 
     Ok(())
 }
 
-/// Write a string given on the command-line to output.  If the string contains \c, return
-/// `Ok(true)`.
-fn write_str<W: Write>(output: &mut W, s: &OsStr) -> Result<bool> {
-    let mut found_c = false;
+struct Echo<O>
+where
+    O: Write,
+{
+    stdout: O,
+}
 
-    for res in map_bytes(s.try_as_bytes()?) {
-        match res {
-            ByteResult::Stop => {
-                // found \c
-                found_c = true;
-                break;
-            }
-            ByteResult::Slice(slice) => output.write_all(slice)?,
-            ByteResult::Escape(byte, slice) => {
-                output.write_all(&[byte])?;
-                output.write_all(slice)?
-            }
-            ByteResult::Num(num, slice) => {
-                output.write_all(&[num?])?;
-                output.write_all(slice)?
-            }
-            ByteResult::Backslash => output.write_all(&[b'\\'])?,
-            ByteResult::None => {}
-        }
+impl<O> Echo<O>
+where
+    O: Write,
+{
+    fn new(stdout: O) -> Self {
+        Self { stdout }
     }
 
-    Ok(found_c)
+    fn echo<T>(&mut self, mut args: T) -> Result<()>
+    where
+        T: ArgsIter,
+    {
+        let mut print_newline = true;
+
+        if let Some(s) = args.next() {
+            if self.write_str(s.as_ref())? {
+                print_newline = false;
+            } else {
+                for s in args {
+                    write!(self.stdout, " ")?;
+                    if self.write_str(s.as_ref())? {
+                        print_newline = false;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if print_newline {
+            writeln!(self.stdout)?;
+        }
+
+        Ok(())
+    }
+
+    /// Write a string given on the command-line to output.  If the string contains \c, return
+    /// `Ok(true)`.
+    fn write_str(&mut self, s: &OsStr) -> Result<bool> {
+        let mut found_c = false;
+
+        for res in map_bytes(s.try_as_bytes()?) {
+            match res {
+                ByteResult::Stop => {
+                    // found \c
+                    found_c = true;
+                    break;
+                }
+                ByteResult::Slice(slice) => self.stdout.write_all(slice)?,
+                ByteResult::Escape(byte, slice) => {
+                    self.stdout.write_all(&[byte])?;
+                    self.stdout.write_all(slice)?
+                }
+                ByteResult::Num(num, slice) => {
+                    self.stdout.write_all(&[num?])?;
+                    self.stdout.write_all(slice)?
+                }
+                ByteResult::Backslash => self.stdout.write_all(&[b'\\'])?,
+                ByteResult::None => {}
+            }
+        }
+
+        Ok(found_c)
+    }
 }
 
 enum ByteResult<'a> {
@@ -135,8 +159,7 @@ fn map_bytes(s: &[u8]) -> impl Iterator<Item = ByteResult> {
                             .map_err(|e| {
                                 let err: MesaError = e.into();
                                 err
-                            })
-                            .and_then(|s| u8::from_str_radix(s, 8).map_err(|e| e.into()))
+                            }).and_then(|s| u8::from_str_radix(s, 8).map_err(|e| e.into()))
                     } else {
                         Ok(b'\0')
                     };
