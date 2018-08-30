@@ -115,5 +115,5 @@ mio = { version = "0.6.14", optional = true }
 socket2 = { version = "0.3.5", optional = true }
 walkdir = { version = "2.1.4", optional = true }
 fnv = { version = "1.0.6", optional = true }
-rustyline = { version = "2.0.0", optional = true }
+rustyline = { git = "https://github.com/kkawakam/rustyline", optional = true }
 log = { version = "0.4.3", optional = true }
