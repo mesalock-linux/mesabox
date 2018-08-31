@@ -25,15 +25,8 @@ pub(crate) const DESCRIPTION: &str = "arbitrary TCP and UDP connections and list
 const BUFSIZE: usize = 16384;
 const PRINT_DEBUG_INFO: bool = false;
 
-#[derive(Fail, Debug)]
+#[derive(Fail, Debug, PartialEq)]
 enum NcError {
-    #[fail(display = "{}: {}", path, err)]
-    Input {
-        #[cause]
-        err: io::Error,
-        path: String,
-    },
-
     #[fail(display = "local_listen failed")]
     LocalListenErr,
 
@@ -1005,4 +998,17 @@ where
     }
 
     Ok(())
+}
+
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_build_ports() {
+        assert_eq!(vec![1, 2, 3, 4, 5], build_ports("5-1").unwrap());
+        assert_eq!(vec![1, 2, 3, 4, 5], build_ports("1-5").unwrap());
+        assert_eq!(Err(NcError::InvalidPortErr), build_ports("1-"));
+        assert_eq!(Err(NcError::InvalidPortErr), build_ports("-"));
+        assert_eq!(Err(NcError::InvalidPortErr), build_ports("65536"));
+    }
 }
