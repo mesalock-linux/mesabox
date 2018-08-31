@@ -28,20 +28,20 @@ where
     args.next();
 
     let output = setup.output().lock()?;
-    let mut echo = Echo::new(output);
-    echo.echo(args)?;
+    let mut echoer = Echoer::new(output);
+    echoer.echo(args)?;
 
     Ok(())
 }
 
-struct Echo<O>
+struct Echoer<O>
 where
     O: Write,
 {
     stdout: O,
 }
 
-impl<O> Echo<O>
+impl<O> Echoer<O>
 where
     O: Write,
 {
