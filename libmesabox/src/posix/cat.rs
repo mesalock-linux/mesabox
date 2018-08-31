@@ -106,7 +106,7 @@ impl From<LockError> for CatError {
     }
 }
 
-struct OutputOptions<'a> {
+struct CatOptions<'a> {
     /// Line numbering mode
     number: NumberingMode,
 
@@ -131,7 +131,7 @@ struct OutputOptions<'a> {
     show_nonprint: bool,
 }
 
-impl<'a> OutputOptions<'a> {
+impl<'a> CatOptions<'a> {
     fn can_write_fast(&self) -> bool {
         !(self.show_tabs
             || self.show_nonprint
@@ -167,7 +167,7 @@ impl<'a> OutputOptions<'a> {
     }
 }
 
-impl<'a> Default for OutputOptions<'a> {
+impl<'a> Default for CatOptions<'a> {
     fn default() -> Self {
         Self {
             number: NumberingMode::NumberNone,
@@ -302,7 +302,7 @@ where
     ///
     /// * `files` - There is no short circuit when encountiner an error
     /// reading a file in this vector
-    pub fn write_lines<'a, 'b, T>(&mut self, files: T, options: &OutputOptions<'b>) -> CatResult<()>
+    pub fn write_lines<'a, 'b, T>(&mut self, files: T, options: &CatOptions<'b>) -> CatResult<()>
     where
         T: Iterator<Item = &'a OsStr>,
     {
@@ -331,7 +331,7 @@ where
     fn write_file_lines<'b>(
         &mut self,
         file: &OsStr,
-        options: &OutputOptions<'b>,
+        options: &CatOptions<'b>,
         state: &mut OutputState,
     ) -> CatResult<()> {
         let mut in_buf = [0; 1024 * 31];
@@ -469,7 +469,7 @@ where
     T: ArgsIter,
 {
     let matches = create_app().get_matches_from_safe(args)?;
-    let options = OutputOptions::from_matches(&matches);
+    let options = CatOptions::from_matches(&matches);
 
     if let Some(files) = matches.values_of_os("FILES") {
         run(setup, files, options)
@@ -528,7 +528,7 @@ fn create_app() -> App<'static, 'static> {
         .arg(Arg::with_name("FILES").index(1).multiple(true))
 }
 
-fn run<'a, 'b, S, T>(setup: &mut S, files: T, mut options: OutputOptions<'b>) -> Result<()>
+fn run<'a, 'b, S, T>(setup: &mut S, files: T, mut options: CatOptions<'b>) -> Result<()>
 where
     S: UtilSetup,
     T: Iterator<Item = &'a OsStr>,

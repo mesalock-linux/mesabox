@@ -40,7 +40,7 @@ enum Mode {
     Lines((usize, bool)),
 }
 
-struct Options {
+struct HeadOptions {
     method: Mode,
     previous_printed: bool,
 }
@@ -113,7 +113,7 @@ where
         Mode::Lines((default_lines, true))
     };
 
-    let mut options = Options {
+    let mut options = HeadOptions {
         method: method,
         previous_printed: false,
     };
@@ -164,7 +164,7 @@ fn handle_stdin<I, O>(
     output: O,
     stdin: &mut I,
     filename: Option<&OsStr>,
-    options: &mut Options,
+    options: &mut HeadOptions,
 ) -> Result<()>
 where
     I: for<'a> UtilRead<'a>,
@@ -178,7 +178,7 @@ fn handle_file<O: Write>(
     output: O,
     filename: &Path,
     disp_filename: Option<&OsStr>,
-    options: &mut Options,
+    options: &mut HeadOptions,
 ) -> Result<()> {
     let file = File::open(filename)?;
     let reader = BufReader::new(file);
@@ -189,7 +189,7 @@ fn handle_data<W, R>(
     mut output: W,
     input: R,
     filename: Option<&OsStr>,
-    options: &mut Options,
+    options: &mut HeadOptions,
 ) -> Result<()>
 where
     W: Write,

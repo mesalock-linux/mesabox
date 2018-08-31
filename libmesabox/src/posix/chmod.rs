@@ -94,7 +94,7 @@ impl Message {
     }
 }
 
-struct Options<'a> {
+struct ChmodOptions<'a> {
     verbosity: Verbosity,
     preserve_root: bool,
     recursive: bool,
@@ -186,7 +186,7 @@ where
         stderr: stderr.lock()?,
     };
 
-    let options = Options {
+    let options = ChmodOptions {
         verbosity: verbosity,
         preserve_root: preserve_root,
         recursive: recursive,
@@ -239,7 +239,7 @@ where
     O: Write,
     E: Write,
 {
-    fn chmod<'b>(&mut self, options: &Options, files: OsValues<'b>) -> Result<i32> {
+    fn chmod<'b>(&mut self, options: &ChmodOptions, files: OsValues<'b>) -> Result<i32> {
         let mut r = 0;
 
         let mut msgs = [None, None];
@@ -260,7 +260,7 @@ where
 
     fn chmod_dir(
         &mut self,
-        options: &Options,
+        options: &ChmodOptions,
         msgs: &mut [Option<Message>; 2],
         file: &Path,
     ) -> Result<i32> {
@@ -304,7 +304,7 @@ where
 }
 
 #[cfg(any(unix, target_os = "redox"))]
-fn chmod_file(options: &Options, msgs: &mut [Option<Message>; 2], file: &Path) -> i32 {
+fn chmod_file(options: &ChmodOptions, msgs: &mut [Option<Message>; 2], file: &Path) -> i32 {
     let mut fperm = match fs::metadata(file) {
         Ok(meta) => meta.mode() & 0o7777,
         Err(err) => {
@@ -350,7 +350,7 @@ fn chmod_file(options: &Options, msgs: &mut [Option<Message>; 2], file: &Path) -
 
 #[cfg(unix)]
 fn change_file(
-    options: &Options,
+    options: &ChmodOptions,
     msgs: &mut [Option<Message>; 2],
     fperm: u32,
     mode: u32,

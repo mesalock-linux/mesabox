@@ -71,7 +71,7 @@ impl Default for ArchiveFormat {
 }
 
 #[derive(Default)]
-struct Options<'a> {
+struct TarOptions<'a> {
     pub mode: Mode,
     pub compression: Compression,
     pub format: ArchiveFormat,
@@ -86,14 +86,14 @@ where
     S: UtilSetup + 'a,
 {
     setup: &'a mut S,
-    pub options: Options<'b>,
+    pub options: TarOptions<'b>,
 }
 
 impl<'a, 'b, S> Tar<'a, 'b, S>
 where
     S: UtilSetup,
 {
-    pub fn new(setup: &'a mut S, options: Options<'b>) -> Self {
+    pub fn new(setup: &'a mut S, options: TarOptions<'b>) -> Self {
         Self {
             setup: setup,
             options: options,
@@ -285,7 +285,7 @@ where
         app.get_matches_from_safe(args)?
     };
 
-    let mut options = Options::default();
+    let mut options = TarOptions::default();
 
     options.file = matches
         .value_of_os("file")

@@ -224,7 +224,7 @@ impl Drop for IcmpSocket {
     }
 }
 
-struct Options {
+struct PingOptions {
     pub count: Option<u64>,
     pub recv_wait: libc::c_int,
     pub between_wait: f64,
@@ -306,7 +306,7 @@ where
     };
     let resolved_ip = IcmpSocket::resolve_hostname(hostname)?;
 
-    let options = Options {
+    let options = PingOptions {
         count: count,
         recv_wait: wait_time,
         between_wait: between_packet_wait,
@@ -366,7 +366,7 @@ fn ping_socket<O>(
     stats: &mut Stats,
     stdout: &mut O,
     should_stop: &AtomicBool,
-    mut options: Options,
+    mut options: PingOptions,
 ) -> Result<()>
 where
     O: for<'a> UtilWrite<'a>,

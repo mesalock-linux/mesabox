@@ -45,7 +45,7 @@ use std::io::{BufReader, Read, Write};
 use std::result::Result as StdResult;
 use std::str::FromStr;
 
-struct Options {
+struct BaseOptions {
     line_wrap: usize,
     decode: bool,
     ignore_garbage: bool,
@@ -95,7 +95,7 @@ where
 
     let ignore_garbage = matches.is_present("ignore-garbage");
 
-    let options = Options {
+    let options = BaseOptions {
         line_wrap: line_wrap,
         decode: decode,
         ignore_garbage: ignore_garbage,
@@ -120,7 +120,7 @@ where
     }
 }
 
-fn handle_data<W, S>(mut output: W, source: S, options: Options) -> Result<()>
+fn handle_data<W, S>(mut output: W, source: S, options: BaseOptions) -> Result<()>
 where
     W: Write,
     S: Read,
