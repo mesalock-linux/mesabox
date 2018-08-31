@@ -2,7 +2,6 @@ extern crate mio;
 extern crate clap;
 extern crate socket2;
 
-use regex::Regex;
 use std;
 use tempfile::NamedTempFile;
 use clap::{Arg, ArgMatches};
@@ -38,14 +37,20 @@ enum NcError {
     #[fail(display = "local_listen failed")]
     LocalListenErr,
 
-    #[fail(display = "invalid port[s] {}", _0)]
-    InvalidPortErr(String),
+    #[fail(display = "port range not invalid")]
+    InvalidPortErr,
 
     #[fail(display = "poll error")]
     PollErr,
 
     #[fail(display = "{}", _0)]
     UsageErr(String),
+}
+
+impl From<std::num::ParseIntError> for NcError {
+    fn from(err: std::num::ParseIntError) -> Self {
+        NcError::InvalidPortErr
+    }
 }
 
 
@@ -72,29 +77,31 @@ struct NcOptions {
     nflag: bool
 }
 
-/// 0-65535, 0, 65535-0
-fn build_ports(ports: &str) -> Result<Vec<u16>, MesaError>{
+fn build_ports(ports: &str) -> Result<Vec<u16>, NcError> {
     let splits: Vec<&str> = ports.split("-").collect();
-    let re = Regex::new(r"^(?P<start>\d{1,5})(-(?P<end>\d{1,5}))?$").unwrap();
-    let caps = re.captures(ports);
-    if caps.is_some() {
-        let caps = caps.unwrap();
-        let start = caps.name("start").unwrap().as_str().parse::<u32>().unwrap();
-        let mut end = 0;
-        match caps.name("end") {
-            Some(match_end) => end = match_end.as_str().parse::<u32>().unwrap(),
-            None => end = start
-        }
-        if start <= 65535 && end <= 65535 {
-            let ret = if start <= end {
-                ((start as u16)..=((end) as u16)).collect()
+    match splits.len() {
+        1 => {
+            if splits[0] == "" {
+                return Err(NcError::InvalidPortErr);
+            }
+            let port: u16 = splits[0].parse()?;
+            Ok(vec![port])
+        },
+        2 => {
+            if splits[0] == "" || splits[1] == "" {
+                return Err(NcError::InvalidPortErr);
+            }
+            let start: u16 = splits[0].parse()?;
+            let end: u16 = splits[1].parse()?;
+            let (start, end) = if start > end {
+                (end, start)
             } else {
-                ((end as u16)..=((start) as u16)).collect()
+                (start, end)
             };
-            return Ok(ret);
-        }
+            Ok((start..=end).collect())
+        },
+        _ => Err(NcError::InvalidPortErr)
     }
-    return Err(NcError::InvalidPortErr(String::from(ports)))?;
 }
 
 // fn warn<S: UtilSetup>(setup: &mut S, msg: &str) {
