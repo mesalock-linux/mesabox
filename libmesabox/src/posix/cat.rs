@@ -35,7 +35,7 @@
 //     SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 //
 
-use clap::{App, Arg};
+use clap::{App, Arg, ArgMatches};
 use std::ffi::OsStr;
 use std::fs::{metadata, File};
 use std::io::{self, BufRead, Read, Write};
@@ -139,6 +139,32 @@ impl<'a> OutputOptions<'a> {
             || self.squeeze_blank
             || self.number != NumberingMode::NumberNone)
     }
+
+    fn from_matches(matches: &ArgMatches) -> Self {
+        let mut options = Self::default();
+
+        options.number = if matches.is_present("number-nonblank") {
+            NumberingMode::NumberNonEmpty
+        } else if matches.is_present("number") {
+            NumberingMode::NumberAll
+        } else {
+            NumberingMode::NumberNone
+        };
+
+        options.show_nonprint = matches.is_present("show-all")
+            || matches.is_present("show-nonprinting")
+            || matches.is_present("e")
+            || matches.is_present("t");
+        options.show_ends = matches.is_present("show-all")
+            || matches.is_present("show-ends")
+            || matches.is_present("e");
+        options.show_tabs = matches.is_present("show-all")
+            || matches.is_present("show-tabs")
+            || matches.is_present("t");
+        options.squeeze_blank = matches.is_present("squeeze-blank");
+
+        options
+    }
 }
 
 impl<'a> Default for OutputOptions<'a> {
@@ -190,7 +216,7 @@ struct OutputState {
 }
 
 // XXX: is ArgsIter even needed?  i think the traits it needs might satisfy the reqs anyway
-struct Cat<'a, I, O, E>
+struct Cater<'a, I, O, E>
 where
     I: BufRead,
     O: Write,
@@ -203,7 +229,7 @@ where
     interactive: bool,
 }
 
-impl<'c, I, O, E> Cat<'c, I, O, E>
+impl<'c, I, O, E> Cater<'c, I, O, E>
 where
     I: BufRead,
     O: Write,
@@ -217,11 +243,11 @@ where
         interactive: bool,
     ) -> Self {
         Self {
-            stdin: stdin,
-            stdout: stdout,
-            stderr: stderr,
-            current_dir: current_dir,
-            interactive: interactive,
+            stdin,
+            stdout,
+            stderr,
+            current_dir,
+            interactive,
         }
     }
 
@@ -443,28 +469,7 @@ where
     T: ArgsIter,
 {
     let matches = create_app().get_matches_from_safe(args)?;
-
-    let mut options = OutputOptions::default();
-
-    options.number = if matches.is_present("number-nonblank") {
-        NumberingMode::NumberNonEmpty
-    } else if matches.is_present("number") {
-        NumberingMode::NumberAll
-    } else {
-        NumberingMode::NumberNone
-    };
-
-    options.show_nonprint = matches.is_present("show-all")
-        || matches.is_present("show-nonprinting")
-        || matches.is_present("e")
-        || matches.is_present("t");
-    options.show_ends = matches.is_present("show-all")
-        || matches.is_present("show-ends")
-        || matches.is_present("e");
-    options.show_tabs = matches.is_present("show-all")
-        || matches.is_present("show-tabs")
-        || matches.is_present("t");
-    options.squeeze_blank = matches.is_present("squeeze-blank");
+    let options = OutputOptions::from_matches(&matches);
 
     if let Some(files) = matches.values_of_os("FILES") {
         run(setup, files, options)
@@ -538,7 +543,7 @@ where
     let stdout = output.lock()?;
     let stderr = error.lock()?;
 
-    let mut util = Cat::new(
+    let mut util = Cater::new(
         stdin,
         stdout,
         stderr,
