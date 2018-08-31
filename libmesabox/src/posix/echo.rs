@@ -19,19 +19,13 @@ use util::OsStrExt;
 pub(crate) const NAME: &str = "echo";
 pub(crate) const DESCRIPTION: &str = "Write string(s) to stdout with a trailing newline";
 
-pub fn execute<S, T>(setup: &mut S, mut args: T) -> Result<()>
-where
-    S: UtilSetup,
-    T: ArgsIter,
-{
-    // this is the program name, so just ignore it
-    args.next();
-
-    let output = setup.output().lock()?;
-    let mut echoer = Echoer::new(output);
-    echoer.echo(args)?;
-
-    Ok(())
+enum ByteResult<'a> {
+    None,
+    Escape(u8, &'a [u8]),
+    Num(Result<u8>, &'a [u8]),
+    Slice(&'a [u8]),
+    Backslash,
+    Stop,
 }
 
 struct Echoer<O>
@@ -106,15 +100,6 @@ where
     }
 }
 
-enum ByteResult<'a> {
-    None,
-    Escape(u8, &'a [u8]),
-    Num(Result<u8>, &'a [u8]),
-    Slice(&'a [u8]),
-    Backslash,
-    Stop,
-}
-
 fn map_bytes(s: &[u8]) -> impl Iterator<Item = ByteResult> {
     let mut it = s.split(|&byte| byte == b'\\');
     let first = it.next().unwrap();
@@ -172,4 +157,19 @@ fn map_bytes(s: &[u8]) -> impl Iterator<Item = ByteResult> {
     });
 
     iter::once(ByteResult::Slice(first)).chain(scanner)
+}
+
+pub fn execute<S, T>(setup: &mut S, mut args: T) -> Result<()>
+where
+    S: UtilSetup,
+    T: ArgsIter,
+{
+    // this is the program name, so just ignore it
+    args.next();
+
+    let output = setup.output().lock()?;
+    let mut echoer = Echoer::new(output);
+    echoer.echo(args)?;
+
+    Ok(())
 }
