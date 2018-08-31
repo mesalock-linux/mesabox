@@ -27,7 +27,7 @@ const BUFSIZE: usize = 16384;
 const PRINT_DEBUG_INFO: bool = false;
 
 #[derive(Fail, Debug)]
-enum NetcatError {
+enum NcError {
     #[fail(display = "{}: {}", path, err)]
     Input {
         #[cause]
@@ -48,19 +48,6 @@ enum NetcatError {
     UsageErr(String),
 }
 
-
-// struct Cat<'a, I, O, E>
-// where
-//     I: BufRead,
-//     O: Write,
-//     E: Write,
-// {
-//     stdin: I,
-//     stdout: O,
-//     stderr: E,
-//     current_dir: Option<&'a Path>,
-//     interactive: bool,
-// }
 
 #[derive(Debug)]
 struct NcOptions {
@@ -85,7 +72,9 @@ struct NcOptions {
     nflag: bool
 }
 
+/// 0-65535, 0, 65535-0
 fn build_ports(ports: &str) -> Result<Vec<u16>, MesaError>{
+    let splits: Vec<&str> = ports.split("-").collect();
     let re = Regex::new(r"^(?P<start>\d{1,5})(-(?P<end>\d{1,5}))?$").unwrap();
     let caps = re.captures(ports);
     if caps.is_some() {
@@ -105,7 +94,7 @@ fn build_ports(ports: &str) -> Result<Vec<u16>, MesaError>{
             return Ok(ret);
         }
     }
-    return Err(NetcatError::InvalidPortErr(String::from(ports)))?;
+    return Err(NcError::InvalidPortErr(String::from(ports)))?;
 }
 
 // fn warn<S: UtilSetup>(setup: &mut S, msg: &str) {
@@ -160,7 +149,7 @@ impl NcOptions {
                 uport = String::new();
             } else {
                 if !lflag {
-                    return Err(NetcatError::UsageErr(String::from(msg)))?;
+                    return Err(NcError::UsageErr(String::from(msg)))?;
                 }
                 uport = String::from(positionals[0]);
             }
@@ -221,18 +210,6 @@ impl NcOptions {
         };
 
         return Ok(ret);
-    }
-
-    pub fn setup_stdio<T: UtilSetup>(&mut self, setup: T) {
-        self.stdin_fd = match setup.input().raw_object() {
-            Some(fd) => fd.raw_value(),
-            _ => {
-                self.dflag = true;
-                0
-            }
-        };
-        // self.
-        // opts.stdin_fd = stdin_fd;
     }
 }
 
@@ -339,7 +316,7 @@ impl <'a> NcCore<'a> {
             }
 
             if let Err(_) = self.poll.poll(&mut events, None) {
-                return Err(NetcatError::PollErr)?;
+                return Err(NcError::PollErr)?;
             }
 
             // timeout happened 
@@ -739,7 +716,7 @@ fn local_listen(opts: &NcOptions) -> Result<Socket, MesaError> {
         };
     }
 
-    return Err(NetcatError::LocalListenErr)?;
+    return Err(NcError::LocalListenErr)?;
 }
 
 fn remote_connect(opts: &NcOptions, port: u16) -> Result<Socket, MesaError>{
@@ -783,7 +760,7 @@ fn remote_connect(opts: &NcOptions, port: u16) -> Result<Socket, MesaError>{
             }
         }
     }
-    return Err(NetcatError::LocalListenErr)?;
+    return Err(NcError::LocalListenErr)?;
 }
 
 /*
@@ -959,13 +936,13 @@ where
         .arg(Arg::with_name("i")
             .short("i")
             .value_name("interval")
-            .takes_value(true))
-            .help("Specifies a delay time interval between lines of text sent and received.  Also causes a delay time between connections to multiple ports.")
+            .takes_value(true)
+            .help("Specifies a delay time interval between lines of text sent and received.  Also causes a delay time between connections to multiple ports."))
         .arg(Arg::with_name("w")
             .short("w")
             .value_name("timeout")
-            .takes_value(true))
-            .help("If a connection and stdin are idle for more than timeout seconds, then the connection is silently closed.  The -w flag has no effect on the -l option, i.e. nc will listen forever for a connection, with or without the -w flag. The default is no timeout.")
+            .takes_value(true)
+            .help("If a connection and stdin are idle for more than timeout seconds, then the connection is silently closed.  The -w flag has no effect on the -l option, i.e. nc will listen forever for a connection, with or without the -w flag. The default is no timeout."))
         .arg(Arg::with_name("s")
             .short("s")
             .value_name("source_ip_address")
