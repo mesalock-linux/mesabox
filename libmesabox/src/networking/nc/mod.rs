@@ -104,10 +104,6 @@ fn build_ports(ports: &str) -> Result<Vec<u16>, NcError> {
     }
 }
 
-// fn warn<S: UtilSetup>(setup: &mut S, msg: &str) {
-//     let _ = write!(setup.error(), "{}", msg);
-// }
-
 fn warn(msg: &str) {
     eprint!("{}", msg);
 }
@@ -137,7 +133,7 @@ impl NcOptions {
         let kflag = matches.is_present("k");
         let unixflag = matches.is_present("U");
 
-        // Cruft to make sure options are clean, and used properly. 
+        // Cruft to make sure options are clean, and used properly.
         let positionals:Vec<&str> = matches.values_of("positionals").unwrap().collect();
 
         let family = if matches.is_present("U") {
@@ -183,7 +179,7 @@ impl NcOptions {
 
         let mut unix_dg_tmp_socket = PathBuf::new();
 
-        // Get name of temporary socket for unix datagram client 
+        // Get name of temporary socket for unix datagram client
         if family == AF_UNIX && uflag && !lflag {
             unix_dg_tmp_socket = match s_addr {
                 Some(ref addr) => addr.into(),
@@ -298,18 +294,18 @@ impl <'a> NcCore<'a> {
         let mut last_ready_end = -1;
 
         loop {
-            // both inputs are gone, buffers are empty, we are done 
+            // both inputs are gone, buffers are empty, we are done
             if self.stdin_gone() && self.netin_gone() &&
                 self.stdinbuf_empty() && self.netinbuf_empty() {
                 return Ok(());
             }
 
-            // both outputs are gone, we can't continue 
+            // both outputs are gone, we can't continue
             if self.stdout_gone() && self.netout_gone() {
                 return Ok(());
             }
 
-            // listen and net in gone, queues empty, done 
+            // listen and net in gone, queues empty, done
             if self.opts.lflag && self.netin_gone() &&
                 self.stdinbuf_empty() && self.netinbuf_empty() {
                 return Ok(());
@@ -326,7 +322,7 @@ impl <'a> NcCore<'a> {
                 return Err(NcError::PollErr)?;
             }
 
-            // timeout happened 
+            // timeout happened
             if events.is_empty() {
                 return Ok(());
             }
@@ -1010,4 +1006,3 @@ where
 
     Ok(())
 }
-
