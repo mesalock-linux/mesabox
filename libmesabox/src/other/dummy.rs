@@ -10,6 +10,7 @@ use clap::{App, Arg, ArgMatches};
 use std::io::{self, Write};
 use {UtilSetup, ArgsIter, Result, UtilRead, UtilWrite};
 
+const NAME: &str = "dummy";
 pub const DESCRIPTION: &str = "A dummy utility to demonstrate the framework";
 
 #[derive(Fail, Debug)]
@@ -42,7 +43,7 @@ where
 }
 
 fn create_app() -> App<'static, 'static> {
-    util_app!("dummy")
+    util_app!(NAME)
         .arg(Arg::with_name("about")
                 .short("a")
                 .long("about")
