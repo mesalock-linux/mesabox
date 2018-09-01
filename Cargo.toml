@@ -60,6 +60,12 @@ sysinit = [
     "init"
 ]
 
+# a dummy utility to help people to understand the framework
+dummy = ["libmesabox/dummy"]
+other = [
+    "dummy"
+]
+
 # utilities that work on Unix
 unix = [
     "gnu",
