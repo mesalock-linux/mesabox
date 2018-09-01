@@ -1,7 +1,7 @@
 [package]
 name = "libmesabox"
 version = "0.1.0"
-authors = ["Alex Lyon <alexlyon@baidu.com>"]
+authors = ["The MesaLock Linux Developers"]
 description = "A collection of common command-line utilities in library form"
 
 [features]
