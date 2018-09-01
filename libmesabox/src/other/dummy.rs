@@ -6,8 +6,9 @@
 // For a copy, see the LICENSE file.
 //
 
-use {UtilSetup, ArgsIter, Result, UtilRead, UtilWrite};
+use clap::{App, Arg, ArgMatches};
 use std::io::{self, Write};
+use {UtilSetup, ArgsIter, Result, UtilRead, UtilWrite};
 
 pub const DESCRIPTION: &str = "A dummy utility to demonstrate the framework";
 
@@ -40,13 +41,25 @@ where
     }
 }
 
-pub fn execute<S, T>(setup: &mut S, _args: T) -> Result<()>
+fn create_app() -> App<'static, 'static> {
+    util_app!("dummy")
+        .arg(Arg::with_name("about")
+                .short("a")
+                .long("about")
+                .help("show about"))
+}
+
+pub fn execute<S, T>(setup: &mut S, args: T) -> Result<()>
 where
     S: UtilSetup,
     T: ArgsIter,
 {
+    let app = create_app();
+    let matches = app.get_matches_from_safe(args)?;
+
     let output = setup.output();
     let mut output = output.lock()?;
+
     let mut dummyer = Dummyer::new(output);
     dummyer.dummy()?;
     Ok(())
