@@ -27,5 +27,8 @@ generate_fns! {
     },
     sysinit {
         (init, "init")
+    },
+    other {
+        (dummy, "dummy")
     }
 }
