@@ -12,6 +12,6 @@ use std::process::Command;
 const NAME: &str = "false";
 
 #[test]
-fn test_false() {
+fn test_default() {
     new_cmd!().assert().failure();
 }
