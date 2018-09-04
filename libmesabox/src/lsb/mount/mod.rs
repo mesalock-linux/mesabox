@@ -10,7 +10,7 @@ extern crate clap;
 extern crate lazy_static;
 extern crate libc;
 extern crate nix;
-use clap::Arg;
+use clap::{App, Arg};
 use nix::mount::MsFlags;
 use std::collections::HashMap;
 use std::ffi::OsString;
@@ -22,6 +22,8 @@ use {ArgsIter, LockError, Result, UtilSetup, UtilWrite};
 
 pub(crate) const NAME: &str = "mount";
 pub(crate) const DESCRIPTION: &str = "Mount file systems";
+
+type MountResult<T> = ::std::result::Result<T, MountError>;
 
 #[derive(Debug, Fail)]
 enum MountError {
@@ -70,16 +72,19 @@ impl From<io::Error> for MountError {
     }
 }
 
-// There are several types of mount, all of them implement Mount trait
-trait Mount {
-    fn run(&mut self) -> MountResult<()>;
+/// There are several types of mount task, all of them implement Mountable trait
+trait Mountable {
+    fn run(&mut self) -> MountResult<String>;
 }
 
-struct MountCommand {
+/// Store information that we need to execute a mount command
+struct MountOptions {
     multi_thread: bool,
-    mount_list: Vec<Box<Mount + Send>>,
+    // Mount command might mount a lot of devices at the same time, so we cache them in a list
+    mount_list: Vec<Box<Mountable + Send>>,
 }
 
+/// Used to translate UUID into corresponding device path
 struct Uuid {
     // map UUID to actual path
     path_map: HashMap<OsString, PathBuf>,
@@ -120,6 +125,7 @@ impl Uuid {
     }
 }
 
+/// Used to translate Label into corresponding device path
 struct Label {
     // map Label to actual path
     path_map: HashMap<OsString, PathBuf>,
@@ -224,8 +230,8 @@ struct MntEnt {
     mnt_opts: OsString,
 }
 
-// This is used to read Filesystem Description File
-// e.g. /etc/fstab and /etc/mtab
+/// This is used to read Filesystem Description File
+/// e.g. /etc/fstab and /etc/mtab
 struct FSDescFile {
     list: Vec<MntEnt>,
 }
@@ -266,27 +272,30 @@ impl FSDescFile {
         }
         Ok(Self { list: list })
     }
-    fn print<O: Write>(&self, fs_type: OsString, output: &mut O) -> MountResult<()> {
+
+    fn to_string(&self, fs_type: &OsString) -> MountResult<String> {
+        let mut ret = String::new();
         for item in &self.list {
-            if fs_type != *"" {
-                if fs_type != item.mnt_type {
+            if *fs_type != *"" {
+                if *fs_type != item.mnt_type {
                     continue;
                 }
             }
-            writeln!(
-                output,
-                "{} on {} type {} ({})",
-                item.mnt_fsname.to_string_lossy(),
-                item.mnt_dir.to_string_lossy(),
-                item.mnt_type.to_string_lossy(),
-                item.mnt_opts.to_string_lossy(),
-            )?;
+            ret.push_str(
+                format!(
+                    "{} on {} type {} ({})\n",
+                    item.mnt_fsname.to_string_lossy(),
+                    item.mnt_dir.to_string_lossy(),
+                    item.mnt_type.to_string_lossy(),
+                    item.mnt_opts.to_string_lossy(),
+                ).as_str(),
+            );
         }
-        Ok(())
+        Ok(ret)
     }
 }
 
-// Define some special requirements
+/// Define some special requirements
 struct Property {
     fake: bool,
     // TODO user mountable devices
@@ -298,7 +307,7 @@ impl Default for Property {
     }
 }
 
-// OsString has limited methods, implement them
+/// OsString has limited methods, implement them
 trait OsStringExtend {
     fn starts_with(&self, pat: &str) -> bool;
     fn contains(&self, pat: &str) -> bool;
@@ -308,16 +317,17 @@ impl OsStringExtend for OsString {
     fn starts_with(&self, pat: &str) -> bool {
         self.to_string_lossy().starts_with(pat)
     }
+
     fn contains(&self, pat: &str) -> bool {
         self.to_string_lossy().contains(pat)
     }
 }
 
-// -a and -F are parsed at the very beginning
-impl<'a> MountCommand {
-    fn new<S: UtilSetup>(setup: &'a mut S, matches: &clap::ArgMatches) -> MountResult<Self> {
-        let mut mount_list: Vec<Box<Mount + Send>> = Vec::new();
+impl MountOptions {
+    fn from_matches(matches: &clap::ArgMatches) -> MountResult<Self> {
+        let mut mount_list: Vec<Box<Mountable + Send>> = Vec::new();
         let multi_thread = if matches.is_present("F") { true } else { false };
+        // -a and -F are parsed at the very beginning
         // If -a exists, mount all the entries in /etc/fstab, except for those who contain "noauto"
         if matches.is_present("a") {
             let fstab = FSDescFile::new("/etc/fstab")?;
@@ -338,10 +348,8 @@ impl<'a> MountCommand {
                 mount_list.push(Box::new(m));
             }
         }
-        // If -a dosn't exist, read arguments from command line, and find out the mount type
+        // If -a doesn't exist, read arguments from command line, and find out the mount type
         else {
-            let (_, output, _) = setup.stdio();
-            let mut stdout = output.lock()?;
             let mut arg1 = match matches.value_of("arg1") {
                 Some(arg1) => OsString::from(arg1),
                 None => OsString::from(""),
@@ -372,8 +380,9 @@ impl<'a> MountCommand {
             }
             // no argument
             if arg1 == *"" {
-                let mut m = ShowMountPoints::new(fs_type, &mut stdout);
-                m.run()?;
+                let m = ShowMountPoints::new(fs_type);
+                // m.run()?;
+                mount_list.push(Box::new(m));
             }
             // one argument
             else if arg1 != *"" && arg2 == *"" {
@@ -424,10 +433,27 @@ impl<'a> MountCommand {
             mount_list: mount_list,
         })
     }
-    fn run(mut self) -> MountResult<()> {
-        if self.multi_thread {
+}
+
+struct Mounter<O>
+where
+    O: Write,
+{
+    output: O,
+}
+
+impl<O> Mounter<O>
+where
+    O: Write,
+{
+    fn new(output: O) -> Self {
+        Mounter { output }
+    }
+
+    fn mount(&mut self, mut options: MountOptions) -> MountResult<()> {
+        if options.multi_thread {
             let mut handle = vec![];
-            for mut m in self.mount_list {
+            for mut m in options.mount_list {
                 handle.push(thread::spawn(move || m.run()));
             }
             for h in handle {
@@ -436,44 +462,37 @@ impl<'a> MountCommand {
                 }
             }
         } else {
-            for m in &mut self.mount_list {
-                m.run()?;
+            for m in &mut options.mount_list {
+                write!(self.output, "{}", m.run()?);
             }
         }
         Ok(())
     }
 }
 
-/*
- * Show mount points from /proc/mounts
- * If -t is specified, only output mount points of this file system type
- * Usage examples: "mount", "mount -t ext4"
- */
-struct ShowMountPoints<'a, O: Write + 'a> {
-    stdout: &'a mut O,
+/// Show mount points from /proc/mounts
+/// If -t is specified, only output mount points of this file system type
+/// Usage examples: "mount", "mount -t ext4"
+struct ShowMountPoints {
     filesystem_type: OsString,
 }
 
-impl<'a, O: Write> ShowMountPoints<'a, O> {
-    fn new(filesystem_type: OsString, stdout: &'a mut O) -> Self {
+impl ShowMountPoints {
+    fn new(filesystem_type: OsString) -> Self {
         Self {
-            stdout: stdout,
             filesystem_type: filesystem_type,
         }
     }
 }
 
-impl<'a, O: Write> Mount for ShowMountPoints<'a, O> {
-    fn run(&mut self) -> MountResult<()> {
-        FSDescFile::new("/proc/mounts")?.print(self.filesystem_type.clone(), self.stdout)?;
-        Ok(())
+impl Mountable for ShowMountPoints {
+    fn run(&mut self) -> MountResult<String> {
+        FSDescFile::new("/proc/mounts")?.to_string(&self.filesystem_type)
     }
 }
 
-/*
- * Create a new mount point
- * Usage examples: "mount /dev/sda1 /home/username/mnt"
- */
+/// Create a new mount point
+/// Usage examples: "mount /dev/sda1 /home/username/mnt"
 struct CreateMountPoint {
     property: Property,
     source: PathBuf,
@@ -501,6 +520,7 @@ impl CreateMountPoint {
             data,
         })
     }
+
     fn parse_source(source: OsString) -> MountResult<PathBuf> {
         if source.starts_with("UUID=") {
             let uuid = Uuid::new()?;
@@ -514,8 +534,8 @@ impl CreateMountPoint {
     }
 }
 
-impl Mount for CreateMountPoint {
-    fn run(&mut self) -> MountResult<()> {
+impl Mountable for CreateMountPoint {
+    fn run(&mut self) -> MountResult<String> {
         // check privilege
         // getuid() is always successful, so it's ok to use it
         if unsafe { libc::getuid() } != 0 {
@@ -565,7 +585,7 @@ impl Mount for CreateMountPoint {
                     Some(self.data.as_os_str()),
                 ).or(Err(MountError::from(io::Error::last_os_error())))
                 {
-                    Ok(_) => return Ok(()),
+                    Ok(_) => return Ok(String::new()),
                     Err(_) => { /*println!("get error number: {}", nix::errno::errno());*/ }
                 }
             }
@@ -582,7 +602,7 @@ impl Mount for CreateMountPoint {
                     Some(self.data.as_os_str()),
                 ).or(Err(MountError::from(io::Error::last_os_error())))
                 {
-                    Ok(_) => return Ok(()),
+                    Ok(_) => return Ok(String::new()),
                     Err(_) => {
                         // errno == 19 means "No such device"
                         // this happens if you provide a wrong filesystem type
@@ -595,15 +615,13 @@ impl Mount for CreateMountPoint {
                     }
                 }
             }
-            Ok(())
+            Ok(String::new())
         }
     }
 }
 
-/*
- * Remount an existing mount
- * Usage examples: "mount -o remount /home/username/mnt"
- */
+/// Remount an existing mount point
+/// Usage examples: "mount -o remount /home/username/mnt"
 struct Remount {
     property: Property,
     target: PathBuf,
@@ -622,8 +640,8 @@ impl Remount {
     }
 }
 
-impl Mount for Remount {
-    fn run(&mut self) -> MountResult<()> {
+impl Mountable for Remount {
+    fn run(&mut self) -> MountResult<String> {
         // check privilege
         // getuid() is always successful, so it's ok to use it
         if unsafe { libc::getuid() } != 0 {
@@ -651,19 +669,12 @@ impl Mount for Remount {
                 Some(self.data.as_os_str()),
             ).or(Err(MountError::from(io::Error::last_os_error())))?
         }
-        Ok(())
+        Ok(String::new())
     }
 }
 
-type MountResult<T> = ::std::result::Result<T, MountError>;
-
-pub fn execute<S, T>(setup: &mut S, args: T) -> Result<()>
-where
-    S: UtilSetup,
-    T: ArgsIter,
-{
-    let matches = {
-        let app = util_app!(NAME)
+fn create_app() -> App<'static, 'static> {
+    util_app!(NAME)
             .author("Zhuohua Li <zhuohuali@baidu.com>")
             .arg(Arg::with_name("arg1")
                 .index(1))
@@ -722,11 +733,22 @@ where
                 .value_name("options")
                 .use_delimiter(true)
                 .possible_values(&["async", "atime", "defaults", "dev", "exec", "noatime", "nodev", "noexec", "nosuid", "nouser", "remount", "ro", "rw", "suid", "sync", "user"])
-                .hide_possible_values(true));
+                .hide_possible_values(true))
+}
 
-        app.get_matches_from_safe(args)?
-    };
+pub fn execute<S, T>(setup: &mut S, args: T) -> Result<()>
+where
+    S: UtilSetup,
+    T: ArgsIter,
+{
+    let app = create_app();
+    let matches = app.get_matches_from_safe(args)?;
+    let options = MountOptions::from_matches(&matches)?;
 
-    let mount_command = MountCommand::new(setup, &matches)?;
-    Ok(mount_command.run()?)
+    let output = setup.output();
+    let output = output.lock()?;
+
+    let mut mounter = Mounter::new(output);
+    mounter.mount(options)?;
+    Ok(())
 }
