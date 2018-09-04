@@ -22,9 +22,9 @@ loginutils = [
     "getty"
 ]
 
+mount = ["libmesabox/mount"]
 # FIXME: this is only like this because we can't rename dependencies and we use the same macro in
 #        the tests that libmesabox uses to build
-mount = ["libmesabox/mount"]
 tar_util = ["libmesabox/tar_util"]
 lsb = [
     "mount", "tar_util"
