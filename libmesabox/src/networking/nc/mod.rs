@@ -80,7 +80,7 @@ fn debug_info(msg: &str) {
 }
 
 impl NcOptions {
-    pub fn parse(matches: ArgMatches, msg: &str) -> Result<NcOptions, MesaError> {
+    pub fn from_matches(matches: ArgMatches, msg: &str) -> Result<NcOptions, MesaError> {
         let mut portlist = vec![];
         let lflag = matches.is_present("l");
         let mut host = String::from("127.0.0.1");
@@ -897,7 +897,7 @@ where
     let matches = app.get_matches_from_safe(args)?;
 
     debug_info(&format!("matches = {:?}", matches));
-    let mut opts = NcOptions::parse(matches, &help_msg)?;
+    let mut opts = NcOptions::from_matches(matches, &help_msg)?;
 
     let stdin_fd = match setup.input().raw_object() {
         Some(fd) => fd.raw_value(),
@@ -923,54 +923,95 @@ where
 
 fn create_app() -> App<'static, 'static> {
     util_app!(NAME)
-        .arg(Arg::with_name("l")
-             .short("l")
-             .help("Used to specify that nc should listen for an incoming connection rather than initiate a connection to a remote host.  It is an error to use this option in conjunction with the -p, -s, or -z options.  Additionally, any timeouts specified with the -w option are ignored.")
-             .conflicts_with("s")
-             .conflicts_with("p")
-             .conflicts_with("z")
-             .conflicts_with("k"))
-        .arg(Arg::with_name("i")
-             .short("i")
-             .value_name("interval")
-             .takes_value(true)
-             .help("Specifies a delay time interval between lines of text sent and received.  Also causes a delay time between connections to multiple ports."))
-        .arg(Arg::with_name("w")
-             .short("w")
-             .value_name("timeout")
-             .takes_value(true)
-             .help("If a connection and stdin are idle for more than timeout seconds, then the connection is silently closed.  The -w flag has no effect on the -l option, i.e. nc will listen forever for a connection, with or without the -w flag. The default is no timeout."))
-        .arg(Arg::with_name("s")
-             .short("s")
-             .value_name("source_ip_address")
-             .takes_value(true)
-             .help("Specifies the IP of the interface which is used to send the packets.  It is an error to use this option in conjunction with the -l option."))
-        .arg(Arg::with_name("d")
-             .short("d")
-             .help("Do not attempt to read from stdin."))
-        .arg(Arg::with_name("U")
-             .short("U")
-             .help("Specifies to use Unix Domain Sockets.")
-             .conflicts_with("z"))
-        .arg(Arg::with_name("u")
-             .short("u")
-             .help("Use UDP instead of the default option of TCP."))
-        .arg(Arg::with_name("v")
-             .short("v")
-             .help("Have nc give more verbose output."))
-        .arg(Arg::with_name("k")
-             .short("k")
-             .help("Forces nc to stay listening for another connection after its current connection is completed.  It is an error to use this option without the -l option."))
-        .arg(Arg::with_name("n")
-             .short("n")
-             .help("Do not do any DNS or service lookups on any specified addresses, hostnames or ports."))
-        .arg(Arg::with_name("z")
-             .short("z")
-             .help("Specifies that nc should just scan for listening daemons, without sending any data to them.  It is an error to use this option in conjunction with the -l option."))
-        .arg(Arg::with_name("positionals")
-             .value_name("[hostname] [port[s]]")
-             .multiple(true)
-             .required(true))
+        .arg(
+            Arg::with_name("l")
+                .short("l")
+                .help("Used to specify that nc should listen for an incoming \
+                connection rather than initiate a connection to a remote host. \
+                It is an error to use this option in conjunction with the -p, \
+                -s, or -z options. Additionally, any timeouts specified with the \
+                -w option are ignored.")
+                .conflicts_with("s")
+                .conflicts_with("p")
+                .conflicts_with("z")
+                .conflicts_with("k")
+        )
+        .arg(
+            Arg::with_name("i")
+                .short("i")
+                .value_name("interval")
+                .takes_value(true)
+                .help("Specifies a delay time interval between lines of text \
+                sent and received. Also causes a delay time between connections \
+                to multiple ports.")
+        )
+        .arg(
+            Arg::with_name("w")
+                .short("w")
+                .value_name("timeout")
+                .takes_value(true)
+                .help("If a connection and stdin are idle for more than timeout \
+                seconds, then the connection is silently closed. The -w flag has \
+                no effect on the -l option, i.e. nc will listen forever for a \
+                connection, with or without the -w flag. The default is no \
+                timeout.")
+        )
+        .arg(
+            Arg::with_name("s")
+                .short("s")
+                .value_name("source_ip_address")
+                .takes_value(true)
+                .help("Specifies the IP of the interface which is used to send \
+                the packets. It is an error to use this option in conjunction \
+                with the -l option.")
+        )
+        .arg(
+            Arg::with_name("d")
+                .short("d")
+                .help("Do not attempt to read from stdin.")
+        )
+        .arg(
+            Arg::with_name("U")
+                .short("U")
+                .help("Specifies to use Unix Domain Sockets.")
+                .conflicts_with("z")
+        )
+        .arg(
+            Arg::with_name("u")
+                .short("u")
+                .help("Use UDP instead of the default option of TCP.")
+        )
+        .arg(
+            Arg::with_name("v")
+                .short("v")
+                .help("Have nc give more verbose output.")
+        )
+        .arg(
+            Arg::with_name("k")
+                .short("k")
+                .help("Forces nc to stay listening for another connection after \
+                its current connection is completed. It is an error to use this \
+                option without the -l option.")
+        )
+        .arg(
+            Arg::with_name("n")
+                .short("n")
+                .help("Do not do any DNS or service lookups on any specified \
+                addresses, hostnames or ports.")
+        )
+        .arg(
+            Arg::with_name("z")
+                .short("z")
+                .help("Specifies that nc should just scan for listening daemons, \
+                without sending any data to them. It is an error to use this \
+                option in conjunction with the -l option.")
+        )
+        .arg(
+            Arg::with_name("positionals")
+                .value_name("[hostname] [port[s]]")
+                .multiple(true)
+                .required(true)
+        )
 }
 
 fn build_ports(ports: &str) -> Result<Vec<u16>, NcError> {
