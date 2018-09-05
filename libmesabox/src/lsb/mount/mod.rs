@@ -74,6 +74,7 @@ impl From<io::Error> for MountError {
 
 /// There are several types of mount task, all of them implement Mountable trait
 trait Mountable {
+    // Sometimes mount prints messages, so returns a string
     fn run(&mut self) -> MountResult<String>;
 }
 
@@ -84,7 +85,7 @@ struct MountOptions {
     mount_list: Vec<Box<Mountable + Send>>,
 }
 
-/// Used to translate UUID into corresponding device path
+/// Translate UUID into corresponding device path
 struct Uuid {
     // map UUID to actual path
     path_map: HashMap<OsString, PathBuf>,
@@ -106,7 +107,7 @@ impl Uuid {
         Ok(Self { path_map: path_map })
     }
 
-    fn to_dev(&self, input: OsString) -> MountResult<PathBuf> {
+    fn get_dev(&self, input: OsString) -> MountResult<PathBuf> {
         // OsString and OsStr lacks "starts_with" function
         // FIXME Maybe find a better way to test if input starts with "UUID="
         let dir;
@@ -125,7 +126,7 @@ impl Uuid {
     }
 }
 
-/// Used to translate Label into corresponding device path
+/// Translate Label into corresponding device path
 struct Label {
     // map Label to actual path
     path_map: HashMap<OsString, PathBuf>,
@@ -147,7 +148,7 @@ impl Label {
         Ok(Self { path_map: path_map })
     }
 
-    fn to_dev(&self, input: OsString) -> MountResult<PathBuf> {
+    fn get_dev(&self, input: OsString) -> MountResult<PathBuf> {
         // OsString and OsStr lacks "starts_with" function
         // FIXME Maybe find a better way to test if input starts with "Label="
         let dir;
@@ -199,13 +200,10 @@ impl Default for Flag {
 }
 
 impl Flag {
-    fn add_flag(&mut self, f: &str) -> MountResult<()> {
-        let flg = OPTION_MAP.get(f).ok_or(MountError::UnsupportedOption)?;
-        self.flag.insert(*flg);
-        Ok(())
-    }
-
-    fn get_flag(options: &OsString) -> MountResult<MsFlags> {
+    fn from_os_string(options: &OsString) -> MountResult<MsFlags> {
+        if options == "" {
+            return Ok(Flag::default().flag);
+        }
         let s = options.clone();
         let s = s.to_string_lossy();
         let mut options: Vec<&str> = s.split(",").collect();
@@ -214,10 +212,8 @@ impl Flag {
             options.extend_from_slice(&["rw", "suid", "dev", "exec", "auto", "nouser", "async"]);
         }
         for opt in options {
-            if opt == "" {
-                continue;
-            }
-            flag.add_flag(opt)?;
+            flag.flag
+                .insert(*OPTION_MAP.get(opt).ok_or(MountError::UnsupportedOption)?);
         }
         Ok(flag.flag)
     }
@@ -233,14 +229,14 @@ struct MntEnt {
 /// This is used to read Filesystem Description File
 /// e.g. /etc/fstab and /etc/mtab
 struct FSDescFile {
-    list: Vec<MntEnt>,
+    entries: Vec<MntEnt>,
 }
 
 impl FSDescFile {
     fn new(path: &str) -> MountResult<Self> {
         // all of these files should exist and can be read, but just in case
         let file = fs::File::open(path).or(Err(MountError::OpenFileError(String::from(path))))?;
-        let mut list = Vec::new();
+        let mut entries = Vec::new();
         for line in BufReader::new(file).lines() {
             let line = line.or(Err(MountError::FSDescFileFormatError(String::from(path))))?;
             match line.chars().next() {
@@ -249,33 +245,26 @@ impl FSDescFile {
                 }
                 Some(_) => {}
             }
-            let mut iter = line.split_whitespace();
-            let mnt_fsname = iter
-                .next()
-                .ok_or(MountError::FSDescFileFormatError(String::from(path)))?;
-            let mnt_dir = iter
-                .next()
-                .ok_or(MountError::FSDescFileFormatError(String::from(path)))?;
-            let mnt_type = iter
-                .next()
-                .ok_or(MountError::FSDescFileFormatError(String::from(path)))?;
-            let mnt_opts = iter
-                .next()
-                .ok_or(MountError::FSDescFileFormatError(String::from(path)))?;
+            let a: Vec<&str> = line.split_whitespace().collect();
+            // There should be 6 columns in FileSystem Description Files
+            if a.len() != 6 {
+                return Err(MountError::FSDescFileFormatError(String::from(path)));
+            }
+            // We only need the first 4 columns
             let mnt = MntEnt {
-                mnt_fsname: OsString::from(mnt_fsname),
-                mnt_dir: OsString::from(mnt_dir),
-                mnt_type: OsString::from(mnt_type),
-                mnt_opts: OsString::from(mnt_opts),
+                mnt_fsname: OsString::from(a[0]),
+                mnt_dir: OsString::from(a[1]),
+                mnt_type: OsString::from(a[2]),
+                mnt_opts: OsString::from(a[3]),
             };
-            list.push(mnt)
+            entries.push(mnt)
         }
-        Ok(Self { list: list })
+        Ok(Self { entries: entries })
     }
 
-    fn to_string(&self, fs_type: &OsString) -> MountResult<String> {
+    fn get_output(&self, fs_type: &OsString) -> String {
         let mut ret = String::new();
-        for item in &self.list {
+        for item in &self.entries {
             if *fs_type != *"" {
                 if *fs_type != item.mnt_type {
                     continue;
@@ -291,7 +280,7 @@ impl FSDescFile {
                 ).as_str(),
             );
         }
-        Ok(ret)
+        ret
     }
 }
 
@@ -326,12 +315,10 @@ impl OsStringExtend for OsString {
 impl MountOptions {
     fn from_matches(matches: &clap::ArgMatches) -> MountResult<Self> {
         let mut mount_list: Vec<Box<Mountable + Send>> = Vec::new();
-        let multi_thread = if matches.is_present("F") { true } else { false };
-        // -a and -F are parsed at the very beginning
         // If -a exists, mount all the entries in /etc/fstab, except for those who contain "noauto"
         if matches.is_present("a") {
             let fstab = FSDescFile::new("/etc/fstab")?;
-            for item in fstab.list {
+            for item in fstab.entries {
                 if item.mnt_opts.contains("noauto") {
                     continue;
                 }
@@ -366,22 +353,22 @@ impl MountOptions {
                 Some(t) => t.collect(),
                 None => Vec::new(),
             };
-            let fake = if matches.is_present("f") { true } else { false };
-            let property = Property { fake: fake };
+            let property = Property {
+                fake: matches.is_present("f"),
+            };
             // We can use UUID as source
             if let Some(uuid) = matches.value_of("U") {
                 arg2 = arg1;
                 arg1 = OsString::from(String::from("UUID=") + uuid);
             }
             // We can use Label as source
-            if let Some(uuid) = matches.value_of("L") {
+            if let Some(label) = matches.value_of("L") {
                 arg2 = arg1;
-                arg1 = OsString::from(String::from("Label=") + uuid);
+                arg1 = OsString::from(String::from("Label=") + label);
             }
             // no argument
             if arg1 == *"" {
                 let m = ShowMountPoints::new(fs_type);
-                // m.run()?;
                 mount_list.push(Box::new(m));
             }
             // one argument
@@ -396,7 +383,7 @@ impl MountOptions {
                     mount_list.push(Box::new(m));
                 } else {
                     let fstab = FSDescFile::new("/etc/fstab")?;
-                    for item in fstab.list {
+                    for item in fstab.entries {
                         if arg1 == item.mnt_fsname || arg1 == item.mnt_dir {
                             let m = CreateMountPoint::new(
                                 property,
@@ -429,7 +416,7 @@ impl MountOptions {
             }
         }
         Ok(Self {
-            multi_thread: multi_thread,
+            multi_thread: matches.is_present("F"),
             mount_list: mount_list,
         })
     }
@@ -487,7 +474,7 @@ impl ShowMountPoints {
 
 impl Mountable for ShowMountPoints {
     fn run(&mut self) -> MountResult<String> {
-        FSDescFile::new("/proc/mounts")?.to_string(&self.filesystem_type)
+        Ok(FSDescFile::new("/proc/mounts")?.get_output(&self.filesystem_type))
     }
 }
 
@@ -524,10 +511,10 @@ impl CreateMountPoint {
     fn parse_source(source: OsString) -> MountResult<PathBuf> {
         if source.starts_with("UUID=") {
             let uuid = Uuid::new()?;
-            Ok(PathBuf::from(uuid.to_dev(source)?))
+            Ok(PathBuf::from(uuid.get_dev(source)?))
         } else if source.starts_with("Label=") {
             let label = Label::new()?;
-            Ok(PathBuf::from(label.to_dev(source)?))
+            Ok(PathBuf::from(label.get_dev(source)?))
         } else {
             Ok(PathBuf::from(source))
         }
@@ -556,13 +543,8 @@ impl Mountable for CreateMountPoint {
         // if type is not specified, auto detect filesystem type
         if self.filesystem_type == *"" || self.filesystem_type == *"auto" {
             let file_name = "/proc/filesystems";
-            let file = match fs::File::open(file_name) {
-                Ok(f) => f,
-                Err(_) => {
-                    // this file should always exist, but just in case
-                    return Err(MountError::OpenFileError(String::from(file_name)));
-                }
-            };
+            let file = fs::File::open(file_name)
+                .or(Err(MountError::OpenFileError(String::from(file_name))))?;
             for line in BufReader::new(file).lines() {
                 let line = line?;
                 match line.chars().next() {
@@ -576,8 +558,8 @@ impl Mountable for CreateMountPoint {
                     }
                 }
                 let try_fs_type = &line[1..];
-                let mountflags = Flag::get_flag(&self.mountflags)?;
-                match nix::mount::mount(
+                let mountflags = Flag::from_os_string(&self.mountflags)?;
+                if let Ok(_) = nix::mount::mount(
                     Some(self.source.as_os_str()),
                     self.target.as_os_str(),
                     Some(try_fs_type),
@@ -585,14 +567,13 @@ impl Mountable for CreateMountPoint {
                     Some(self.data.as_os_str()),
                 ).or(Err(MountError::from(io::Error::last_os_error())))
                 {
-                    Ok(_) => return Ok(String::new()),
-                    Err(_) => { /*println!("get error number: {}", nix::errno::errno());*/ }
+                    return Ok(String::new());
                 }
             }
             return Err(MountError::UnsupportedFSType);
         } else {
             // if type is specified
-            let mountflags = Flag::get_flag(&self.mountflags)?;
+            let mountflags = Flag::from_os_string(&self.mountflags)?;
             if !self.property.fake {
                 match nix::mount::mount(
                     Some(self.source.as_os_str()),
@@ -647,11 +628,12 @@ impl Mountable for Remount {
         if unsafe { libc::getuid() } != 0 {
             return Err(MountError::PermissionDenied);
         }
-        let mounts = FSDescFile::new("/proc/mounts")?;
+        let existing_mounts = FSDescFile::new("/proc/mounts")?;
         let mut source = OsString::new();
         let mut target = OsString::new();
         let mut filesystem_type = OsString::new();
-        for item in mounts.list.iter().rev() {
+        // Go through all the existing mount points in reverse order
+        for item in existing_mounts.entries.iter().rev() {
             if self.target == item.mnt_fsname || self.target == item.mnt_dir {
                 source = item.mnt_fsname.clone();
                 target = item.mnt_dir.clone();
@@ -659,7 +641,7 @@ impl Mountable for Remount {
                 break;
             }
         }
-        let mountflags = Flag::get_flag(&self.mountflags)?;
+        let mountflags = Flag::from_os_string(&self.mountflags)?;
         if !self.property.fake {
             nix::mount::mount(
                 Some(source.as_os_str()),
