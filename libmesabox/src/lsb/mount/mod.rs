@@ -13,10 +13,10 @@ extern crate nix;
 use clap::{App, Arg};
 use nix::mount::MsFlags;
 use std::collections::HashMap;
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io::{self, BufRead, BufReader, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::thread;
 use {ArgsIter, LockError, Result, UtilSetup, UtilWrite};
 
@@ -53,6 +53,8 @@ enum MountError {
     LabelNotFoundError(String),
     #[fail(display = "{}: mount point does not exist.", _0)]
     MountPointNotExist(String),
+    #[fail(display = "{}: mount point not mounted or bad option.", _0)]
+    MountPointNotMounted(String),
     #[fail(display = "{}: special device {} does not exist.", _0, _1)]
     DeviceNotExist(String, String),
     // Denotes an error caused by one of stdin, stdout, or stderr failing to lock
@@ -74,7 +76,7 @@ impl From<io::Error> for MountError {
 
 /// There are several types of mount task, all of them implement Mountable trait
 trait Mountable {
-    // Sometimes mount prints messages, so returns a string
+    // Sometimes mount prints messages, so it returns a string
     fn run(&mut self) -> MountResult<String>;
 }
 
@@ -107,23 +109,20 @@ impl Uuid {
         Ok(Self { path_map: path_map })
     }
 
-    fn get_device_path(&self, input: &OsString) -> MountResult<PathBuf> {
-        // OsString and OsStr lacks "starts_with" function
-        // FIXME Maybe find a better way to test if input starts with "UUID="
+    fn get_device_path(&self, input: &OsString) -> MountResult<&Path> {
+        let input_string = input.to_string_lossy();
         let dir;
-        //let s = input.clone();
-        let s = input.to_string_lossy();
-        if s.starts_with("UUID=") {
-            dir = OsString::from(&s[5..]);
+        if input_string.starts_with("UUID=") {
+            dir = OsStr::new(&input_string[5..]);
         } else {
-            dir = input.clone();
+            dir = input;
         }
         Ok(self
             .path_map
-            .get(&dir)
+            .get(dir)
             .ok_or(MountError::UuidNotFoundError(
                 dir.to_string_lossy().to_string(),
-            ))?.clone())
+            ))?.as_path())
     }
 }
 
@@ -149,22 +148,19 @@ impl Label {
         Ok(Self { path_map: path_map })
     }
 
-    fn get_device_path(&self, input: &OsString) -> MountResult<PathBuf> {
-        // OsString and OsStr lacks "starts_with" function
-        // FIXME Maybe find a better way to test if input starts with "Label="
+    fn get_device_path(&self, input: &OsString) -> MountResult<&Path> {
+        let input_string = input.to_string_lossy();
         let dir;
-        //let s = input.clone();
-        let s = input.to_string_lossy();
-        if s.starts_with("Label=") {
-            dir = OsString::from(&s[6..]);
+        if input_string.starts_with("Label=") {
+            dir = OsStr::new(&input_string[6..]);
         } else {
-            dir = input.clone();
+            dir = input;
         }
         Ok(self
             .path_map
-            .get(&dir)
-            .ok_or(MountError::LabelNotFoundError(String::from(&s[5..])))?
-            .clone())
+            .get(dir)
+            .ok_or(MountError::LabelNotFoundError(dir.to_string_lossy().to_string()))?
+            .as_path())
     }
 }
 
@@ -202,7 +198,7 @@ impl Default for Flag {
 }
 
 impl Flag {
-    fn from(options: &mut Vec<OsString>) -> MountResult<MsFlags> {
+    fn from(options: &mut Vec<OsString>) -> MountResult<Flag> {
         let mut flag = Flag::default();
         if options.contains(&OsString::from("default")) {
             options.extend_from_slice(&[
@@ -219,7 +215,7 @@ impl Flag {
             flag.flag
                 .insert(*OPTION_MAP.get(opt).ok_or(MountError::UnsupportedOption)?);
         }
-        Ok(flag.flag)
+        Ok(flag)
     }
 }
 
@@ -325,6 +321,7 @@ impl OsStringExtend for OsString {
 impl MountOptions {
     fn from_matches(matches: &clap::ArgMatches) -> MountResult<Self> {
         let mut mount_list: Vec<Box<Mountable + Send>> = Vec::new();
+
         // If -a exists, mount all the entries in /etc/fstab, except for those who contain "noauto"
         if matches.is_present("a") {
             let fstab = FSDescFile::new("/etc/fstab")?;
@@ -343,7 +340,6 @@ impl MountOptions {
                     .collect();
                 // In this case, all the mounts are of type "CreateMountPoint"
                 let m = CreateMountPoint::new(
-                    // TODO detect user mountable devices
                     Property::default(),
                     item.mnt_fsname,
                     PathBuf::from(item.mnt_dir),
@@ -359,14 +355,11 @@ impl MountOptions {
             let mut arg1 = matches.value_of("arg1");
             let mut arg2 = matches.value_of("arg2");
             let fs_type = matches.value_of("t");
+
             let options: Option<Vec<OsString>> = matches
                 .values_of("o")
                 .map(|i| i.collect())
                 .map(|i: Vec<&str>| i.into_iter().map(|s| OsString::from(s)).collect());
-            //let options: Vec<&str> = match matches.values_of("o") {
-            //Some(t) => t.collect(),
-            //None => Vec::new(),
-            //};
 
             let property = Property {
                 fake: matches.is_present("f"),
@@ -379,22 +372,18 @@ impl MountOptions {
                 arg2 = arg1;
                 arg1 = Some(uuid);
             }
+
             // If -L exists, then use Label as source
             if let Some(label) = matches.value_of("L") {
                 arg2 = arg1;
-                // arg1 = Some((String::from("Label==")+label).as_str());
                 arg1 = Some(label);
             }
 
             match arg1 {
                 Some(arg1) => {
                     match arg2 {
-                        // two arguments
+                        // Two arguments
                         Some(arg2) => {
-                            //let t = match fs_type {
-                            //Some(t) => OsString::from(t),
-                            //None => OsString::new(),
-                            //};
                             let m = CreateMountPoint::new(
                                 property,
                                 OsString::from(arg1),
@@ -405,68 +394,38 @@ impl MountOptions {
                             )?;
                             mount_list.push(Box::new(m));
                         }
-                        // one argument
-                        None => {
-                            match options {
-                                Some(ref opts) if opts.contains(&OsString::from("remount")) => {
-                                    let m = Remount::new(
-                                        property,
-                                        OsString::from(arg1),
-                                        opts.to_vec(),
-                                        OsString::new(),
-                                    );
-                                    mount_list.push(Box::new(m));
+                        // One argument
+                        None => match options {
+                            Some(ref opts) if opts.contains(&OsString::from("remount")) => {
+                                let m = Remount::new(
+                                    property,
+                                    OsString::from(arg1),
+                                    opts.to_vec(),
+                                    OsString::new(),
+                                );
+                                mount_list.push(Box::new(m));
+                            }
+                            _ => {
+                                let fstab = FSDescFile::new("/etc/fstab")?;
+                                for item in fstab.entries {
+                                    if arg1 == item.mnt_fsname || arg1 == item.mnt_dir {
+                                        let m = CreateMountPoint::new(
+                                            property,
+                                            item.mnt_fsname,
+                                            PathBuf::from(item.mnt_dir),
+                                            Some(item.mnt_type),
+                                            options,
+                                            OsString::new(),
+                                        )?;
+                                        mount_list.push(Box::new(m));
+                                        break;
+                                    }
                                 }
-                                _ => {
-                                    let fstab = FSDescFile::new("/etc/fstab")?;
-                                    for item in fstab.entries {
-                                        if arg1 == item.mnt_fsname || arg1 == item.mnt_dir {
-                                            let m = CreateMountPoint::new(
-                                                property,
-                                                item.mnt_fsname,
-                                                PathBuf::from(item.mnt_dir),
-                                                Some(item.mnt_type),
-                                                options,
-                                                OsString::new(),
-                                            )?;
-                                            mount_list.push(Box::new(m));
-                                            break;
-                                        }
-                                    }
-                                    if mount_list.len() == 0 {
-                                        return Err(MountError::InvalidArgument);
-                                    }
+                                if mount_list.len() == 0 {
+                                    return Err(MountError::InvalidArgument);
                                 }
                             }
-                            //if options.contains(&"remount") {
-                            //let m = Remount::new(
-                            //property,
-                            //OsString::from(arg1),
-                            //OsString::from(options.join(",")),
-                            //OsString::new(),
-                            //);
-                            //mount_list.push(Box::new(m));
-                            //} else {
-                            //let fstab = FSDescFile::new("/etc/fstab")?;
-                            //for item in fstab.entries {
-                            //if arg1 == item.mnt_fsname || arg1 == item.mnt_dir {
-                            //let m = CreateMountPoint::new(
-                            //property,
-                            //item.mnt_fsname,
-                            //PathBuf::from(item.mnt_dir),
-                            //Some(item.mnt_type),
-                            //item.mnt_opts,
-                            //OsString::new(),
-                            //)?;
-                            //mount_list.push(Box::new(m));
-                            //break;
-                            //}
-                            //}
-                            //if mount_list.len() == 0 {
-                            //return Err(MountError::InvalidArgument);
-                            //}
-                            //}
-                        }
+                        },
                     }
                 }
                 // no argument
@@ -595,31 +554,31 @@ impl Mountable for CreateMountPoint {
 
         // check if mount point exists
         if !self.target.exists() {
-            return Err(MountError::MountPointNotExist(String::from(
-                self.target.to_string_lossy(),
-            )));
+            return Err(MountError::MountPointNotExist(
+                self.target.to_string_lossy().to_string(),
+            ));
         }
 
         // check if device exists
         if !self.source.exists() {
-            let s = String::from(self.source.to_string_lossy());
-            let t = String::from(self.target.to_string_lossy());
+            let s = self.source.to_string_lossy().to_string();
+            let t = self.target.to_string_lossy().to_string();
             return Err(MountError::DeviceNotExist(t, s));
         }
 
         // Get mountflags
         let mountflags = match self.mountflags {
-            Some(ref mut mountflags) => Flag::from(mountflags)?,
+            Some(ref mut mountflags) => Flag::from(mountflags)?.flag,
             None => Flag::default().flag,
         };
 
-        // if type is not specified or "auto", automatically detect filesystem type
+        // If type is not specified or "auto", automatically detect filesystem type
         if Some(OsString::from("auto")) == self.filesystem_type {
             self.filesystem_type = None;
         }
-
         match self.filesystem_type {
             None => {
+                // Read all the filesystem types that we support
                 let file_name = "/proc/filesystems";
                 let file = fs::File::open(file_name)
                     .or(Err(MountError::OpenFileError(String::from(file_name))))?;
@@ -635,8 +594,8 @@ impl Mountable for CreateMountPoint {
                             continue; // skip empty lines
                         }
                     }
+                    // Empty lines are already skipped, so it is ok to read array from index 1
                     let try_fs_type = &line[1..];
-                    //let mountflags = Flag::from_os_string(&self.mountflags)?;
                     if let Ok(_) = nix::mount::mount(
                         Some(self.source.as_os_str()),
                         self.target.as_os_str(),
@@ -648,11 +607,12 @@ impl Mountable for CreateMountPoint {
                         return Ok(String::new());
                     }
                 }
+                // Now we tried all the types that we support and none of them succeed
                 return Err(MountError::UnsupportedFSType);
             }
-            // if type is specified
+
+            // If type is specified
             Some(ref fs_type) => {
-                //let mountflags = Flag::from(&self.mountflags)?;
                 if !self.property.fake {
                     match nix::mount::mount(
                         Some(self.source.as_os_str()),
@@ -663,15 +623,16 @@ impl Mountable for CreateMountPoint {
                     ).or(Err(MountError::from(io::Error::last_os_error())))
                     {
                         Ok(_) => return Ok(String::new()),
-                        Err(_) => {
-                            // errno == 19 means "No such device"
-                            // this happens if you provide a wrong filesystem type
+                        Err(e) => {
+                            // Error number 19 means "No such device"
+                            // This happens if you provide a wrong filesystem type
                             if nix::errno::errno() == 19 {
                                 return Err(MountError::UnknownFSType(String::from(
                                     fs_type.to_string_lossy(),
                                 )));
                             }
-                            return Err(MountError::from(io::Error::last_os_error()));
+                            // TODO: It's not known if there are other possible error numbers
+                            return Err(e);
                         }
                     }
                 }
@@ -713,29 +674,41 @@ impl Mountable for Remount {
         if unsafe { libc::getuid() } != 0 {
             return Err(MountError::PermissionDenied);
         }
+
+        // Go through all the existing mount points, find the appropriate source & target
         let existing_mounts = FSDescFile::new("/proc/mounts")?;
-        let mut source = OsString::new();
-        let mut target = OsString::new();
-        let mut filesystem_type = OsString::new();
-        // Go through all the existing mount points in reverse order
+        let mut source = OsStr::new("");
+        let mut target = OsStr::new("");
+        let mut filesystem_type = OsStr::new("");
+        // We need to do this in reverse order
         for item in existing_mounts.entries.iter().rev() {
             if self.target == item.mnt_fsname || self.target == item.mnt_dir {
-                source = item.mnt_fsname.clone();
-                target = item.mnt_dir.clone();
-                filesystem_type = item.mnt_type.clone();
+                source = &item.mnt_fsname;
+                target = &item.mnt_dir;
+                filesystem_type = &item.mnt_type;
                 break;
             }
         }
-        let mountflags = Flag::from(&mut self.mountflags)?;
+
+        // If not found, the mount point is not mounted
+        if source == "" || target == "" {
+            return Err(MountError::MountPointNotMounted(
+                self.target.to_string_lossy().to_string(),
+            ));
+        }
+
+        let mountflags = Flag::from(&mut self.mountflags)?.flag;
+
         if !self.property.fake {
             nix::mount::mount(
-                Some(source.as_os_str()),
-                target.as_os_str(),
-                Some(filesystem_type.as_os_str()),
+                Some(source),
+                target,
+                Some(filesystem_type),
                 mountflags,
                 Some(self.data.as_os_str()),
             ).or(Err(MountError::from(io::Error::last_os_error())))?
         }
+
         Ok(String::new())
     }
 }
@@ -747,7 +720,7 @@ fn create_app() -> App<'static, 'static> {
                 .index(1))
             .arg(Arg::with_name("arg2")
                 .index(2))
-            .arg(Arg::with_name("v")
+            .arg(Arg::with_name("v") // TODO: not supported yet
                 .short("v")
                 .help("invoke verbose mode. The mount command shall provide diagnostic messages on stdout."))
             .arg(Arg::with_name("a")
@@ -760,12 +733,10 @@ fn create_app() -> App<'static, 'static> {
             .arg(Arg::with_name("f")
                 .short("f")
                 .help("cause everything to be done except for the actual system call; if it's not obvious, this `fakes' mounting the file system."))
-            // FIXME not supported yet
-            .arg(Arg::with_name("n")
+            .arg(Arg::with_name("n") // TODO: not supported yet
                 .short("n")
                 .help("mount without writing in /etc/mtab. This is necessary for example when /etc is on a read-only file system."))
-            // FIXME not supported yet
-            .arg(Arg::with_name("s")
+            .arg(Arg::with_name("s") // TODO: not supported yet
                 .short("s")
                 .help("ignore mount options not supported by a file system type. Not all file systems support this option."))
             .arg(Arg::with_name("r")
