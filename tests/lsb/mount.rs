@@ -261,7 +261,7 @@ fn root_test_mount_remount() {
     new_cmd!()
             .current_dir(&temp_dir)
             // then remount it as read-only
-            .args(&["-o", "remount,ro", "/dev/loop1", "mnt"])
+            .args(&["-o", "remount,ro", "/dev/loop1"])
             .assert()
             .success();
 
@@ -288,4 +288,19 @@ fn root_test_mount_remount() {
         .success()
         .stdout("")
         .stderr("");
+}
+
+#[test]
+#[ignore]
+fn root_test_mount_remount_nonexistent_mount_point() {
+    new_cmd!()
+        .args(&["-o", "remount", "/dev/this_device_should_not_be_mounted"])
+        .assert()
+        .failure()
+        .stdout("")
+        .stderr(
+            predicate::str::contains(
+                "mount point not mounted or bad option.",
+            ).from_utf8(),
+        );
 }
