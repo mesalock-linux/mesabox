@@ -11,6 +11,7 @@ extern crate lazy_static;
 extern crate libc;
 extern crate nix;
 use clap::{App, Arg};
+use libc::{c_long, c_ulong};
 use nix::mount::MsFlags;
 use std::collections::HashMap;
 use std::ffi::{OsStr, OsString};
@@ -159,28 +160,28 @@ impl Label {
         Ok(self
             .path_map
             .get(dir)
-            .ok_or(MountError::LabelNotFoundError(dir.to_string_lossy().to_string()))?
-            .as_path())
+            .ok_or(MountError::LabelNotFoundError(
+                dir.to_string_lossy().to_string(),
+            ))?.as_path())
     }
 }
 
 lazy_static! {
-    //static ref OPTION_MAP: HashMap<&'static str, MsFlags> = {
-    static ref OPTION_MAP: HashMap<OsString, MsFlags> = {
+    static ref OPTION_MAP: HashMap<OsString, c_ulong> = {
         let mut option_map = HashMap::new();
-        option_map.insert(OsString::from("async"), MsFlags::MS_SYNCHRONOUS);
-        option_map.insert(OsString::from("atime"), MsFlags::MS_NOATIME);
-        option_map.insert(OsString::from("dev"), MsFlags::MS_NODEV);
-        option_map.insert(OsString::from("exec"), MsFlags::MS_NOEXEC);
-        option_map.insert(OsString::from("noatime"), MsFlags::MS_NOATIME);
-        option_map.insert(OsString::from("nodev"), MsFlags::MS_NODEV);
-        option_map.insert(OsString::from("noexec"), MsFlags::MS_NOEXEC);
-        option_map.insert(OsString::from("nosuid"), MsFlags::MS_NOSUID);
-        option_map.insert(OsString::from("remount"), MsFlags::MS_REMOUNT);
-        option_map.insert(OsString::from("ro"), MsFlags::MS_RDONLY);
-        option_map.insert(OsString::from("rw"), MsFlags::MS_RDONLY);
-        option_map.insert(OsString::from("suid"), MsFlags::MS_NOSUID);
-        option_map.insert(OsString::from("sync"), MsFlags::MS_SYNCHRONOUS);
+        option_map.insert(OsString::from("async"), !libc::MS_SYNCHRONOUS);
+        option_map.insert(OsString::from("atime"), !libc::MS_NOATIME);
+        option_map.insert(OsString::from("dev"), !libc::MS_NODEV);
+        option_map.insert(OsString::from("exec"), !libc::MS_NOEXEC);
+        option_map.insert(OsString::from("noatime"), libc::MS_NOATIME);
+        option_map.insert(OsString::from("nodev"), libc::MS_NODEV);
+        option_map.insert(OsString::from("noexec"), libc::MS_NOEXEC);
+        option_map.insert(OsString::from("nosuid"), libc::MS_NOSUID);
+        option_map.insert(OsString::from("remount"), libc::MS_REMOUNT);
+        option_map.insert(OsString::from("ro"), libc::MS_RDONLY);
+        option_map.insert(OsString::from("rw"), !libc::MS_RDONLY);
+        option_map.insert(OsString::from("suid"), !libc::MS_NOSUID);
+        option_map.insert(OsString::from("sync"), libc::MS_SYNCHRONOUS);
         option_map
     };
 }
@@ -198,8 +199,9 @@ impl Default for Flag {
 }
 
 impl Flag {
-    fn from(options: &mut Vec<OsString>) -> MountResult<Flag> {
-        let mut flag = Flag::default();
+    fn from(options: &mut Vec<OsString>) -> MountResult<MsFlags> {
+        //let mut flag = Flag::default();
+        let mut flag = Flag::default().flag.bits();
         if options.contains(&OsString::from("default")) {
             options.extend_from_slice(&[
                 OsString::from("rw"),
@@ -212,10 +214,14 @@ impl Flag {
             ]);
         }
         for opt in options {
-            flag.flag
-                .insert(*OPTION_MAP.get(opt).ok_or(MountError::UnsupportedOption)?);
+            let f = *OPTION_MAP.get(opt).ok_or(MountError::UnsupportedOption)?;
+            if (f as c_long) < 0 {
+                flag &= f;
+            } else {
+                flag |= f;
+            }
         }
-        Ok(flag)
+        Ok(MsFlags::from_bits(flag).ok_or(MountError::UnsupportedOption)?)
     }
 }
 
@@ -329,15 +335,15 @@ impl MountOptions {
                 if item.mnt_opts.contains("noauto") {
                     continue;
                 }
+
                 // Split the comma separated option string into a vector, also convert &str into OsString
                 let opts: Vec<OsString> = item
                     .mnt_opts
                     .to_string_lossy()
                     .split(",")
-                    .collect::<Vec<&str>>()
-                    .into_iter()
                     .map(|i| OsString::from(i))
                     .collect();
+
                 // In this case, all the mounts are of type "CreateMountPoint"
                 let m = CreateMountPoint::new(
                     Property::default(),
@@ -347,6 +353,7 @@ impl MountOptions {
                     Some(opts),
                     OsString::new(),
                 )?;
+
                 mount_list.push(Box::new(m));
             }
         }
@@ -379,10 +386,11 @@ impl MountOptions {
                 arg1 = Some(label);
             }
 
+            // Find out the exact mount type
             match arg1 {
                 Some(arg1) => {
                     match arg2 {
-                        // Two arguments
+                        // Two arguments, the type must be "CreateMountPoint"
                         Some(arg2) => {
                             let m = CreateMountPoint::new(
                                 property,
@@ -396,6 +404,7 @@ impl MountOptions {
                         }
                         // One argument
                         None => match options {
+                            // If there is a "remount" option, the type is "Remount"
                             Some(ref opts) if opts.contains(&OsString::from("remount")) => {
                                 let m = Remount::new(
                                     property,
@@ -405,6 +414,7 @@ impl MountOptions {
                                 );
                                 mount_list.push(Box::new(m));
                             }
+                            // Otherwise, this device should be written in /etc/fstab
                             _ => {
                                 let fstab = FSDescFile::new("/etc/fstab")?;
                                 for item in fstab.entries {
@@ -421,6 +431,7 @@ impl MountOptions {
                                         break;
                                     }
                                 }
+                                // If we cannot find anything about this device, return an error
                                 if mount_list.len() == 0 {
                                     return Err(MountError::InvalidArgument);
                                 }
@@ -428,7 +439,7 @@ impl MountOptions {
                         },
                     }
                 }
-                // no argument
+                // no argument, the type must be "ShowMountPoints"
                 None => {
                     let m = ShowMountPoints::new(fs_type);
                     mount_list.push(Box::new(m));
@@ -568,7 +579,7 @@ impl Mountable for CreateMountPoint {
 
         // Get mountflags
         let mountflags = match self.mountflags {
-            Some(ref mut mountflags) => Flag::from(mountflags)?.flag,
+            Some(ref mut mountflags) => Flag::from(mountflags)?,
             None => Flag::default().flag,
         };
 
@@ -697,7 +708,7 @@ impl Mountable for Remount {
             ));
         }
 
-        let mountflags = Flag::from(&mut self.mountflags)?.flag;
+        let mountflags = Flag::from(&mut self.mountflags)?;
 
         if !self.property.fake {
             nix::mount::mount(
