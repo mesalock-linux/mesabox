@@ -9,6 +9,7 @@ generate_fns! {
         (getty, "getty")
     },
     lsb {
+        (mount, "mount"),
         (tar, "tar_util")
     },
     networking {
