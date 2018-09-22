@@ -10,13 +10,16 @@ extern crate clap;
 extern crate lazy_static;
 extern crate libc;
 extern crate nix;
+
 use clap::{App, Arg};
 use libc::{c_long, c_ulong};
 use nix::mount::MsFlags;
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::ffi::{OsStr, OsString};
-use std::fs;
+use std::fs::{self, File};
 use std::io::{self, BufRead, BufReader, Write};
+use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::thread;
 use {ArgsIter, LockError, Result, UtilSetup, UtilWrite};
@@ -44,14 +47,10 @@ enum MountError {
     PermissionDenied,
     #[fail(display = "Invalid argument")]
     InvalidArgument,
-    #[fail(display = "Cannot support UUID on your system")]
-    UuidSupportError,
-    #[fail(display = "Cannot support Label on your system")]
-    LabelSupportError,
-    #[fail(display = "Cannot find UUID=\"{}\"", _0)]
-    UuidNotFoundError(String),
-    #[fail(display = "Cannot find Label=\"{}\"", _0)]
-    LabelNotFoundError(String),
+    #[fail(display = "Cannot support {} on your system", _0)]
+    UuidLabelNotSupportedError(String),
+    #[fail(display = "Cannot find {}=\"{}\"", _0, _1)]
+    UuidLabelNotFoundError(String, String),
     #[fail(display = "{}: mount point does not exist.", _0)]
     MountPointNotExist(String),
     #[fail(display = "{}: mount point not mounted or bad option.", _0)]
@@ -75,113 +74,139 @@ impl From<io::Error> for MountError {
     }
 }
 
+enum MountCore {
+    ShowMountPoints(ShowMountPoints),
+    CreateMountPoint(CreateMountPoint),
+    Remount(Remount),
+}
+
 /// There are several types of mount task, all of them implement Mountable trait
 trait Mountable {
     // Sometimes mount prints messages, so it returns a string
     fn run(&mut self) -> MountResult<String>;
 }
 
+impl Mountable for MountCore {
+    fn run(&mut self) -> MountResult<String> {
+        match *self {
+            MountCore::ShowMountPoints(ref mut mount) => mount.run(),
+            MountCore::CreateMountPoint(ref mut mount) => mount.run(),
+            MountCore::Remount(ref mut mount) => mount.run(),
+        }
+    }
+}
+
 /// Store information that we need to execute a mount command
 struct MountOptions {
     multi_thread: bool,
     // Mount command might mount a lot of devices at the same time, so we cache them in a list
-    mount_list: Vec<Box<Mountable + Send>>,
+    mount_list: Vec<MountCore>,
 }
 
-/// Translate UUID into corresponding device path
-struct Uuid {
-    // map UUID to actual path
+/// Source devices may be represented as an UUID or Label
+enum SourceType {
+    Uuid,
+    Label,
+}
+
+/// Help to convert an UUID or Label to the corresponding device path
+struct SourceHelper {
+    source_type: SourceType,
     path_map: HashMap<OsString, PathBuf>,
 }
 
-impl Uuid {
-    fn new() -> MountResult<Self> {
-        let mut path_map: HashMap<OsString, PathBuf> = HashMap::new();
-        let dir = fs::read_dir("/dev/disk/by-uuid").or(Err(MountError::UuidSupportError))?;
-        for symlink in dir {
-            let link = symlink.or(Err(MountError::UuidSupportError))?;
-            path_map.insert(
-                link.file_name(),
-                link.path()
-                    .canonicalize()
-                    .or(Err(MountError::UuidSupportError))?,
-            );
-        }
-        Ok(Self { path_map: path_map })
+impl SourceHelper {
+    fn new_uuid() -> MountResult<Self> {
+        Ok(Self {
+            source_type: SourceType::Uuid,
+            path_map: Self::get_path_map("/dev/disk/by-uuid", SourceType::Uuid)?,
+        })
+    }
+
+    fn new_label() -> MountResult<Self> {
+        Ok(Self {
+            source_type: SourceType::Label,
+            path_map: Self::get_path_map("/dev/disk/by-label", SourceType::Label)?,
+        })
     }
 
     fn get_device_path(&self, input: &OsString) -> MountResult<&Path> {
-        let input_string = input.to_string_lossy();
-        let dir;
-        if input_string.starts_with("UUID=") {
-            dir = OsStr::new(&input_string[5..]);
-        } else {
-            dir = input;
+        let input_bytes = input.as_bytes();
+        let clipped_input;
+        let err_msg;
+        match self.source_type {
+            SourceType::Uuid => {
+                err_msg = "UUID".to_string();
+                if input_bytes.starts_with(b"UUID=") {
+                    clipped_input = OsStr::from_bytes(&input_bytes[5..]);
+                } else {
+                    clipped_input = input;
+                }
+            }
+            SourceType::Label => {
+                err_msg = "Label".to_string();
+                if input_bytes.starts_with(b"Label=") {
+                    clipped_input = OsStr::from_bytes(&input_bytes[6..]);
+                } else {
+                    clipped_input = input;
+                }
+            }
         }
         Ok(self
             .path_map
-            .get(dir)
-            .ok_or(MountError::UuidNotFoundError(
-                dir.to_string_lossy().to_string(),
+            .get(clipped_input)
+            .ok_or(MountError::UuidLabelNotFoundError(
+                err_msg,
+                clipped_input.to_string_lossy().to_string(),
             ))?.as_path())
     }
-}
 
-/// Translate Label into corresponding device path
-struct Label {
-    // map Label to actual path
-    path_map: HashMap<OsString, PathBuf>,
-}
-
-impl Label {
-    fn new() -> MountResult<Self> {
+    fn get_path_map(
+        read_path: &str,
+        source_type: SourceType,
+    ) -> MountResult<HashMap<OsString, PathBuf>> {
         let mut path_map: HashMap<OsString, PathBuf> = HashMap::new();
-        let dir = fs::read_dir("/dev/disk/by-label").or(Err(MountError::LabelSupportError))?;
+        let err_msg = match source_type {
+            SourceType::Uuid => "UUID",
+            SourceType::Label => "Label",
+        };
+        let dir = fs::read_dir(read_path)
+            .or_else(|_| Err(MountError::UuidLabelNotSupportedError(err_msg.to_string())))?;
         for symlink in dir {
-            let link = symlink.or(Err(MountError::LabelSupportError))?;
+            let link = symlink
+                .or_else(|_| Err(MountError::UuidLabelNotSupportedError(err_msg.to_string())))?;
             path_map.insert(
                 link.file_name(),
-                link.path()
-                    .canonicalize()
-                    .or(Err(MountError::LabelSupportError))?,
+                link.path().canonicalize().or_else(|_| {
+                    Err(MountError::UuidLabelNotSupportedError(err_msg.to_string()))
+                })?,
             );
         }
-        Ok(Self { path_map: path_map })
-    }
-
-    fn get_device_path(&self, input: &OsString) -> MountResult<&Path> {
-        let input_string = input.to_string_lossy();
-        let dir;
-        if input_string.starts_with("Label=") {
-            dir = OsStr::new(&input_string[6..]);
-        } else {
-            dir = input;
-        }
-        Ok(self
-            .path_map
-            .get(dir)
-            .ok_or(MountError::LabelNotFoundError(
-                dir.to_string_lossy().to_string(),
-            ))?.as_path())
+        Ok(path_map)
     }
 }
 
 lazy_static! {
-    static ref OPTION_MAP: HashMap<OsString, c_ulong> = {
+    static ref OPTION_MAP: HashMap<Cow<'static ,OsStr>, c_ulong> = {
         let mut option_map = HashMap::new();
-        option_map.insert(OsString::from("async"), !libc::MS_SYNCHRONOUS);
-        option_map.insert(OsString::from("atime"), !libc::MS_NOATIME);
-        option_map.insert(OsString::from("dev"), !libc::MS_NODEV);
-        option_map.insert(OsString::from("exec"), !libc::MS_NOEXEC);
-        option_map.insert(OsString::from("noatime"), libc::MS_NOATIME);
-        option_map.insert(OsString::from("nodev"), libc::MS_NODEV);
-        option_map.insert(OsString::from("noexec"), libc::MS_NOEXEC);
-        option_map.insert(OsString::from("nosuid"), libc::MS_NOSUID);
-        option_map.insert(OsString::from("remount"), libc::MS_REMOUNT);
-        option_map.insert(OsString::from("ro"), libc::MS_RDONLY);
-        option_map.insert(OsString::from("rw"), !libc::MS_RDONLY);
-        option_map.insert(OsString::from("suid"), !libc::MS_NOSUID);
-        option_map.insert(OsString::from("sync"), libc::MS_SYNCHRONOUS);
+        option_map.insert(Cow::Borrowed(OsStr::new("auto")), 0); // ignored
+        option_map.insert(Cow::Borrowed(OsStr::new("noauto")), 0); // ignored
+        option_map.insert(Cow::Borrowed(OsStr::new("defaults")), 0); // ignored
+        option_map.insert(Cow::Borrowed(OsStr::new("nouser")), 0); // ignored
+        option_map.insert(Cow::Borrowed(OsStr::new("user")), 0); // ignored
+        option_map.insert(Cow::Borrowed(OsStr::new("async")), !libc::MS_SYNCHRONOUS);
+        option_map.insert(Cow::Borrowed(OsStr::new("atime")), !libc::MS_NOATIME);
+        option_map.insert(Cow::Borrowed(OsStr::new("dev")), !libc::MS_NODEV);
+        option_map.insert(Cow::Borrowed(OsStr::new("exec")), !libc::MS_NOEXEC);
+        option_map.insert(Cow::Borrowed(OsStr::new("noatime")), libc::MS_NOATIME);
+        option_map.insert(Cow::Borrowed(OsStr::new("nodev")), libc::MS_NODEV);
+        option_map.insert(Cow::Borrowed(OsStr::new("noexec")), libc::MS_NOEXEC);
+        option_map.insert(Cow::Borrowed(OsStr::new("nosuid")), libc::MS_NOSUID);
+        option_map.insert(Cow::Borrowed(OsStr::new("remount")), libc::MS_REMOUNT);
+        option_map.insert(Cow::Borrowed(OsStr::new("ro")), libc::MS_RDONLY);
+        option_map.insert(Cow::Borrowed(OsStr::new("rw")), !libc::MS_RDONLY);
+        option_map.insert(Cow::Borrowed(OsStr::new("suid")), !libc::MS_NOSUID);
+        option_map.insert(Cow::Borrowed(OsStr::new("sync")), libc::MS_SYNCHRONOUS);
         option_map
     };
 }
@@ -199,18 +224,17 @@ impl Default for Flag {
 }
 
 impl Flag {
-    fn from(options: &mut Vec<OsString>) -> MountResult<MsFlags> {
-        //let mut flag = Flag::default();
-        let mut flag = Flag::default().flag.bits();
-        if options.contains(&OsString::from("default")) {
+    fn from<'a>(options: &mut Vec<Cow<'a, OsStr>>) -> MountResult<MsFlags> {
+        let mut flag = Self::default().flag.bits();
+        if options.contains(&Cow::Borrowed(OsStr::new("default"))) {
             options.extend_from_slice(&[
-                OsString::from("rw"),
-                OsString::from("suid"),
-                OsString::from("dev"),
-                OsString::from("exec"),
-                OsString::from("auto"),
-                OsString::from("nouser"),
-                OsString::from("async"),
+                Cow::Borrowed(OsStr::new("rw")),
+                Cow::Borrowed(OsStr::new("suid")),
+                Cow::Borrowed(OsStr::new("dev")),
+                Cow::Borrowed(OsStr::new("exec")),
+                Cow::Borrowed(OsStr::new("auto")),
+                Cow::Borrowed(OsStr::new("nouser")),
+                Cow::Borrowed(OsStr::new("async")),
             ]);
         }
         for opt in options {
@@ -239,42 +263,59 @@ struct FSDescFile {
 }
 
 impl FSDescFile {
-    fn new(path: &str) -> MountResult<Self> {
-        // all of these files should exist and can be read, but just in case
-        let file = fs::File::open(path).or(Err(MountError::OpenFileError(String::from(path))))?;
-        let mut entries = Vec::new();
-        for line in BufReader::new(file).lines() {
-            let line = line.or(Err(MountError::FSDescFileFormatError(String::from(path))))?;
-            match line.chars().next() {
-                None | Some('#') => {
-                    continue;
-                }
-                Some(_) => {}
+    fn new(path: &Path) -> MountResult<Self> {
+        // All of these files should exist and can be read, but just in case
+        let file = File::open(path)
+            .or_else(|_| Err(MountError::OpenFileError(path.display().to_string())))?;
+        let mut entries = vec![];
+        let mut reader = BufReader::new(file);
+        let mut line_bytes = vec![];
+        while let Ok(n) = reader.read_until(b'\n', &mut line_bytes) {
+            // Break if EOF
+            if n == 0 {
+                break;
             }
-            let a: Vec<&str> = line.split_whitespace().collect();
-            // There should be 6 columns in FileSystem Description Files
-            if a.len() != 6 {
-                return Err(MountError::FSDescFileFormatError(String::from(path)));
+            // Skip empty lines and commends
+            if line_bytes.is_empty() || line_bytes[0] == b'#' {
+                continue;
             }
-            // We only need the first 4 columns
+            let line = OsStr::from_bytes(&line_bytes).to_os_string();
+            line_bytes.clear();
+
+            // We need the first 4 columns
+            let mut splitted_line = line.split_whitespace();
+            let mnt_fsname = splitted_line.next();
+            let mnt_dir = splitted_line.next();
+            let mnt_type = splitted_line.next();
+            let mnt_opts = splitted_line.next();
+            // There should be 2 columns remaining
+            if splitted_line.count() != 2 {
+                return Err(MountError::FSDescFileFormatError(
+                    path.display().to_string(),
+                ));
+            }
             let mnt = MntEnt {
-                mnt_fsname: OsString::from(a[0]),
-                mnt_dir: OsString::from(a[1]),
-                mnt_type: OsString::from(a[2]),
-                mnt_opts: OsString::from(a[3]),
+                mnt_fsname: OsString::from(mnt_fsname.unwrap()),
+                mnt_dir: OsString::from(mnt_dir.unwrap()),
+                mnt_type: OsString::from(mnt_type.unwrap()),
+                mnt_opts: OsString::from(mnt_opts.unwrap()),
             };
             entries.push(mnt)
         }
+
         Ok(Self { entries: entries })
     }
 
-    fn get_output(&self, fs_type: &OsString) -> String {
+    fn get_output(&self, fs_type: &Option<OsString>) -> String {
         let mut ret = String::new();
         for item in &self.entries {
-            if *fs_type != *"" {
-                if *fs_type != item.mnt_type {
-                    continue;
+            match *fs_type {
+                Some(ref t) => {
+                    if *t != item.mnt_type {
+                        continue;
+                    }
                 }
+                None => {}
             }
             ret.push_str(
                 format!(
@@ -312,6 +353,7 @@ impl Default for Property {
 trait OsStringExtend {
     fn starts_with(&self, pat: &str) -> bool;
     fn contains(&self, pat: &str) -> bool;
+    fn split_whitespace<'a>(&'a self) -> Box<Iterator<Item = &'a OsStr> + 'a>;
 }
 
 impl OsStringExtend for OsString {
@@ -322,26 +364,35 @@ impl OsStringExtend for OsString {
     fn contains(&self, pat: &str) -> bool {
         self.to_string_lossy().contains(pat)
     }
+
+    fn split_whitespace<'a>(&'a self) -> Box<Iterator<Item = &'a OsStr> + 'a> {
+        Box::new(
+            self.as_bytes()
+                .split(|ch| ch.is_ascii_whitespace())
+                .filter(|s| !s.is_empty())
+                .map(|s| OsStr::from_bytes(s)),
+        )
+    }
 }
 
 impl MountOptions {
     fn from_matches(matches: &clap::ArgMatches) -> MountResult<Self> {
-        let mut mount_list: Vec<Box<Mountable + Send>> = Vec::new();
+        let mut mount_list: Vec<MountCore> = vec![];
 
         // If -a exists, mount all the entries in /etc/fstab, except for those who contain "noauto"
         if matches.is_present("a") {
-            let fstab = FSDescFile::new("/etc/fstab")?;
+            let fstab = FSDescFile::new(&Path::new("/etc/fstab"))?;
             for item in fstab.entries {
                 if item.mnt_opts.contains("noauto") {
                     continue;
                 }
 
                 // Split the comma separated option string into a vector, also convert &str into OsString
-                let opts: Vec<OsString> = item
+                let opts: Vec<Cow<'static, OsStr>> = item
                     .mnt_opts
                     .to_string_lossy()
                     .split(",")
-                    .map(|i| OsString::from(i))
+                    .map(|i| Cow::Owned(OsString::from(i)))
                     .collect();
 
                 // In this case, all the mounts are of type "CreateMountPoint"
@@ -354,7 +405,7 @@ impl MountOptions {
                     OsString::new(),
                 )?;
 
-                mount_list.push(Box::new(m));
+                mount_list.push(MountCore::CreateMountPoint(m));
             }
         }
         // If -a doesn't exist, read arguments from command line, and find out the mount type
@@ -363,10 +414,14 @@ impl MountOptions {
             let mut arg2 = matches.value_of("arg2");
             let fs_type = matches.value_of("t");
 
-            let options: Option<Vec<OsString>> = matches
+            let options: Option<Vec<Cow<'static, OsStr>>> = matches
                 .values_of("o")
                 .map(|i| i.collect())
-                .map(|i: Vec<&str>| i.into_iter().map(|s| OsString::from(s)).collect());
+                .map(|i: Vec<&str>| {
+                    i.into_iter()
+                        .map(|s| Cow::Owned(OsString::from(s)))
+                        .collect()
+                });
 
             let property = Property {
                 fake: matches.is_present("f"),
@@ -400,23 +455,25 @@ impl MountOptions {
                                 options,
                                 OsString::new(),
                             )?;
-                            mount_list.push(Box::new(m));
+                            mount_list.push(MountCore::CreateMountPoint(m));
                         }
                         // One argument
                         None => match options {
                             // If there is a "remount" option, the type is "Remount"
-                            Some(ref opts) if opts.contains(&OsString::from("remount")) => {
+                            Some(ref opts)
+                                if opts.contains(&Cow::Borrowed(OsStr::new("remount"))) =>
+                            {
                                 let m = Remount::new(
                                     property,
                                     OsString::from(arg1),
                                     opts.to_vec(),
                                     OsString::new(),
                                 );
-                                mount_list.push(Box::new(m));
+                                mount_list.push(MountCore::Remount(m));
                             }
                             // Otherwise, this device should be written in /etc/fstab
                             _ => {
-                                let fstab = FSDescFile::new("/etc/fstab")?;
+                                let fstab = FSDescFile::new(Path::new("/etc/fstab"))?;
                                 for item in fstab.entries {
                                     if arg1 == item.mnt_fsname || arg1 == item.mnt_dir {
                                         let m = CreateMountPoint::new(
@@ -427,7 +484,7 @@ impl MountOptions {
                                             options,
                                             OsString::new(),
                                         )?;
-                                        mount_list.push(Box::new(m));
+                                        mount_list.push(MountCore::CreateMountPoint(m));
                                         break;
                                     }
                                 }
@@ -442,7 +499,7 @@ impl MountOptions {
                 // no argument, the type must be "ShowMountPoints"
                 None => {
                     let m = ShowMountPoints::new(fs_type);
-                    mount_list.push(Box::new(m));
+                    mount_list.push(MountCore::ShowMountPoints(m));
                 }
             }
         }
@@ -492,22 +549,24 @@ where
 /// If -t is specified, only output mount points of this file system type
 /// Usage examples: "mount", "mount -t ext4"
 struct ShowMountPoints {
-    filesystem_type: OsString,
+    filesystem_type: Option<OsString>,
 }
 
 impl ShowMountPoints {
     fn new(filesystem_type: Option<&str>) -> Self {
-        let t = match filesystem_type {
-            Some(t) => OsString::from(t),
-            None => OsString::new(),
-        };
-        Self { filesystem_type: t }
+        //let t = match filesystem_type {
+        //Some(t) => OsString::from(t),
+        //None => OsString::new(),
+        //};
+        Self {
+            filesystem_type: filesystem_type.map(|s| OsString::from(s)),
+        }
     }
 }
 
 impl Mountable for ShowMountPoints {
     fn run(&mut self) -> MountResult<String> {
-        Ok(FSDescFile::new("/proc/mounts")?.get_output(&self.filesystem_type))
+        Ok(FSDescFile::new(Path::new("/proc/mounts"))?.get_output(&self.filesystem_type))
     }
 }
 
@@ -518,7 +577,7 @@ struct CreateMountPoint {
     source: PathBuf,
     target: PathBuf,
     filesystem_type: Option<OsString>,
-    mountflags: Option<Vec<OsString>>,
+    mountflags: Option<Vec<Cow<'static, OsStr>>>,
     data: OsString,
 }
 
@@ -528,7 +587,7 @@ impl CreateMountPoint {
         source: OsString,
         target: PathBuf,
         filesystem_type: Option<OsString>,
-        mountflags: Option<Vec<OsString>>,
+        mountflags: Option<Vec<Cow<'static, OsStr>>>,
         data: OsString,
     ) -> MountResult<Self> {
         // If source is an UUID or LABEL, get the corresponding device path
@@ -536,11 +595,11 @@ impl CreateMountPoint {
         // If source is read from command line, check its property
         let device_path;
         if source.starts_with("UUID=") || property.use_uuid {
-            let uuid = Uuid::new()?;
-            device_path = PathBuf::from(uuid.get_device_path(&source)?);
+            let uuid_helper = SourceHelper::new_uuid()?;
+            device_path = PathBuf::from(uuid_helper.get_device_path(&source)?);
         } else if source.starts_with("Label=") || property.use_label {
-            let label = Label::new()?;
-            device_path = PathBuf::from(label.get_device_path(&source)?);
+            let label_helper = SourceHelper::new_label()?;
+            device_path = PathBuf::from(label_helper.get_device_path(&source)?);
         } else {
             device_path = PathBuf::from(source);
         }
@@ -591,8 +650,8 @@ impl Mountable for CreateMountPoint {
             None => {
                 // Read all the filesystem types that we support
                 let file_name = "/proc/filesystems";
-                let file = fs::File::open(file_name)
-                    .or(Err(MountError::OpenFileError(String::from(file_name))))?;
+                let file = File::open(file_name)
+                    .or_else(|_| Err(MountError::OpenFileError(String::from(file_name))))?;
                 for line in BufReader::new(file).lines() {
                     let line = line?;
                     match line.chars().next() {
@@ -613,7 +672,7 @@ impl Mountable for CreateMountPoint {
                         Some(try_fs_type),
                         mountflags,
                         Some(self.data.as_os_str()),
-                    ).or(Err(MountError::from(io::Error::last_os_error())))
+                    ).or_else(|_| Err(MountError::from(io::Error::last_os_error())))
                     {
                         return Ok(String::new());
                     }
@@ -631,7 +690,7 @@ impl Mountable for CreateMountPoint {
                         Some(fs_type.as_os_str()),
                         mountflags,
                         Some(self.data.as_os_str()),
-                    ).or(Err(MountError::from(io::Error::last_os_error())))
+                    ).or_else(|_| Err(MountError::from(io::Error::last_os_error())))
                     {
                         Ok(_) => return Ok(String::new()),
                         Err(e) => {
@@ -658,7 +717,7 @@ impl Mountable for CreateMountPoint {
 struct Remount {
     property: Property,
     target: PathBuf,
-    mountflags: Vec<OsString>,
+    mountflags: Vec<Cow<'static, OsStr>>,
     data: OsString,
 }
 
@@ -666,7 +725,7 @@ impl Remount {
     fn new(
         property: Property,
         target: OsString,
-        mountflags: Vec<OsString>,
+        mountflags: Vec<Cow<'static, OsStr>>,
         data: OsString,
     ) -> Self {
         Self {
@@ -687,7 +746,7 @@ impl Mountable for Remount {
         }
 
         // Go through all the existing mount points, find the appropriate source & target
-        let existing_mounts = FSDescFile::new("/proc/mounts")?;
+        let existing_mounts = FSDescFile::new(Path::new("/proc/mounts"))?;
         let mut source = OsStr::new("");
         let mut target = OsStr::new("");
         let mut filesystem_type = OsStr::new("");
@@ -717,7 +776,7 @@ impl Mountable for Remount {
                 Some(filesystem_type),
                 mountflags,
                 Some(self.data.as_os_str()),
-            ).or(Err(MountError::from(io::Error::last_os_error())))?
+            ).or_else(|_| Err(MountError::from(io::Error::last_os_error())))?
         }
 
         Ok(String::new())

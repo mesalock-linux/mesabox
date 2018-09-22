@@ -27,7 +27,8 @@ mount = ["libmesabox/mount"]
 #        the tests that libmesabox uses to build
 tar_util = ["libmesabox/tar_util"]
 lsb = [
-    "mount", "tar_util"
+    "mount",
+    "tar_util"
 ]
 
 ping = ["libmesabox/ping"]

@@ -25,7 +25,8 @@ mount = ["libc", "lazy_static"]
 # XXX: temporary until renaming dependencies is supported
 tar_util = ["tar", "globset"]
 lsb = [
-    "mount", "tar"
+    "mount",
+    "tar"
 ]
 
 ping = ["chrono", "crossbeam", "libc", "pnet", "byteorder", "trust-dns-resolver", "mio", "socket2"]
