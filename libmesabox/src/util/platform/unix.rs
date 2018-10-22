@@ -190,7 +190,7 @@ impl AsRawObject for Pipe {
 impl Drop for Pipe {
     fn drop(&mut self) {
         // XXX: ignore error?
-        unistd::close(self.fd);
+        let _ = unistd::close(self.fd);
     }
 }
 

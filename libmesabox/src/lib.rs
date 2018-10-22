@@ -55,6 +55,8 @@ extern crate rustyline;
 #[cfg(feature = "log")]
 #[macro_use]
 extern crate log;
+#[cfg(feature = "pnet_packet")]
+extern crate pnet_packet;
 
 use clap::{App, SubCommand};
 use std::env::{self, VarsOs};
