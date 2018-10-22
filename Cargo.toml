@@ -30,8 +30,10 @@ lsb = [
 ]
 
 ping = ["libmesabox/ping"]
+traceroute = ["libmesabox/traceroute"]
 networking = [
-    "ping"
+    "ping",
+    "traceroute"
 ]
 
 cat = ["libmesabox/cat"]

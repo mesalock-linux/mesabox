@@ -28,8 +28,10 @@ lsb = [
 ]
 
 ping = ["chrono", "crossbeam", "libc", "pnet", "byteorder", "trust-dns-resolver", "mio", "socket2"]
+traceroute = ["byteorder", "pnet_packet", "trust-dns-resolver", "socket2"]
 networking = [
-    "ping"
+    "ping",
+    "traceroute"
 ]
 
 cat = []
@@ -110,7 +112,8 @@ chrono = { version = "0.4.2", optional = true }
 crossbeam = { version = "0.3.2", optional = true }
 pnet = { version = "0.21.0", optional = true }
 byteorder = { version = "1.2.3", optional = true }
-trust-dns-resolver = { version = "0.9.0", optional = true }
+trust-dns-resolver = { version = "0.10.0-alpha.3", optional = true }
+pnet_packet = { version = "0.21.0", optional = true }
 mio = { version = "0.6.14", optional = true }
 socket2 = { version = "0.3.5", optional = true }
 walkdir = { version = "2.1.4", optional = true }
