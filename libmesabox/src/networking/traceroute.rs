@@ -6,7 +6,7 @@
 // For a copy, see the LICENSE file.
 //
 
-use {UtilSetup, ArgsIter, Result, UtilWrite};
+use {ArgsIter, Result, UtilSetup, UtilWrite};
 
 use std::borrow::Cow;
 use std::ffi::{OsStr, OsString};
@@ -17,12 +17,12 @@ use std::time::{Duration, Instant};
 
 use byteorder::{NetworkEndian, ReadBytesExt};
 use clap::{App, Arg, ArgMatches};
-use pnet_packet::icmp::{self, IcmpPacket, IcmpType, IcmpTypes, MutableIcmpPacket};
-use pnet_packet::icmp::echo_request::MutableEchoRequestPacket;
 use pnet_packet::icmp::echo_reply::EchoReplyPacket;
+use pnet_packet::icmp::echo_request::MutableEchoRequestPacket;
 use pnet_packet::icmp::time_exceeded::TimeExceededPacket;
+use pnet_packet::icmp::{self, IcmpPacket, IcmpType, IcmpTypes, MutableIcmpPacket};
 use pnet_packet::ipv4::{self, Ipv4Packet};
-use socket2::{Domain, Protocol, Socket, SockAddr, Type};
+use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 use trust_dns_resolver::Resolver;
 
 pub const DESCRIPTION: &str = "Traces the route taken to reach a host";
@@ -90,7 +90,7 @@ impl TraceSocket {
         })
     }
 
-    pub fn recv_socket(&mut self) -> io::Result<(RecvSocket, u16)> {        
+    pub fn recv_socket(&mut self) -> io::Result<(RecvSocket, u16)> {
         let sock = RecvSocket::new(self.method, self.port, self.domain)?;
 
         let cur_port = self.port;
@@ -103,9 +103,7 @@ impl TraceSocket {
         self.send_time = Instant::now();
 
         match self.method {
-            TraceMethod::Udp => {
-                self.socket.send_to(&[], addr)
-            }
+            TraceMethod::Udp => self.socket.send_to(&[], addr),
             TraceMethod::Icmp => {
                 // TODO: find the actual number needed
                 let mut icmp_buffer = [0; 512];
@@ -133,7 +131,9 @@ impl TraceSocket {
         }
 
         {
-            let mut icmp_packet = MutableIcmpPacket::new(&mut buffer[..MutableEchoRequestPacket::minimum_packet_size()])?;
+            let mut icmp_packet = MutableIcmpPacket::new(
+                &mut buffer[..MutableEchoRequestPacket::minimum_packet_size()],
+            )?;
             let checksum = icmp::checksum(&icmp_packet.to_immutable());
             icmp_packet.set_checksum(checksum);
         }
@@ -225,18 +225,25 @@ impl RecvSocket {
             if kind == IcmpTypes::TimeExceeded || kind == IcmpTypes::DestinationUnreachable {
                 // NOTE: for some reason, there is no way to get the payload from a
                 //       TimeExceeded packet, so we just manually find the data we need
-                let old_ip_header = self.extract_ipv4_payload(&icmp_buffer[TimeExceededPacket::minimum_packet_size()..])?;
+                let old_ip_header = self.extract_ipv4_payload(
+                    &icmp_buffer[TimeExceededPacket::minimum_packet_size()..],
+                )?;
 
                 if old_ip_header.len() >= 8 {
                     // NOTE: unwrapping is fine as we verify the length of the packet
                     //       is alright above
                     // XXX: for some reason this differs from the udp method?
-                    let recv_port = (&old_ip_header[start..]).read_u16::<NetworkEndian>().unwrap();
+                    let recv_port = (&old_ip_header[start..])
+                        .read_u16::<NetworkEndian>()
+                        .unwrap();
 
                     return Some((kind, recv_port));
                 }
             } else if kind == IcmpTypes::EchoReply {
-                return Some((kind, EchoReplyPacket::new(icmp_buffer)?.get_sequence_number()));
+                return Some((
+                    kind,
+                    EchoReplyPacket::new(icmp_buffer)?.get_sequence_number(),
+                ));
             }
         }
 
@@ -249,7 +256,7 @@ impl RecvSocket {
         if ip_packet.get_checksum() == ipv4::checksum(&ip_packet) {
             let header_len = ip_packet.get_header_length() as usize * 4;
             if header_len < buffer.len() {
-                return Some(&buffer[header_len..])
+                return Some(&buffer[header_len..]);
             }
         }
 
@@ -320,7 +327,11 @@ where
 
     let mut buffer = [0; 512];
 
-    writeln!(stdout, "traceroute to {} ({}), {} hops max", options.host, addr, options.max_hop)?;
+    writeln!(
+        stdout,
+        "traceroute to {} ({}), {} hops max",
+        options.host, addr, options.max_hop
+    )?;
 
     // XXX: what should all of these errors do?  should they exit (like they
     //      currently do) or just continue with the next hop?
@@ -410,84 +421,92 @@ where
 
 fn setup_clap() -> App<'static, 'static> {
     util_app!("traceroute")
-        .arg(Arg::with_name("first-hop")
+        .arg(
+            Arg::with_name("first-hop")
                 .short("f")
                 .long("first-hop")
                 .takes_value(true)
                 .validator_os(is_valid_hop)
-                .help("Set the first hop (default is 1)"))
-        .arg(Arg::with_name("max-hop")
+                .help("Set the first hop (default is 1)"),
+        ).arg(
+            Arg::with_name("max-hop")
                 .short("m")
                 .long("max-hop")
                 .takes_value(true)
                 .validator_os(is_valid_hop)
-                .help("Set the max hop (default is 64)"))
-        .arg(Arg::with_name("resolve")
+                .help("Set the max hop (default is 64)"),
+        ).arg(
+            Arg::with_name("resolve")
                 .long("resolve-hostnames")
-                .help("Try to resolve hostnames of IP addresses"))
-        .arg(Arg::with_name("port")
+                .help("Try to resolve hostnames of IP addresses"),
+        ).arg(
+            Arg::with_name("port")
                 .short("p")
                 .long("port")
                 .takes_value(true)
                 .value_name("PORT")
                 .validator_os(is_valid_u16)
-                .help("Set the destination port of the target to PORT"))
-        .arg(Arg::with_name("wait")
+                .help("Set the destination port of the target to PORT"),
+        ).arg(
+            Arg::with_name("wait")
                 .short("w")
                 .long("wait")
                 .takes_value(true)
                 .value_name("TIME")
                 .validator_os(is_valid_u64)
-                .help("Set the timeout for receiving packets (default is 3)"))
-        .arg(Arg::with_name("tries")
+                .help("Set the timeout for receiving packets (default is 3)"),
+        ).arg(
+            Arg::with_name("tries")
                 .short("q")
                 .long("tries")
                 .takes_value(true)
                 .value_name("NUM")
                 .validator_os(is_valid_u64)
-                .help("Set the number of probes per hop"))
-        .arg(Arg::with_name("method")
+                .help("Set the number of probes per hop"),
+        ).arg(
+            Arg::with_name("method")
                 .short("M")
                 .long("type")
                 .takes_value(true)
                 .value_name("METHOD")
                 .possible_values(&["udp", "icmp"])
-                .default_value("udp"))
-        .arg(Arg::with_name("HOST")
-                .index(1)
-                .required(true))
+                .default_value("udp"),
+        ).arg(Arg::with_name("HOST").index(1).required(true))
 }
 
 fn determine_options<'a>(matches: &'a ArgMatches) -> Options<'a> {
-    let port = matches.value_of("port")
+    let port = matches
+        .value_of("port")
         .map(|s| s.parse::<u16>().unwrap())
         .unwrap_or(DEFAULT_PORT);
 
-    let first_hop = matches.value_of("first-hop")
+    let first_hop = matches
+        .value_of("first-hop")
         .map(|s| s.parse::<u8>().unwrap())
         .unwrap_or(DEFAULT_FHOP);
 
-    let max_hop = matches.value_of("max-hop")
+    let max_hop = matches
+        .value_of("max-hop")
         .map(|s| s.parse::<u8>().unwrap())
         .unwrap_or(DEFAULT_MHOP);
 
-    let wait = matches.value_of("wait")
+    let wait = matches
+        .value_of("wait")
         .map(|s| s.parse::<u64>().unwrap())
         .unwrap_or(DEFAULT_WAIT);
 
-    let tries = matches.value_of("tries")
+    let tries = matches
+        .value_of("tries")
         .map(|s| s.parse::<u64>().unwrap())
         .unwrap_or(DEFAULT_TRIES);
 
-    let method = matches.value_of("method")
-        .map(|s| {
-            match s {
-                "udp" => TraceMethod::Udp,
-                "icmp" => TraceMethod::Icmp,
-                _ => unreachable!(),
-            }
-        })
-        .unwrap();
+    let method = matches
+        .value_of("method")
+        .map(|s| match s {
+            "udp" => TraceMethod::Udp,
+            "icmp" => TraceMethod::Icmp,
+            _ => unreachable!(),
+        }).unwrap();
 
     let resolve_hostnames = matches.is_present("resolve");
 
@@ -519,7 +538,11 @@ fn is_valid_num<T, F: Fn(&str) -> Option<T>>(val: &OsStr, func: F) -> StdResult<
 }
 
 fn is_valid_hop(val: &OsStr) -> StdResult<(), OsString> {
-    is_valid_num(val, |s| s.parse::<u8>().ok().and_then(|num| if num > 0 { Some(num) } else { None }))
+    is_valid_num(val, |s| {
+        s.parse::<u8>()
+            .ok()
+            .and_then(|num| if num > 0 { Some(num) } else { None })
+    })
 }
 
 fn is_valid_u16(val: &OsStr) -> StdResult<(), OsString> {
